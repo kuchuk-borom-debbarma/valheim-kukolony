@@ -39,6 +39,9 @@ namespace Kukolony
                 "Spike B: take over vanilla Dverger AI and walk them to the player. Diagnostic, remove after the spike.");
 
             _harmony.PatchAll(Assembly.GetExecutingAssembly());
+
+            // Spike B support - remove with the spike.
+            gameObject.AddComponent<Spikes.SpikeHotkey>();
         }
     }
 }
