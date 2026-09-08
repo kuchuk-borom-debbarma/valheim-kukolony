@@ -1,12 +1,13 @@
 ﻿using BepInEx;
 using Jotunn.Entities;
+using Jotunn.Utils;
 using Jotunn.Managers;
 
 namespace Kukolony
 {
     [BepInPlugin(PluginGUID, PluginName, PluginVersion)]
     [BepInDependency(Jotunn.Main.ModGuid)]
-    //[NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
+    [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
     internal class Kukolony : BaseUnityPlugin
     {
         public const string PluginGUID = "com.kuku.kukolony";

@@ -98,16 +98,14 @@ simultaneously-loaded colonies, and a config to disable it.
 the keep-alive, and every write to a shared object (container, smelter) must go through
 its owner. See the ownership note in `docs/README.md`.
 
-**Dedicated servers are a different problem.** A dedicated server has no local player, so
-nothing calls `SetReferencePosition` after startup — its reference position stays at the
-spawn point. Creature AI on a dedicated server is simulated by whichever *client* owns the
-ZDO. A colony far from every player would have no owner to tick it. Making this work on a
-dedicated server likely means a server-side component that claims ownership and keeps its
-own zone set alive, which is a meaningfully different implementation.
+**Multiplayer is in scope.** Ownership arbitration decides who simulates an idle colony,
+and the answer is "the server, until a player walks over". See `docs/multiplayer.md` for
+how `ZDOMan.ReleaseNearbyZDOS` behaves and what it forces on job code.
 
-**Decision: single-player and client-hosted first.** Dedicated server support is deferred,
-not designed out — the keep-alive is written so the set of kept-alive zones is a list, not
-a single value, which is what a server-side owner would also need.
+**Dedicated server behaviour is unverified** and blocks this design. The client assembly
+hardcodes `ZNet.IsDedicated() => false`, so it cannot tell us whether a dedicated server
+instantiates GameObjects at all. If it does not, `BaseAI` never ticks there and idle
+colonies need a different mechanism. Answer this before building the keep-alive.
 
 ## Verified facts
 
