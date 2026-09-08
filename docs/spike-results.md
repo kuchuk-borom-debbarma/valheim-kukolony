@@ -98,6 +98,83 @@ every tick is therefore cheap — pathfinding is not recomputed 20 times a secon
 
 ## Spike A — dedicated server behaviour
 
-**Status: in progress.** A macOS build of the Valheim Dedicated Server exists (app 896660
-installed via the Steam client; `steamcmd` from Homebrew is broken on macOS 27, failing
-with `Failed to load steamconsole.dylib`). Findings to follow.
+**Date:** 2026-09-09 · **Result: PASS** — the architecture survives, for a reason that was
+not obvious.
+
+Method: installed the Valheim Dedicated Server (Steam app 896660 — a macOS build does
+exist), decompiled `valheim_server/Data/Managed/assembly_valheim.dll`, and diffed it
+against the client build.
+
+Note: `steamcmd` from Homebrew is broken on macOS 27 — it self-updates then dies with
+`Fatal Error: Failed to load steamconsole.dylib`. Install through the Steam client GUI
+instead (Library → Tools).
+
+### The two builds genuinely differ
+
+```csharp
+// client                          // server
+public bool IsDedicated()          public bool IsDedicated()
+{ return false; }                  { return true; }
+```
+
+So the earlier caveat was justified — the client assembly could not have answered this.
+
+### The finding
+
+**A dedicated server has all the simulation machinery. Vanilla just points it at nowhere.**
+
+The server build contains, unchanged from the client:
+
+- `ZNetScene.CreateDestroyObjects` — same body, same `FindSectorObjects` call
+- `ZNetScene.CreateObjectsSorted` — including the `IsActiveAreaLoaded()` early-return
+- `BaseAI.UpdateAI` — same validity and ownership gates
+- `MonoUpdaters` — still ticks `BaseAI.Instances` at a fixed 0.05s
+
+What differs is a single line in `Game.FixedUpdate`, present **only** in the server build:
+
+```csharp
+private void FixedUpdate()
+{
+    if (ZNet.m_loadError) { ... }
+    ZNet.instance.SetReferencePosition(new Vector3(1000000f, 0f, 1000000f));
+}
+```
+
+Every fixed frame, the server parks its reference position roughly 1000 km from the world
+origin — far outside the ~10.5 km playable radius. Since both `ZoneSystem.CreateLocalZones`
+and `ZNetScene.CreateDestroyObjects` key off that position, the server loads zones and
+instantiates objects around a point where nothing exists.
+
+That is why a vanilla dedicated server does not simulate creature AI: not because it
+cannot, but because it is deliberately aimed at empty space.
+
+### Consequence for the design
+
+**Server-owned idle colonies survive.** The keep-alive from `off-screen-simulation.md`
+does not depend on the reference position — it appends colony ZDOs to the lists that
+`CreateObjects`/`RemoveObjects` consume. That mechanism works identically on a dedicated
+server, and `BaseAI` will tick whatever we bring into existence.
+
+It also reframes what the keep-alive *is*. On a client it widens an active area that
+already exists. On a dedicated server it is the only thing pointing the simulation at the
+world at all.
+
+### The remaining unknown, now cheap to test
+
+`CreateObjectsSorted` early-returns when `!ZoneSystem.instance.IsActiveAreaLoaded()`, which
+checks the zones around the parked reference position. Whether zones at (1000000, 1000000)
+ever finish loading decides whether near-object creation runs on a server at all.
+
+If they never load, options are: patch `IsActiveAreaLoaded`, route colony objects through
+`CreateDistantObjects` (which has no such guard), or override the reference position
+ourselves.
+
+This no longer blocks anything — we have a runnable macOS server, so it can be measured
+when the keep-alive is built rather than reasoned about now.
+
+### Performance note
+
+The million-coordinate line is a deliberate optimisation: it keeps a headless server from
+paying for physics, colliders and AI. Our keep-alive removes that saving for colony zones
+specifically. That is the intended trade, but it means the radius and colony caps in
+`off-screen-simulation.md` matter more on a dedicated server than on a client.

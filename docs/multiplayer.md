@@ -116,26 +116,49 @@ Jötunn's `SynchronizationManager` pushes server config to clients, so colony ra
 and limits are enforced server-side rather than being per-client. `RegisterCustomConfig`
 plus `CustomRPC` for anything we need to sync beyond BepInEx config entries.
 
-## Dedicated servers — unverified
+## Dedicated servers — verified
 
-**The client assembly cannot answer this.** In the client build,
-`ZNet.IsDedicated()` is:
+**Verified 2026-09-09 against the dedicated server build.** See `spike-results.md` for the
+full method. The earlier caveat here — that the client assembly hardcodes
+`IsDedicated() => false` and could not answer this — was correct, and the two builds do
+differ:
 
 ```csharp
-public bool IsDedicated() { return false; }
+// client                          // server
+public bool IsDedicated()          public bool IsDedicated()
+{ return false; }                  { return true; }
 ```
 
-Hardcoded. The dedicated server ships its own `assembly_valheim.dll` with different
-behaviour, which we have not decompiled. So the following are open questions, not facts:
+**A dedicated server has all the simulation machinery.** `ZNetScene.CreateDestroyObjects`,
+`CreateObjectsSorted`, `BaseAI.UpdateAI` and the fixed 0.05s `MonoUpdaters` tick are all
+present and unchanged from the client.
 
-- Does a dedicated server instantiate `ZNetView` GameObjects at all, or only relay ZDOs?
-  If it never instantiates, `BaseAI` never ticks there and the keep-alive cannot work
-  server-side — idle colonies would need a different mechanism entirely.
-- What is a dedicated server's reference position with no local player?
+**Vanilla just points it at nowhere.** One line exists only in the server build:
 
-**This must be answered before building the keep-alive**, because it decides whether the
-server-owns-idle-colonies architecture holds. Testing it means installing the Valheim
-dedicated server (Steam appid 896660) and reading its assembly.
+```csharp
+// Game.FixedUpdate, server build only
+ZNet.instance.SetReferencePosition(new Vector3(1000000f, 0f, 1000000f));
+```
 
-Host-and-play multiplayer is unaffected by this uncertainty — the host has a local player
-and behaves like the single-player case.
+Every fixed frame the server parks its reference position ~1000 km from the origin, far
+outside the ~10.5 km playable radius. Both zone loading and instance creation key off that
+position, so the server instantiates nothing from the real world. That is why a vanilla
+dedicated server does not simulate creature AI — not that it cannot, but that it is
+deliberately aimed at empty space, to keep a headless server from paying for physics,
+colliders and AI.
+
+**The server-owned idle colony design survives.** The keep-alive does not depend on the
+reference position: it appends colony ZDOs to the lists `CreateObjects`/`RemoveObjects`
+consume, and `BaseAI` ticks whatever we bring into existence. On a client the keep-alive
+widens an active area that already exists; on a dedicated server it is the only thing
+pointing the simulation at the world at all.
+
+One thing left to measure rather than reason about: `CreateObjectsSorted` early-returns on
+`!ZoneSystem.instance.IsActiveAreaLoaded()`, which tests zones around the parked position.
+If those never load, near-object creation never runs server-side and we route through
+`CreateDistantObjects` (no such guard) or override the reference position. A macOS build of
+the dedicated server exists and is installed, so this is testable when the keep-alive is
+built.
+
+Because the million-coordinate line is a deliberate performance saving, the radius and
+colony caps matter more on a dedicated server than on a client.
