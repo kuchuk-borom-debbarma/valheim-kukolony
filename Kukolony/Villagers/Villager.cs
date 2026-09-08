@@ -80,8 +80,10 @@ namespace Kukolony.Villagers
                 return false;
             }
 
-            EnsureTamed();
+            // Identity first: everything below reports by name, and taming used to log
+            // an empty one because it ran before the villager had been named.
             EnsureIdentity();
+            EnsureTamed();
             StayNearHome(deltaTime);
             return true;
         }

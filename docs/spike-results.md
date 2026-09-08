@@ -178,3 +178,64 @@ The million-coordinate line is a deliberate optimisation: it keeps a headless se
 paying for physics, colliders and AI. Our keep-alive removes that saving for colony zones
 specifically. That is the intended trade, but it means the radius and colony caps in
 `off-screen-simulation.md` matter more on a dedicated server than on a client.
+
+
+---
+
+## Milestone 1a — villager as a custom creature
+
+**Date:** 2026-09-09 · **Result: PASS**, both runs, fully unattended.
+
+First verification run using the self-driving harness — see
+[automated-testing.md](automated-testing.md).
+
+```
+==================== KUKOLONY SELF TEST ====================
+  Run 1 - villager spawned fresh
+------------------------------------------------------------
+  [PASS] villager prefab is registered
+  [PASS] spawned villager carries the Villager component
+  [PASS] villager present in world
+  [PASS] villager has a valid ZDO
+  [PASS] villager has a name - Ingrid
+  [PASS] villager has a home - (125.9, 86.8, -2.7)
+  [PASS] villager is tamed (friendly to the player)
+  ....  displaced villager to 40m from home
+  [PASS] villager walked home - 40m -> 8m in 24s
+------------------------------------------------------------
+  RESULT: PASS
+============================================================
+```
+
+Relaunched into the same world:
+
+```
+==================== KUKOLONY SELF TEST ====================
+  Run 2 - villager loaded from save
+------------------------------------------------------------
+  [PASS] villager present in world
+  [PASS] villager has a valid ZDO
+  [PASS] villager has a name - Ingrid
+  [PASS] villager has a home - (125.9, 86.8, -2.7)
+  [PASS] villager is tamed (friendly to the player)
+  ....  name and home above were restored from the save file
+------------------------------------------------------------
+  RESULT: PASS
+============================================================
+```
+
+Same name, same home, across a process restart. The ZDO state model works.
+
+Behaviour observed en route, and worth noting because it is the design working as
+intended: the villager briefly reported `stuck` immediately after being displaced —
+
+```
+Villager 'Ingrid' is now stuck
+Villager 'Ingrid' cannot path home, 40m away. Retrying.
+Villager 'Ingrid' is now walking home (38m away)
+```
+
+`MoveTo` returned "stopped" before a path existed. Because `VillagerMovement` distinguishes
+`PathFailed` from `Arrived`, the villager retried instead of believing it had arrived —
+exactly the trap documented in Spike B, caught in production code by the wrapper built to
+catch it.

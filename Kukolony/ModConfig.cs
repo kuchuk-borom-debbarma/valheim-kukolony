@@ -65,8 +65,9 @@ namespace Kukolony
             AutoTestWorld = config.Bind(
                 "9 - Development",
                 nameof(AutoTestWorld),
-                string.Empty,
-                "World to auto-boot into. Leave empty to use the first available.");
+                "KukolonyTest",
+                "World to auto-boot into. Created automatically if it does not exist, so "
+                + "tests never write into a world you care about.");
 
             AutoTestQuitWhenDone = config.Bind(
                 "9 - Development",
