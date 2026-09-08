@@ -18,6 +18,18 @@ namespace Kukolony
         /// <summary>Development aid. Off by default so it never fires for a normal install.</summary>
         internal static ConfigEntry<bool> DebugSpawnEnabled { get; private set; }
 
+        /// <summary>Boot straight into a world and run the villager acceptance test.</summary>
+        internal static ConfigEntry<bool> AutoTestEnabled { get; private set; }
+
+        /// <summary>Character to auto-boot with. Empty means "first available".</summary>
+        internal static ConfigEntry<string> AutoTestCharacter { get; private set; }
+
+        /// <summary>World to auto-boot into. Empty means "first available".</summary>
+        internal static ConfigEntry<string> AutoTestWorld { get; private set; }
+
+        /// <summary>Save and exit once the test has reported. Makes runs self-terminating.</summary>
+        internal static ConfigEntry<bool> AutoTestQuitWhenDone { get; private set; }
+
         internal static void Bind(ConfigFile config)
         {
             // Binding writes the file once per entry by default; batch it instead.
@@ -36,6 +48,31 @@ namespace Kukolony
                 nameof(DebugSpawnEnabled),
                 false,
                 "Enable the Ctrl+Shift+K hotkey that spawns a villager in front of you. Development aid.");
+
+            AutoTestEnabled = config.Bind(
+                "9 - Development",
+                nameof(AutoTestEnabled),
+                false,
+                "Boot straight into a world on launch and run the villager acceptance test, "
+                + "writing the result to the log. Development aid - never enable for normal play.");
+
+            AutoTestCharacter = config.Bind(
+                "9 - Development",
+                nameof(AutoTestCharacter),
+                string.Empty,
+                "Character to auto-boot with. Leave empty to use the first available.");
+
+            AutoTestWorld = config.Bind(
+                "9 - Development",
+                nameof(AutoTestWorld),
+                string.Empty,
+                "World to auto-boot into. Leave empty to use the first available.");
+
+            AutoTestQuitWhenDone = config.Bind(
+                "9 - Development",
+                nameof(AutoTestQuitWhenDone),
+                true,
+                "Save and exit the game once the test has reported.");
 
             config.Save();
             config.SaveOnConfigSet = true;

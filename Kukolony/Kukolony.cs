@@ -34,6 +34,8 @@ namespace Kukolony
             _harmony.PatchAll(Assembly.GetExecutingAssembly());
 
             gameObject.AddComponent<Debug.DebugHotkeys>();
+            gameObject.AddComponent<Debug.AutoBoot>();
+            gameObject.AddComponent<Debug.VillagerSelfTest>();
 
             Log.Info($"{ModInfo.Name} {ModInfo.Version} loaded");
         }
