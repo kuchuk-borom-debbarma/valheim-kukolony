@@ -61,9 +61,33 @@ public void StopMoving();
 public void MoveTowards(Vector3 dir, bool run);   // raw steering, no pathfinding
 ```
 
-**This replaces the old mod's `SetFollowTarget` + teleport-on-timeout.** `MoveTo` returns
-whether the destination was reached and drives the same pathfinder the vanilla AI uses.
-Keep a teleport fallback for genuinely unreachable targets, but it should be rare now.
+**This replaces the old mod's `SetFollowTarget` + teleport-on-timeout.** `MoveTo` drives
+the same pathfinder the vanilla AI uses. Verified working — see `spike-results.md`.
+
+**But `MoveTo` returning `true` means "stopped", not "arrived".** It returns `true` in four
+cases, and two of them are failures:
+
+```csharp
+if (Utils.DistanceXZ(point, transform.position) < Mathf.Max(dist, num)) { StopMoving(); return true; }  // arrived
+if (!FindPath(point))  { StopMoving(); return true; }   // NO PATH FOUND
+if (m_path.Count == 0) { StopMoving(); return true; }   // empty path
+// ...consumed last waypoint                             StopMoving(); return true;
+```
+
+So every call site must confirm arrival itself, or an unreachable target will look like a
+completed move:
+
+```csharp
+bool stopped = ai.MoveTo(dt, target, dist, run);
+if (stopped && Utils.DistanceXZ(target, ai.transform.position) >= dist)
+{
+    // pathing failed - retry, teleport fallback, or abandon the job
+}
+```
+
+`FindPath` is throttled internally (cached for 1s, or 5s if the target moved under 1m), so
+calling `MoveTo` every tick does not recompute paths 20 times a second. Keep a teleport
+fallback for genuinely unreachable targets.
 
 ## 4. Driving our own AI
 

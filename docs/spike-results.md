@@ -1,0 +1,103 @@
+# Spike results
+
+Evidence gathered before building on the architecture. Each spike tests assumptions that
+`docs/off-screen-simulation.md`, `docs/multiplayer.md` and `docs/api-notes.md` were written
+as if settled.
+
+---
+
+## Spike B — taking over the brain
+
+**Date:** 2026-09-09 · **Result: PASS**, with one important correction.
+
+Method: a Harmony prefix on `MonsterAI.UpdateAI` targeting a plain vanilla `Dverger`,
+walking it toward the local player via `BaseAI.MoveTo`. Evidence written to
+`BepInEx/LogOutput.log` and read back rather than observed on screen.
+
+### What was proved
+
+**1. A prefix on `MonsterAI.UpdateAI` suppresses vanilla behaviour.**
+
+```
+[SpikeB] prefix ACTIVE on Dverger id=-393312 pos=(17.1,63.6,-16.6) - vanilla AI suppressed
+```
+
+The Dverger stopped behaving like a Dverger and did only what our tick told it to.
+
+**2. The publicized build reaches `protected` members at runtime.** No
+`MethodAccessException` — zero exceptions in the whole session. `BaseAI.MoveTo` and
+`BaseAI.HavePath` are both `protected`, both called from a static Harmony patch class,
+both worked. This confirms `Properties/IgnoreAccessModifiers.cs` and its
+`SecurityPermission(SkipVerification)` attribute function on Unity 6 / macOS arm64 / Mono.
+
+This was the assumption most expensive to be wrong about, and it holds.
+
+**3. `MoveTo` drives real pathfinding when called from our own code.** With the player
+standing still, the Dverger closed on them monotonically:
+
+```
+dist=34.12  self=(8.5,63.0,0.9)    target=(-15.3,59.7,25.2)
+dist=32.44  self=(7.9,63.0,2.7)    target=(-15.3,59.6,25.2)
+dist=30.75  self=(7.2,63.0,4.5)
+dist=28.98  self=(6.5,63.0,6.4)
+...
+dist=22.31  self=(2.6,63.1,12.8)
+```
+
+Roughly 1.7 m/s, `havePath=True` throughout, and it navigated terrain across ~60m without
+our code doing any steering. It also correctly stopped inside the 3m stop distance
+(`dist=1.46 arrived=True`).
+
+**4. The prefab name `"Dverger"` is correct** — it resolved via
+`ZNetScene.instance.GetPrefab("Dverger")`. Other `MonsterAI` prefabs observed in passing:
+`Boar`, `Neck`, `Greyling`, `Greydwarf`, `Greydwarf_Elite`, `Greydwarf_Shaman`, `Skeleton`.
+
+### The correction: `MoveTo` returning true does not mean "arrived"
+
+The log showed `arrived=True` at `dist=4.12` with a 3m stop distance, which should not
+happen. Reading `BaseAI.MoveTo` explains it — it returns `true` in **four** cases:
+
+```csharp
+if (Utils.DistanceXZ(point, transform.position) < Mathf.Max(dist, num)) { StopMoving(); return true; }  // arrived
+if (!FindPath(point))    { StopMoving(); return true; }   // NO PATH FOUND
+if (m_path.Count == 0)   { StopMoving(); return true; }   // empty path
+// ...consumed last waypoint
+                           StopMoving(); return true;
+```
+
+**`true` means "stopped", not "arrived".** Two of the four cases are pathfinding
+*failures* reported as success. In the log this is visible as the two early ticks with
+`havePath=False arrived=True` — the path had not been computed yet, so `MoveTo` gave up
+and reported completion.
+
+For job code this is a trap: a villager that cannot reach a container would report its
+move step complete and the job would carry on as if it were standing there. Every call
+site must confirm arrival separately:
+
+```csharp
+bool stopped = ai.MoveTo(dt, target, dist, run);
+if (stopped)
+{
+    bool arrived = Utils.DistanceXZ(target, ai.transform.position) < dist;
+    if (!arrived) { /* pathing failed - retry, teleport fallback, or abandon */ }
+}
+```
+
+Also worth knowing: **`FindPath` is throttled internally.** It returns a cached result if
+called within 1s, or within 5s when the target has moved less than 1m. Calling `MoveTo`
+every tick is therefore cheap — pathfinding is not recomputed 20 times a second.
+
+### Consequences
+
+- `api-notes.md` §3 updated with the return-value caveat.
+- The predecessor's teleport-on-timeout fallback is still needed, but for the narrow case
+  of genuine pathfinding failure rather than as the primary movement mechanism.
+- No change needed to the tick model — a fixed 0.05s prefix works exactly as designed.
+
+---
+
+## Spike A — dedicated server behaviour
+
+**Status: in progress.** A macOS build of the Valheim Dedicated Server exists (app 896660
+installed via the Steam client; `steamcmd` from Homebrew is broken on macOS 27, failing
+with `Failed to load steamconsole.dylib`). Findings to follow.
