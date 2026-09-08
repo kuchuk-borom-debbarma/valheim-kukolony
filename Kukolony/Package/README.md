@@ -1,14 +1,18 @@
-﻿# Kukolony
-Upon building for release, this README.md is copied into the `Package` folder for thunderstore packaging. Remember to also edit the manifest.json and supply your own mod icon.
+# Kukolony
 
-## Installation (manual)
+A colony management system for Valheim.
 
+Recruit NPC villagers, give them a work post, and they keep your base running — hauling
+items, loading smelters, cooking, crafting and repairing — including while you are away
+from the base.
 
-## Features
+**In development. Not yet playable.**
 
+## Multiplayer
 
-## Changelog
+All players must have the mod installed. Villager simulation follows ZDO ownership, so a
+client without the mod cannot run a villager it owns.
 
+## Credits
 
-## Known issues
-You can find the github at:
+Built with [Jötunn](https://github.com/Valheim-Modding/Jotunn).

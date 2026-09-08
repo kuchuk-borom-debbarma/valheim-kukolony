@@ -101,6 +101,15 @@ Note this differs from the path in the Valheim modding wiki, which points at
 the CabbageCrow publicizer `.exe`, and the PowerShell publish scripts all need
 substitutes here.
 
+## Related docs
+
+- [Off-screen simulation](off-screen-simulation.md) — the central technical problem
+- [Multiplayer](multiplayer.md) — ZDO ownership and what it forces on job code
+- [API notes](api-notes.md) — the calls we actually use
+- [Modding basics](modding-basics.md) — conventions and traps
+- [Post-mortem](predecessor-postmortem.md) — lessons from the 2024 attempt
+- [macOS setup](SETUP-macos.md) — toolchain and game paths
+
 ## References
 
 - [Jötunn documentation](https://valheim-modding.github.io/Jotunn/)
