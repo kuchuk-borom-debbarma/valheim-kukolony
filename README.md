@@ -18,6 +18,7 @@ Read in this order:
 | [Multiplayer](docs/multiplayer.md) | ZDO ownership arbitration and what it forces on job code |
 | [API notes](docs/api-notes.md) | The game and Jötunn calls we actually use |
 | [Modding basics](docs/modding-basics.md) | BepInEx/Harmony/Jötunn conventions and traps |
+| [Codebase rules](docs/code-style.md) | Layout, state, ownership, patching conventions |
 | [Post-mortem](docs/predecessor-postmortem.md) | The 2024 predecessor: what to keep, what not to repeat |
 | [macOS setup](docs/SETUP-macos.md) | Toolchain, game paths, BepInEx on Apple Silicon |
 

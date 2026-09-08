@@ -1,47 +1,46 @@
 using System.Reflection;
 using BepInEx;
-using BepInEx.Configuration;
 using HarmonyLib;
 using Jotunn.Entities;
 using Jotunn.Managers;
 using Jotunn.Utils;
+using Kukolony.Core;
+using Kukolony.Villagers;
 
 namespace Kukolony
 {
-    [BepInPlugin(PluginGUID, PluginName, PluginVersion)]
+    /// <summary>
+    ///     Plugin entry point. Wiring only - no game logic lives here.
+    /// </summary>
+    [BepInPlugin(ModInfo.Guid, ModInfo.Name, ModInfo.Version)]
     [BepInDependency(Jotunn.Main.ModGuid)]
+    // Villager simulation follows ZDO ownership, and ownership moves to whichever player
+    // is nearby. A client without the mod would own a villager it cannot tick, so it
+    // would freeze where it stands. See docs/multiplayer.md.
     [NetworkCompatibility(CompatibilityLevel.EveryoneMustHaveMod, VersionStrictness.Minor)]
-    internal class Kukolony : BaseUnityPlugin
+    internal sealed class Kukolony : BaseUnityPlugin
     {
-        public const string PluginGUID = "com.kuku.kukolony";
-        public const string PluginName = "Kukolony";
-        public const string PluginVersion = "0.0.1";
+        private readonly Harmony _harmony = new Harmony(ModInfo.Guid);
 
-        private readonly Harmony _harmony = new Harmony(PluginGUID);
-
-        // Use this class to add your own localization to the game
-        // https://valheim-modding.github.io/Jotunn/tutorials/localization.html
-        public static CustomLocalization Localization = LocalizationManager.Instance.GetLocalization();
-
-        /// <summary>
-        ///     Diagnostic only. See Spikes/DvergerBrainSpike.cs - remove with the spike.
-        /// </summary>
-        internal static ConfigEntry<bool> SpikeBrainEnabled;
+        private static CustomLocalization Localization =>
+            LocalizationManager.Instance.GetLocalization();
 
         private void Awake()
         {
-            Jotunn.Logger.LogInfo("Kukolony has landed");
+            ModConfig.Bind(Config);
+            AddLocalization();
 
-            SpikeBrainEnabled = Config.Bind(
-                "9 - Diagnostics",
-                "SpikeBrainEnabled",
-                false,
-                "Spike B: take over vanilla Dverger AI and walk them to the player. Diagnostic, remove after the spike.");
-
+            VillagerPrefab.Register();
             _harmony.PatchAll(Assembly.GetExecutingAssembly());
 
-            // Spike B support - remove with the spike.
-            gameObject.AddComponent<Spikes.SpikeHotkey>();
+            gameObject.AddComponent<Debug.DebugHotkeys>();
+
+            Log.Info($"{ModInfo.Name} {ModInfo.Version} loaded");
+        }
+
+        private static void AddLocalization()
+        {
+            Localization.AddTranslation("English", "kukolony_villager", "Villager");
         }
     }
 }
