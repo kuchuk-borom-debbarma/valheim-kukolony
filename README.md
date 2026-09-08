@@ -17,6 +17,7 @@ Read in this order:
 | [Off-screen simulation](docs/off-screen-simulation.md) | How zone and instance lifetime work, and how we extend them |
 | [Multiplayer](docs/multiplayer.md) | ZDO ownership arbitration and what it forces on job code |
 | [API notes](docs/api-notes.md) | The game and Jötunn calls we actually use |
+| [NPC design research](docs/npc-design.md) | Player-model villagers, appearance, and the job architecture |
 | [Modding basics](docs/modding-basics.md) | BepInEx/Harmony/Jötunn conventions and traps |
 | [Codebase rules](docs/code-style.md) | Layout, state, ownership, patching conventions |
 | [Automated testing](docs/automated-testing.md) | How the mod tests itself, with no human in the loop |

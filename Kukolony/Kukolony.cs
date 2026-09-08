@@ -36,6 +36,7 @@ namespace Kukolony
             gameObject.AddComponent<Debug.DebugHotkeys>();
             gameObject.AddComponent<Debug.AutoBoot>();
             gameObject.AddComponent<Debug.VillagerSelfTest>();
+            gameObject.AddComponent<Debug.PrefabProbe>();
 
             Log.Info($"{ModInfo.Name} {ModInfo.Version} loaded");
         }

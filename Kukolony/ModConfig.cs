@@ -30,6 +30,9 @@ namespace Kukolony
         /// <summary>Save and exit once the test has reported. Makes runs self-terminating.</summary>
         internal static ConfigEntry<bool> AutoTestQuitWhenDone { get; private set; }
 
+        /// <summary>One-shot prefab diagnostic. Replaces the acceptance test for that run.</summary>
+        internal static ConfigEntry<bool> DebugProbeEnabled { get; private set; }
+
         internal static void Bind(ConfigFile config)
         {
             // Binding writes the file once per entry by default; batch it instead.
@@ -74,6 +77,13 @@ namespace Kukolony
                 nameof(AutoTestQuitWhenDone),
                 true,
                 "Save and exit the game once the test has reported.");
+
+            DebugProbeEnabled = config.Bind(
+                "9 - Development",
+                nameof(DebugProbeEnabled),
+                false,
+                "Dump what prefabs and components actually exist to the log, then quit. "
+                + "Answers questions the decompiled assembly cannot, since prefab contents are asset data.");
 
             config.Save();
             config.SaveOnConfigSet = true;
