@@ -27,6 +27,30 @@ namespace Kukolony.Villagers
         /// <summary>Short description of what this villager is doing, for hover text.</summary>
         internal string Activity { get; private set; } = "idle";
 
+        /// <summary>
+        ///     Records what a villager is doing, logging only when it changes.
+        ///
+        ///     Transitions are rare and genuinely informative; the per-tick state is not.
+        ///     Logging the change rather than the state is what keeps a colony of
+        ///     villagers from flooding the log at 20 Hz each.
+        ///
+        ///     <paramref name="detail" /> is deliberately excluded from the comparison.
+        ///     Anything that varies per tick - a distance, a position - would make every
+        ///     tick look like a new activity and defeat the whole point.
+        /// </summary>
+        private void SetActivity(string activity, string detail = null)
+        {
+            if (Activity == activity)
+            {
+                return;
+            }
+
+            Activity = activity;
+            Log.Info(string.IsNullOrEmpty(detail)
+                ? $"Villager '{State.Name}' is now {activity}"
+                : $"Villager '{State.Name}' is now {activity} ({detail})");
+        }
+
         internal VillagerState State => new VillagerState(_nview != null && _nview.IsValid() ? _nview.GetZDO() : null);
 
         /// <summary>
@@ -106,7 +130,7 @@ namespace Kukolony.Villagers
             }
 
             _ai.MakeTame();
-            Log.Debug($"Villager {name} tamed");
+            Log.Info($"Villager '{State.Name}' tamed");
         }
 
         /// <summary>
@@ -149,7 +173,7 @@ namespace Kukolony.Villagers
             if (distance <= ModConfig.GoHomeRadius.Value)
             {
                 VillagerMovement.Stop(_ai);
-                Activity = "idle";
+                SetActivity("idle");
                 _pathFailureReported = false;
                 return;
             }
@@ -157,17 +181,17 @@ namespace Kukolony.Villagers
             switch (VillagerMovement.MoveTowards(_ai, home, HomeStopDistance))
             {
                 case MoveResult.Moving:
-                    Activity = "walking home";
+                    SetActivity("walking home", $"{distance:F0}m away");
                     _pathFailureReported = false;
                     break;
 
                 case MoveResult.Arrived:
-                    Activity = "idle";
+                    SetActivity("idle");
                     _pathFailureReported = false;
                     break;
 
                 case MoveResult.PathFailed:
-                    Activity = "stuck";
+                    SetActivity("stuck");
                     // Latched: the villager retries every tick, but one log line is
                     // enough to diagnose it. Reset as soon as it moves again.
                     if (!_pathFailureReported)
