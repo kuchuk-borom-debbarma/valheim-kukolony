@@ -4,30 +4,17 @@ using Kukolony.Jobs;
 namespace Kukolony.Colonies
 {
     /// <summary>
-    ///     A colony's record, stored on the hearth's ZDO.
-    ///
-    ///     **A colony has no radius.** Its position means nothing: members are assigned
-    ///     explicitly and may be anywhere. A radius would invent rules the player fights -
-    ///     "this bed is two metres outside" - and would need retuning whenever a base
-    ///     grows. The colony's extent is emergent: wherever its members happen to be.
-    ///
-    ///     It still exists as a placed object because colony data has to live on a ZDO,
-    ///     and in Valheim ZDOs belong to objects. That gives somewhere to write, something
-    ///     findable without loading, and something to interact with.
-    ///
-    ///     Read-only through a ZDO, like WorkPostState, so a colony can be inspected
-    ///     whether or not its hearth is instantiated.
+    ///     Persistent colony root. Villagers are explicit members; placed structures are
+    ///     named records whose live eligibility is bounded by the hearth radius.
     /// </summary>
     internal readonly struct ColonyState
     {
         private static readonly int NameKey = "kukolony.colony.name".GetStableHashCode();
 
         private static readonly int VillagersKey = "kukolony.colony.villagers".GetStableHashCode();
-        private static readonly int ContainersKey = "kukolony.colony.containers".GetStableHashCode();
-        private static readonly int StationsKey = "kukolony.colony.stations".GetStableHashCode();
-        private static readonly int HomesKey = "kukolony.colony.homes".GetStableHashCode();
-        private static readonly int StructuresKey = "kukolony.colony.structures.v1".GetStableHashCode();
-        private static readonly int JobsKey = "kukolony.colony.jobs.v1".GetStableHashCode();
+        private static readonly int StructuresKey = "kukolony.colony.structures.v2".GetStableHashCode();
+        private static readonly int JobsKey = "kukolony.colony.jobs.v2".GetStableHashCode();
+        private static readonly int PresetsKey = "kukolony.colony.presets.v2".GetStableHashCode();
 
         private readonly ZDO _zdo;
 
@@ -52,7 +39,7 @@ namespace Kukolony.Colonies
             try
             {
                 ZPackage p = new ZPackage(encoded);
-                if (p.ReadInt() != 1) return result;
+                if (p.ReadInt() != 2) return result;
                 int count = p.ReadInt();
                 if (count < 0 || count > 4096) return result;
                 for (int i = 0; i < count; i++) result.Add(new StructureRecord { Id = p.ReadZDOID(), Name = p.ReadString(), Prefab = p.ReadString(), Capabilities = (StructureCapability)p.ReadInt() });
@@ -63,7 +50,7 @@ namespace Kukolony.Colonies
 
         internal void SetStructures(List<StructureRecord> records)
         {
-            ZPackage p = new ZPackage(); p.Write(1); p.Write(records.Count);
+            ZPackage p = new ZPackage(); p.Write(2); p.Write(records.Count);
             foreach (StructureRecord r in records) { p.Write(r.Id); p.Write(r.Name ?? string.Empty); p.Write(r.Prefab ?? string.Empty); p.Write((int)r.Capabilities); }
             _zdo.Set(StructuresKey, p.GetBase64());
         }
@@ -72,21 +59,94 @@ namespace Kukolony.Colonies
         {
             List<ColonyJobConfig> result = new List<ColonyJobConfig>(); string encoded = _zdo?.GetString(JobsKey, string.Empty) ?? string.Empty;
             if (string.IsNullOrEmpty(encoded)) return result;
-            try { ZPackage p = new ZPackage(encoded); if (p.ReadInt() != 1) return result; int count = p.ReadInt(); if (count < 0 || count > 512) return result;
-                for (int i = 0; i < count; i++) { ColonyJobConfig j = new ColonyJobConfig { Id=p.ReadString(), Type=(ColonyJobType)p.ReadInt(), Name=p.ReadString(), Targets=(TargetMode)p.ReadInt(), Source=p.ReadZDOID(), Destination=p.ReadZDOID(), StockLimit=p.ReadInt(), Count=p.ReadInt() }; int structures=p.ReadInt(); for(int s=0;s<structures;s++) j.SelectedStructures.Add(p.ReadZDOID()); int filters=p.ReadInt(); for(int f=0;f<filters;f++) j.ItemFilters.Add(p.ReadString()); result.Add(j); } }
+            try { ZPackage p = new ZPackage(encoded); if (p.ReadInt() != 2) return result; int count = p.ReadInt(); if (count < 0 || count > 512) return result;
+                for (int i = 0; i < count; i++) result.Add(ReadJob(p)); }
             catch (System.Exception e) { Core.Log.Warning("[colony] invalid job registry: " + e.Message); }
             return result;
         }
 
         internal void SetJobs(List<ColonyJobConfig> jobs)
         {
-            ZPackage p = new ZPackage(); p.Write(1); p.Write(jobs.Count);
-            foreach (ColonyJobConfig j in jobs) { p.Write(j.Id ?? string.Empty); p.Write((int)j.Type); p.Write(j.Name ?? string.Empty); p.Write((int)j.Targets); p.Write(j.Source); p.Write(j.Destination); p.Write(j.StockLimit); p.Write(j.Count); p.Write(j.SelectedStructures.Count); foreach (ZDOID id in j.SelectedStructures) p.Write(id); p.Write(j.ItemFilters.Count); foreach (string item in j.ItemFilters) p.Write(item ?? string.Empty); }
+            ZPackage p = new ZPackage(); p.Write(2); p.Write(jobs.Count);
+            foreach (ColonyJobConfig j in jobs) WriteJob(p, j);
             _zdo.Set(JobsKey, p.GetBase64());
         }
 
+        internal List<ColonyJobConfig> GetEffectiveJobs()
+        {
+            List<ColonyJobConfig> jobs = GetJobs();
+            return jobs.Count == 0 ? ColonyJobCatalog.CreateDefaults() : jobs;
+        }
+
+        internal List<JobPreset> GetPresets()
+        {
+            List<JobPreset> result = new List<JobPreset>();
+            string encoded = _zdo?.GetString(PresetsKey, string.Empty) ?? string.Empty;
+            if (string.IsNullOrEmpty(encoded)) return result;
+            try
+            {
+                ZPackage p = new ZPackage(encoded);
+                if (p.ReadInt() != 2) return result;
+                int count = p.ReadInt();
+                if (count < 0 || count > 512) return result;
+                for (int i = 0; i < count; i++)
+                    result.Add(new JobPreset { Name = p.ReadString(), ColonyLocal = p.ReadBool(), Settings = ReadJob(p) });
+            }
+            catch (System.Exception e) { Core.Log.Warning("[colony] invalid preset registry: " + e.Message); }
+            return result;
+        }
+
+        internal void SetPresets(List<JobPreset> presets)
+        {
+            ZPackage p = new ZPackage(); p.Write(2); p.Write(presets.Count);
+            foreach (JobPreset preset in presets)
+            {
+                p.Write(preset.Name ?? string.Empty);
+                p.Write(preset.ColonyLocal);
+                WriteJob(p, preset.Settings);
+            }
+            _zdo.Set(PresetsKey, p.GetBase64());
+        }
+
+        private static ColonyJobConfig ReadJob(ZPackage p)
+        {
+            ColonyJobConfig job = new ColonyJobConfig
+            {
+                Id = p.ReadString(),
+                Type = (ColonyJobType)p.ReadInt(),
+                Name = p.ReadString(),
+                Targets = (TargetMode)p.ReadInt(),
+                Source = p.ReadZDOID(),
+                Destination = p.ReadZDOID(),
+                StockLimit = p.ReadInt(),
+                Count = p.ReadInt(),
+                Reservations = p.ReadBool(),
+                SearchRadius = p.ReadSingle(),
+                StopDistance = p.ReadSingle()
+            };
+            int structures = p.ReadInt();
+            if (structures < 0 || structures > 4096) throw new System.IO.InvalidDataException("invalid target count");
+            for (int i = 0; i < structures; i++) job.SelectedStructures.Add(p.ReadZDOID());
+            int filters = p.ReadInt();
+            if (filters < 0 || filters > 4096) throw new System.IO.InvalidDataException("invalid filter count");
+            for (int i = 0; i < filters; i++) job.ItemFilters.Add(p.ReadString());
+            return job;
+        }
+
+        private static void WriteJob(ZPackage p, ColonyJobConfig job)
+        {
+            p.Write(job.Id ?? string.Empty); p.Write((int)job.Type); p.Write(job.Name ?? string.Empty);
+            p.Write((int)job.Targets); p.Write(job.Source); p.Write(job.Destination);
+            p.Write(job.StockLimit); p.Write(System.Math.Max(1, job.Count)); p.Write(job.Reservations);
+            p.Write(job.SearchRadius); p.Write(job.StopDistance);
+            p.Write(job.SelectedStructures.Count); foreach (ZDOID id in job.SelectedStructures) p.Write(id);
+            p.Write(job.ItemFilters.Count); foreach (string item in job.ItemFilters) p.Write(item ?? string.Empty);
+        }
+
         internal List<ZDOID> GetMembers(ColonyMemberKind kind) =>
-            ColonyMembers.Decode(_zdo?.GetString(KeyFor(kind), string.Empty) ?? string.Empty);
+            kind == ColonyMemberKind.Villager
+                ? ColonyMembers.Decode(_zdo?.GetString(VillagersKey, string.Empty) ?? string.Empty)
+                : new List<ZDOID>();
 
         internal int CountMembers(ColonyMemberKind kind) => GetMembers(kind).Count;
 
@@ -108,7 +168,7 @@ namespace Kukolony.Colonies
             }
 
             members.Add(member);
-            _zdo.Set(KeyFor(kind), ColonyMembers.Encode(members));
+            _zdo.Set(VillagersKey, ColonyMembers.Encode(members));
             return true;
         }
 
@@ -120,7 +180,7 @@ namespace Kukolony.Colonies
                 return false;
             }
 
-            _zdo.Set(KeyFor(kind), ColonyMembers.Encode(members));
+            _zdo.Set(VillagersKey, ColonyMembers.Encode(members));
             return true;
         }
 
@@ -153,21 +213,11 @@ namespace Kukolony.Colonies
             int removed = members.Count - alive.Count;
             if (removed > 0)
             {
-                _zdo.Set(KeyFor(kind), ColonyMembers.Encode(alive));
+                _zdo.Set(VillagersKey, ColonyMembers.Encode(alive));
             }
 
             return removed;
         }
 
-        private static int KeyFor(ColonyMemberKind kind)
-        {
-            switch (kind)
-            {
-                case ColonyMemberKind.Villager: return VillagersKey;
-                case ColonyMemberKind.Container: return ContainersKey;
-                case ColonyMemberKind.Station: return StationsKey;
-                default: return HomesKey;
-            }
-        }
     }
 }

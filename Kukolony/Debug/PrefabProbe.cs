@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Reflection;
 using Kukolony.Core;
 using UnityEngine;
 
@@ -49,6 +50,34 @@ namespace Kukolony.Debug
             ReportRandomisedHumanoids(prefabs);
             ReportComponents(prefabs, "Dverger");
             ReportSmallPieces(prefabs);
+            ReportStationContracts(prefabs);
+        }
+
+        private static void ReportStationContracts(List<GameObject> prefabs)
+        {
+            string[] names = { "fire_pit", "smelter", "charcoal_kiln", "piece_cookingstation",
+                "fermenter", "piece_beehive" };
+            foreach (string name in names)
+            {
+                GameObject prefab = prefabs.FirstOrDefault(p => p != null && p.name == name);
+                if (prefab == null)
+                {
+                    Log.Warning($"[Probe:station] {name}: missing");
+                    continue;
+                }
+                IEnumerable<Component> stations = prefab.GetComponents<Component>().Where(c =>
+                    c is Fireplace || c is Smelter || c is CookingStation || c is Fermenter ||
+                    c is Beehive || c is Container);
+                foreach (Component component in stations)
+                {
+                    IEnumerable<string> rpcs = component.GetType()
+                        .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                        .Where(method => method.Name.StartsWith("RPC_"))
+                        .Select(method => method.Name + "(" + string.Join(",",
+                            method.GetParameters().Select(parameter => parameter.ParameterType.Name).ToArray()) + ")");
+                    Log.Info($"[Probe:station] {name}: {component.GetType().Name}; RPCs={Join(rpcs)}");
+                }
+            }
         }
 
         /// <summary>Can we clone the player body rig at all?</summary>
@@ -115,7 +144,7 @@ namespace Kukolony.Debug
         }
 
         /// <summary>
-        ///     Placeable pieces we could clone as a work post. Filtered to buildable ones
+        ///     Placeable pieces suitable for a colony hearth. Filtered to buildable ones
         ///     with an icon, because CustomPiece.IsValid demands an icon and cloning is
         ///     the only way to get one without Unity.
         /// </summary>

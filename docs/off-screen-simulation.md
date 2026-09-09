@@ -71,10 +71,9 @@ villagers to exist, the zones under them hold themselves open.
 
 ## The approach: the villager is the loader
 
-Implemented and verified. Rather than a fixed radius around a work post, **each villager
-keeps a small halo of zones alive around itself**. The loaded region follows the work
-instead of being a static square, there is no extra item to build or fuel, and the cost is
-proportional to what the colony actually occupies.
+Implemented and verified. **Each villager and the colony's registered structures contribute
+positions to a bounded halo of live zones.** The region follows actual work rather than a
+speculative world-wide square, and the cost is proportional to what a colony occupies.
 
 Three facts make it work, all read from the game:
 

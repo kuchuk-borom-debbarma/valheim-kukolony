@@ -6,6 +6,7 @@ using Jotunn.Managers;
 using Jotunn.Utils;
 using Kukolony.Core;
 using Kukolony.Villagers;
+using UnityEngine;
 
 namespace Kukolony
 {
@@ -28,6 +29,11 @@ namespace Kukolony
         private void Awake()
         {
             ModConfig.Bind(Config);
+            if (ModConfig.AutoTestEnabled.Value || ModConfig.DebugProbeEnabled.Value ||
+                ModConfig.DebugScreenshotEnabled.Value)
+            {
+                Application.runInBackground = true;
+            }
             AddLocalization();
 
             Gui.ColonyPanel.Register();
@@ -39,7 +45,6 @@ namespace Kukolony
             gameObject.AddComponent<KeepAlive.KeepAliveDriver>();
             gameObject.AddComponent<Debug.DebugHotkeys>();
             gameObject.AddComponent<Debug.AutoBoot>();
-            gameObject.AddComponent<Debug.VillagerSelfTest>();
             gameObject.AddComponent<Debug.PrefabProbe>();
             gameObject.AddComponent<Debug.ColonySelfTest>();
             gameObject.AddComponent<Debug.DedicatedServerProbe>();

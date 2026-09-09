@@ -16,15 +16,6 @@ namespace Kukolony
         internal static ConfigEntry<float> GoHomeRadius { get; private set; }
         internal static ConfigEntry<float> ColonyRadius { get; private set; }
 
-        /// <summary>How far villagers range from their work post.</summary>
-        internal static ConfigEntry<float> WorkPostRadius { get; private set; }
-
-        /// <summary>What a freshly placed post hauls until it is configured otherwise.</summary>
-        internal static ConfigEntry<string> WorkPostDefaultItem { get; private set; }
-
-        /// <summary>How far a villager will look for a post to work at.</summary>
-        internal static ConfigEntry<float> PostBindRadius { get; private set; }
-
         /// <summary>
         ///     Whether villagers reserve what they are working on. Off is the old
         ///     behaviour and exists so the claim test can be shown to fail without it -
@@ -66,9 +57,6 @@ namespace Kukolony
         /// <summary>Save and exit once the test has reported. Makes runs self-terminating.</summary>
         internal static ConfigEntry<bool> AutoTestQuitWhenDone { get; private set; }
 
-        /// <summary>Haul job acceptance test. Replaces the villager test for that run.</summary>
-        internal static ConfigEntry<bool> HaulTestEnabled { get; private set; }
-
         /// <summary>Build a populated colony, open the panel, and photograph it.</summary>
         internal static ConfigEntry<bool> DebugScreenshotEnabled { get; private set; }
 
@@ -93,28 +81,6 @@ namespace Kukolony
 
             ColonyRadius = config.Bind("1 - Colony", nameof(ColonyRadius), 48f,
                 new ConfigDescription("Live registration radius around a colony hearth. Registered records outside it remain visible but are ineligible.", new AcceptableValueRange<float>(8f, 128f)));
-
-            WorkPostRadius = config.Bind(
-                "2 - Work posts",
-                nameof(WorkPostRadius),
-                24f,
-                new ConfigDescription(
-                    "How far villagers range from their work post when looking for work, in metres.",
-                    new AcceptableValueRange<float>(4f, 128f)));
-
-            WorkPostDefaultItem = config.Bind(
-                "2 - Work posts",
-                nameof(WorkPostDefaultItem),
-                "Wood",
-                "Item prefab a newly placed work post hauls until configured otherwise.");
-
-            PostBindRadius = config.Bind(
-                "2 - Work posts",
-                nameof(PostBindRadius),
-                32f,
-                new ConfigDescription(
-                    "How far a villager will look for a work post to bind itself to, in metres.",
-                    new AcceptableValueRange<float>(4f, 128f)));
 
             KeepAliveEnabled = config.Bind(
                 "3 - Off-screen simulation",
@@ -154,18 +120,18 @@ namespace Kukolony
                 nameof(KeepAliveFilterObjects),
                 true,
                 "In zones kept loaded only for a villager, load just what the colony needs - "
-                + "villagers, posts, buildings, chests, items and stations - and skip trees, "
+                + "villagers, registered structures, buildings and loose items - and skip trees, "
                 + "rocks and wildlife. Disable to load everything, as chunk loader mods do.");
 
             ClaimsEnabled = config.Bind(
-                "2 - Work posts",
+                "2 - Jobs",
                 nameof(ClaimsEnabled),
                 true,
                 "Villagers reserve what they are working on so two never walk to the same item. "
                 + "Disable only to compare against the unclaimed behaviour.");
 
             ClaimTtlSeconds = config.Bind(
-                "2 - Work posts",
+                "2 - Jobs",
                 nameof(ClaimTtlSeconds),
                 30f,
                 new ConfigDescription(
@@ -208,12 +174,6 @@ namespace Kukolony
                 nameof(AutoTestQuitWhenDone),
                 true,
                 "Save and exit the game once the test has reported.");
-
-            HaulTestEnabled = config.Bind(
-                "9 - Development",
-                nameof(HaulTestEnabled),
-                false,
-                "Build a work post, a chest and a villager, drop wood, and verify the haul job runs.");
 
             DebugScreenshotEnabled = config.Bind(
                 "9 - Development",

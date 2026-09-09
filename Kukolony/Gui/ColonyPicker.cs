@@ -9,6 +9,7 @@ namespace Kukolony.Gui
     /// <summary>Small searchable shortcut to any loaded colony; direct hearth use remains available.</summary>
     internal sealed class ColonyPicker : MonoBehaviour
     {
+        internal static ColonyPicker Instance { get; private set; }
         private GameObject _root;
         private InputField _search;
         private readonly List<Button> _buttons = new List<Button>();
@@ -19,7 +20,8 @@ namespace Kukolony.Gui
         {
             GameObject holder = new GameObject("KukolonyColonyPicker");
             holder.transform.SetParent(GUIManager.CustomGUIFront.transform, false);
-            holder.AddComponent<ColonyPicker>().Create();
+            Instance = holder.AddComponent<ColonyPicker>();
+            Instance.Create();
         }
 
         private void Create()
@@ -51,6 +53,23 @@ namespace Kukolony.Gui
                 Button button = GUIManager.Instance.CreateButton(colony.State.Name, _root.transform, new Vector2(.5f,1), new Vector2(.5f,1), new Vector2(0,-108-row*32), 320, 28).GetComponent<Button>();
                 button.onClick.AddListener(() => { ColonyPanel.Instance?.Open(selected); _root.SetActive(false); }); _buttons.Add(button); row++;
             }
+        }
+
+        internal void ShowForTest()
+        {
+            if (_root == null) return;
+            _root.SetActive(true);
+            Refresh();
+        }
+
+        internal void HideForTest()
+        {
+            if (_root != null) _root.SetActive(false);
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this) Instance = null;
         }
     }
 }

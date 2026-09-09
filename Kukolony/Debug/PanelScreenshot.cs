@@ -5,6 +5,7 @@ using Kukolony.Colonies;
 using Kukolony.Core;
 using Kukolony.Gui;
 using Kukolony.Villagers;
+using Kukolony.Jobs;
 using UnityEngine;
 
 namespace Kukolony.Debug
@@ -26,6 +27,10 @@ namespace Kukolony.Debug
 
         private void Update()
         {
+            if (ModConfig.DebugScreenshotEnabled.Value)
+            {
+                Application.runInBackground = true;
+            }
             if (_started || !ModConfig.DebugScreenshotEnabled.Value)
             {
                 return;
@@ -47,11 +52,11 @@ namespace Kukolony.Debug
 
         private IEnumerator Run()
         {
-            yield return new WaitForSeconds(WorldSettleSeconds);
+            yield return new WaitForSecondsRealtime(WorldSettleSeconds);
 
             Vector3 origin = Player.m_localPlayer.transform.position;
             TestWorld.Purge(origin);
-            yield return new WaitForSeconds(1f);
+            yield return new WaitForSecondsRealtime(1f);
 
             Colony colony = BuildScenario(origin);
             if (colony == null)
@@ -63,8 +68,24 @@ namespace Kukolony.Debug
 
             Log.Info("[Screenshot] scenario built");
 
-            // Let villagers tick once so their persisted identity is visible.
-            yield return new WaitForSeconds(3f);
+            // Stagger appearance setup: several human rigs instantiated in one frame can
+            // monopolise Unity's main thread on macOS and make a screenshot run look hung.
+            for (int i = 0; i < 6; i++)
+            {
+                Villager villager = Spawn<Villager>(VillagerPrefab.PrefabName,
+                    origin + Vector3.back * (3f + i * 1.5f));
+                if (villager != null && villager.TryGetComponent(out ZNetView view))
+                {
+                    colony.Register(ColonyMemberKind.Villager, view);
+                    List<ColonyJobConfig> configured = colony.State.GetEffectiveJobs();
+                    ColonyAssignments.SetQueue(view.GetZDO().m_uid,
+                        new List<string> { configured[i % configured.Count].Id, configured[(i + 1) % configured.Count].Id });
+                }
+                yield return new WaitForSecondsRealtime(.75f);
+            }
+
+            // Let villagers tick so persisted identities and activities are visible.
+            yield return new WaitForSecondsRealtime(3f);
 
             ColonyPanel panel = ColonyPanel.Instance;
             if (panel == null)
@@ -77,18 +98,42 @@ namespace Kukolony.Debug
             Log.Info("[Screenshot] opening panel");
 
             panel.Open(colony);
-            yield return new WaitForSeconds(1.5f);
+            yield return new WaitForSecondsRealtime(1.5f);
 
             Log.Info("[Screenshot] capturing colony panel");
             yield return Capture("colony-panel.png");
 
-            // Capture the registered-structure state as well as the member list.
-            yield return new WaitForSeconds(1f);
-            Log.Info("[Screenshot] capturing structures panel");
-            yield return Capture("colony-panel-structures.png");
+            panel.ShowTabForTest("Structures");
+            yield return new WaitForSecondsRealtime(.5f);
+            yield return Capture("colony-structures.png");
+            panel.ShowTabForTest("Members");
+            yield return new WaitForSecondsRealtime(1f);
+            yield return Capture("colony-members.png");
+            panel.ShowPageForTest(1);
+            yield return new WaitForSecondsRealtime(1f);
+            yield return Capture("colony-members-page-2.png");
+            panel.ShowMemberDetailForTest(0);
+            yield return new WaitForSecondsRealtime(1f);
+            yield return Capture("colony-member-detail.png");
+            panel.ShowTabForTest("Jobs");
+            yield return new WaitForSecondsRealtime(.5f);
+            yield return Capture("colony-jobs.png");
+            panel.ShowJobForTest(0);
+            yield return new WaitForSecondsRealtime(1f);
+            yield return Capture("colony-job-config.png");
+            panel.ShowTargetPickerForTest();
+            yield return new WaitForSecondsRealtime(1f);
+            yield return Capture("colony-structure-picker.png");
+            panel.ShowPresetsForTest();
+            yield return new WaitForSecondsRealtime(1f);
+            yield return Capture("colony-preset-application.png");
 
             panel.Close();
-            yield return new WaitForSeconds(0.5f);
+            ColonyPicker.Instance?.ShowForTest();
+            yield return new WaitForSecondsRealtime(.5f);
+            yield return Capture("colony-picker.png");
+            ColonyPicker.Instance?.HideForTest();
+            yield return new WaitForSecondsRealtime(0.5f);
 
             Log.Info("[Screenshot] done");
             Application.Quit();
@@ -104,18 +149,36 @@ namespace Kukolony.Debug
 
             colony.EnsureNamed();
 
-            Container chest = Spawn<Container>("piece_chest_wood", origin + Vector3.right * 8f);
-            if (chest != null && chest.TryGetComponent(out ZNetView chestView))
-                colony.RegisterStructure(new StructureRecord { Id = chestView.GetZDO().m_uid, Name = "Screenshot chest", Prefab = chest.gameObject.name, Capabilities = StructureCapability.Container });
-
-            for (int i = 0; i < 5; i++)
+            string[] prefabs = { "piece_chest_wood", "fire_pit", "smelter", "charcoal_kiln",
+                "piece_cookingstation", "fermenter", "piece_beehive" };
+            for (int i = 0; i < prefabs.Length; i++)
             {
-                Villager villager = Spawn<Villager>(VillagerPrefab.PrefabName, origin + Vector3.back * (3f + i));
-                if (villager != null && villager.TryGetComponent(out ZNetView view))
-                    colony.Register(ColonyMemberKind.Villager, view);
+                GameObject structure = Spawn(prefabs[i], origin + Vector3.right * (5f + i * 3f));
+                RegisterStructure(colony, structure, "Test " + prefabs[i]);
             }
 
+            List<ColonyJobConfig> jobs = ColonyJobCatalog.CreateDefaults();
+            jobs[0].ItemFilters.Add("Wood");
+            jobs[0].Count = 3;
+            jobs[0].StockLimit = 20;
+            colony.State.SetJobs(jobs);
+            ColonyOperations.SavePreset(colony, "Portable wood hauling", jobs[0], false);
+            ColonyOperations.SavePreset(colony, "Local wood hauling", jobs[0], true);
+
             return colony;
+        }
+
+        private static void RegisterStructure(Colony colony, GameObject structure, string name)
+        {
+            if (structure == null || !structure.TryGetComponent(out ZNetView view) || !view.IsValid()) return;
+            if (!StructureRegistry.TryCapabilities(structure, out StructureCapability capabilities)) return;
+            colony.RegisterStructure(new StructureRecord
+            {
+                Id = view.GetZDO().m_uid,
+                Name = name,
+                Prefab = Utils.GetPrefabName(structure),
+                Capabilities = capabilities
+            });
         }
 
 
@@ -131,6 +194,18 @@ namespace Kukolony.Debug
             position.y = ZoneSystem.instance.GetSolidHeight(position) + 0.2f;
             GameObject spawned = Object.Instantiate(prefab, position, Quaternion.identity);
             return spawned != null ? spawned.GetComponent<T>() : null;
+        }
+
+        private static GameObject Spawn(string prefabName, Vector3 position)
+        {
+            GameObject prefab = ZNetScene.instance.GetPrefab(prefabName);
+            if (prefab == null)
+            {
+                Log.Warning($"[Screenshot] optional prefab '{prefabName}' not found");
+                return null;
+            }
+            position.y = ZoneSystem.instance.GetSolidHeight(position) + .2f;
+            return Object.Instantiate(prefab, position, Quaternion.identity);
         }
 
         /// <summary>

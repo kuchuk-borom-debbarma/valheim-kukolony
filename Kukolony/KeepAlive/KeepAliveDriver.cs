@@ -146,7 +146,7 @@ namespace Kukolony.KeepAlive
                 }
             }
 
-            // Everything the colonies own: chests, workstations, homes. This is what makes
+            // Every registered structure. This is what makes
             // a far-away container reachable - its zone is held open because the colony
             // knows about it, not because a villager happens to be standing near it.
             ColonyRegistry.CollectMemberPositions(_positions);

@@ -1,18 +1,16 @@
 # Kukolony
 
-A colony management system for Valheim.
+A pre-release colony-management system for Valheim.
 
-Recruit NPC villagers, give them a work post, and they keep your base running — hauling
-items, loading smelters, cooking, crafting and repairing — including while you are away
-from the base.
+A Colony Hearth owns nearby registered structures, villagers, concrete jobs, presets, and
+ordered looping villager queues. The initial catalog covers loose-item hauling, container
+transfers, fireplaces, smelters and charcoal kilns, cooking stations, fermenters, and
+beehives.
 
-**In development. Not yet playable.**
+Press `C` (configurable) to search colonies, or interact with a hearth. Register only
+placed structures inside the live radius; stale records remain visible but cannot execute.
+Portable presets retain settings, while colony-local presets may retain exact structure
+targets.
 
-## Multiplayer
-
-All players must have the mod installed. Villager simulation follows ZDO ownership, so a
-client without the mod cannot run a villager it owns.
-
-## Credits
-
-Built with [Jötunn](https://github.com/Valheim-Modding/Jotunn).
+All players must install the mod because villager simulation follows Valheim ZDO ownership.
+Development/debug automation is disabled by default.

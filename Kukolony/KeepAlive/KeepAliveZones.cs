@@ -7,9 +7,8 @@ namespace Kukolony.KeepAlive
     /// <summary>
     ///     The zones held open because a villager is in or near them.
     ///
-    ///     The villager is the loader. Rather than a fixed radius around a work post, the
-    ///     loaded region follows the villagers, so it costs what the colony actually
-    ///     occupies rather than what it might.
+    ///     The loaded region follows villagers and registered structures, so it costs what
+    ///     the colony actually occupies rather than a speculative world-wide area.
     /// </summary>
     internal static class KeepAliveZones
     {

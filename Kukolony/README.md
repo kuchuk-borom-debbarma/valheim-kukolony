@@ -1,14 +1,11 @@
-﻿# Kukolony
-Upon building for release, this README.md is copied into the `Package` folder for thunderstore packaging. Remember to also edit the manifest.json and supply your own mod icon.
+# Kukolony
 
-## Installation (manual)
+A test-backed Valheim colony system built with Jötunn and BepInEx.
 
+Place a Colony Hearth, register nearby structures, add villagers, configure one of seven
+concrete jobs, and assign ordered looping queues. Use the default `C` hotkey or interact
+with the hearth. Work posts, bed assignment, and JSON job definitions are not part of this
+version.
 
-## Features
-
-
-## Changelog
-
-
-## Known issues
-You can find the github at:
+All players need the mod. See the repository README for build, installation, job details,
+and the fully unattended acceptance command.

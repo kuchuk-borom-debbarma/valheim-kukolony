@@ -102,7 +102,7 @@ clients, and it fights `ReleaseNearbyZDOS` every 2 seconds. Not worth it.
 ## Rules for job code
 
 - **Never write to a ZDO you do not own.** Use the station's own RPC where one exists
-  (`InvokeRPC("RPC_AddOre", …)`) — it routes to the owner. Fall back to
+  (`InvokeRPC("RPC_AddOre", name, false)`) — it routes to the owner. Fall back to
   `ZNetView.ClaimOwnership()` only when there is no RPC.
 - **Assume ownership can change mid-job.** A player walking past transfers the villager to
   their client between one tick and the next. Job state therefore has to live on the ZDO,

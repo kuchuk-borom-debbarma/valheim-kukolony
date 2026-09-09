@@ -91,7 +91,7 @@ namespace Kukolony.KeepAlive
 
             // And the colony itself.
             return prefab.GetComponent<Villagers.Villager>() != null
-                   || prefab.GetComponent<WorkPosts.WorkPost>() != null;
+                   || prefab.GetComponent<Colonies.Colony>() != null;
         }
     }
 }

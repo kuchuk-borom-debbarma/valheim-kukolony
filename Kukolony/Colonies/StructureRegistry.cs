@@ -48,7 +48,7 @@ namespace Kukolony.Colonies
                 if (piece == null || !piece.TryGetComponent(out ZNetView view) || !view.IsValid()) continue;
                 if (!TryCapabilities(piece.gameObject, out StructureCapability capabilities)) continue;
                 found.Add(new StructureRecord { Id = view.GetZDO().m_uid, Name = DisplayName(piece.gameObject),
-                    Prefab = piece.gameObject.name, Capabilities = capabilities });
+                    Prefab = Utils.GetPrefabName(piece.gameObject), Capabilities = capabilities });
             }
             found.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
             return found;

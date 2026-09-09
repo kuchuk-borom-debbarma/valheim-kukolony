@@ -1,278 +1,55 @@
 using System.Collections.Generic;
 using Kukolony.Colonies;
-using Kukolony.Core;
-using Kukolony.Villagers;
-using Kukolony.WorkPosts;
 using Kukolony.Jobs;
+using Kukolony.Villagers;
 using UnityEngine;
 
 namespace Kukolony.Gui
 {
-    /// <summary>
-    ///     Who lives where and who works what.
-    ///
-    ///     All of the rules, none of the UI. Keeping them here rather than in click
-    ///     handlers is what lets the harness test assignment without driving a mouse -
-    ///     the tests call exactly what the buttons call.
-    ///
-    ///     Everything is addressed by ZDOID and read through ZDOMan, never through a
-    ///     GameObject. Managing a colony from the far side of the map is the point of
-    ///     colonies, so assignment has to work on villagers that are not instantiated.
-    /// </summary>
     internal static class ColonyAssignments
     {
-        /// <summary>Assigns an ordered queue; unlike retired post binding this is explicit.</summary>
         internal static bool SetQueue(ZDOID villager, List<string> jobIds)
         {
-            ZDO villagerZdo = Claim(villager);
-            if (villagerZdo == null) return false;
-            new VillagerState(villagerZdo).SetQueue(jobIds);
-            return true;
-        }
-        /// <summary>A bed belongs to exactly one villager. Stations are shared.</summary>
-        internal static ZDOID HomeOwner(ColonyState colony, ZDOID bed)
-        {
-            if (bed.IsNone() || !colony.IsValid)
-            {
-                return ZDOID.None;
-            }
-
-            foreach (ZDOID villager in colony.GetMembers(ColonyMemberKind.Villager))
-            {
-                ZDO zdo = ZDOMan.instance?.GetZDO(villager);
-                if (zdo != null && new VillagerState(zdo).HomeBed == bed)
-                {
-                    return villager;
-                }
-            }
-
-            return ZDOID.None;
-        }
-
-        internal static int StationWorkerCount(ColonyState colony, ZDOID station)
-        {
-            if (station.IsNone() || !colony.IsValid)
-            {
-                return 0;
-            }
-
-            int count = 0;
-            foreach (ZDOID villager in colony.GetMembers(ColonyMemberKind.Villager))
-            {
-                ZDO zdo = ZDOMan.instance?.GetZDO(villager);
-                if (zdo != null && new VillagerState(zdo).Post == station)
-                {
-                    count++;
-                }
-            }
-
-            return count;
-        }
-
-        /// <summary>
-        ///     Gives a villager a home, taking the bed from whoever had it.
-        ///
-        ///     Stealing is deliberate and visible - the picker labels a bed with its
-        ///     current owner before you click it - but the previous owner does silently
-        ///     revert to its spawn position, so it is logged.
-        /// </summary>
-        internal static bool AssignHome(ColonyState colony, ZDOID villager, ZDOID bed)
-        {
-            ZDO villagerZdo = Claim(villager);
-            if (villagerZdo == null)
-            {
-                return false;
-            }
-
-            ZDOID previousOwner = HomeOwner(colony, bed);
-            if (!previousOwner.IsNone() && previousOwner != villager)
-            {
-                ZDO previousZdo = Claim(previousOwner);
-                if (previousZdo != null)
-                {
-                    new VillagerState(previousZdo).SetHomeBed(ZDOID.None);
-                    Log.Info($"'{new VillagerState(previousZdo).Name}' lost their bed to "
-                             + $"'{new VillagerState(villagerZdo).Name}'");
-                }
-            }
-
-            new VillagerState(villagerZdo).SetHomeBed(bed);
-            Log.Info($"'{new VillagerState(villagerZdo).Name}' now sleeps at {bed}");
+            ZDO zdo = Claim(villager);
+            if (zdo == null) return false;
+            new VillagerState(zdo).SetQueue(jobIds);
             return true;
         }
 
-        internal static bool ClearHome(ZDOID villager)
+        internal static bool AppendJob(ZDOID villager, string jobId)
         {
-            ZDO villagerZdo = Claim(villager);
-            if (villagerZdo == null)
-            {
-                return false;
-            }
-
-            new VillagerState(villagerZdo).SetHomeBed(ZDOID.None);
+            ZDO zdo = Claim(villager);
+            if (zdo == null || string.IsNullOrEmpty(jobId)) return false;
+            VillagerState state = new VillagerState(zdo);
+            List<string> queue = state.GetQueue();
+            queue.Add(jobId);
+            state.SetQueue(queue);
             return true;
         }
 
-        /// <summary>
-        ///     Assigns a workstation. Nothing is stolen - several villagers on one post is
-        ///     supported, because TargetClaims stops them contending over the same item.
-        /// </summary>
-        internal static bool AssignStation(ZDOID villager, ZDOID station)
-        {
-            ZDO villagerZdo = Claim(villager);
-            if (villagerZdo == null)
-            {
-                return false;
-            }
-
-            VillagerState state = new VillagerState(villagerZdo);
-            state.SetPost(station);
-
-            // Starting a new job part-way through the last one's cycle would leave a
-            // stale step index and target pointing at the old post's work.
-            state.SetStepIndex(0);
-            state.SetStepTarget(ZDOID.None);
-
-            Log.Info($"'{state.Name}' assigned to a workstation");
-            return true;
-        }
-
-        internal static bool ClearStation(ZDOID villager) => AssignStation(villager, ZDOID.None);
-
-        /// <summary>Villager name, readable whether or not it is loaded.</summary>
         internal static string NameOf(ZDOID villager)
         {
-            ZDO zdo = ZDOMan.instance?.GetZDO(villager);
-            if (zdo == null)
-            {
-                return "(missing)";
-            }
-
+            ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(villager) : null;
+            if (zdo == null) return "(missing)";
             string name = new VillagerState(zdo).Name;
             return string.IsNullOrEmpty(name) ? "(unnamed)" : name;
         }
 
-        /// <summary>One line describing a villager's current assignments.</summary>
-        /// <summary>
-        ///     One villager's row, split into columns. Returned in parts rather than as a
-        ///     joined string so the panel can align them - a single label makes every row
-        ///     start its "home:" at a different place, depending on the length of the name.
-        /// </summary>
-        internal readonly struct VillagerRow
+        internal static string DescribeActivity(ZDOID villager)
         {
-            internal VillagerRow(string name, string home, string work, string job)
-            {
-                Name = name;
-                Home = home;
-                Work = work;
-                Job = job;
-            }
-
-            internal string Name { get; }
-            internal string Home { get; }
-            internal string Work { get; }
-            internal string Job { get; }
-        }
-
-        internal static VillagerRow DescribeVillager(ColonyState colony, ZDOID villager)
-        {
-            ZDO zdo = ZDOMan.instance?.GetZDO(villager);
-            if (zdo == null)
-            {
-                return new VillagerRow("(missing)", "-", "-", "-");
-            }
-
+            GameObject instance = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(villager) : null;
+            if (instance != null && instance.TryGetComponent(out Villager loaded)) return loaded.Activity;
+            ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(villager) : null;
+            if (zdo == null) return "missing";
             VillagerState state = new VillagerState(zdo);
-            string home = state.HasHomeBed
-                ? LabelFor(colony, ColonyMemberKind.Home, state.HomeBed)
-                : "-";
-            string work = !state.Post.IsNone()
-                ? LabelFor(colony, ColonyMemberKind.Station, state.Post)
-                : "-";
-            ZDO postZdo = !state.Post.IsNone() ? ZDOMan.instance?.GetZDO(state.Post) : null;
-            string job = postZdo != null ? new WorkPostState(postZdo).JobId : string.Empty;
-
-            return new VillagerRow(NameOf(villager), home, work,
-                string.IsNullOrEmpty(job) ? "idle" : job);
+            return string.IsNullOrEmpty(state.RuntimePhase) ? "idle" : state.RuntimePhase;
         }
 
-        /// <summary>
-        ///     Beds and posts have no names, so they are labelled by position in the
-        ///     colony's list - stable, because the list order is.
-        /// </summary>
-        internal static string LabelFor(ColonyState colony, ColonyMemberKind kind, ZDOID member)
-        {
-            if (member.IsNone())
-            {
-                return "-";
-            }
-
-            List<ZDOID> members = colony.GetMembers(kind);
-            int index = members.IndexOf(member);
-            string prefix = kind == ColonyMemberKind.Home ? "Bed" : "Post";
-
-            return index >= 0 ? $"{prefix} {index + 1}" : $"{prefix} ?";
-        }
-
-        /// <summary>Picker label: what it is, and who already has it.</summary>
-        internal static string DescribeChoice(ColonyState colony, ColonyMemberKind kind, ZDOID member,
-            int index, ZDOID subject)
-        {
-            string prefix = kind == ColonyMemberKind.Home ? "Bed" : "Post";
-            string distance = DistanceLabel(colony, member);
-
-            if (kind == ColonyMemberKind.Home)
-            {
-                ZDOID owner = HomeOwner(colony, member);
-
-                // Naming the subject as the owner of its own bed says nothing; what the
-                // player needs to see is which row is the one already chosen.
-                string held = owner.IsNone() ? "free"
-                    : owner == subject ? "current"
-                    : NameOf(owner);
-                return $"{prefix} {index + 1}{distance} ({held})";
-            }
-
-            int workers = StationWorkerCount(colony, member);
-            return $"{prefix} {index + 1}{distance} ({workers} working)";
-        }
-
-        private static string DistanceLabel(ColonyState colony, ZDOID member)
-        {
-            ZDO memberZdo = ZDOMan.instance?.GetZDO(member);
-            ZDO colonyZdo = ZDOMan.instance?.GetZDO(colony.Id);
-            if (memberZdo == null || colonyZdo == null)
-            {
-                return string.Empty;
-            }
-
-            float distance = Utils.DistanceXZ(memberZdo.GetPosition(), colonyZdo.GetPosition());
-            return $" - {distance:F0}m";
-        }
-
-        /// <summary>
-        ///     Resolves a ZDO and takes ownership, because a write by a non-owner lands
-        ///     locally and is clobbered on the next sync. Works without the object being
-        ///     instantiated, which is the whole point.
-        /// </summary>
         private static ZDO Claim(ZDOID id)
         {
-            if (id.IsNone() || ZDOMan.instance == null)
-            {
-                return null;
-            }
-
-            ZDO zdo = ZDOMan.instance.GetZDO(id);
-            if (zdo == null || !zdo.IsValid())
-            {
-                return null;
-            }
-
-            if (!zdo.IsOwner())
-            {
-                zdo.SetOwner(ZDOMan.GetSessionID());
-            }
-
+            ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(id) : null;
+            if (zdo == null || !zdo.IsValid()) return null;
+            zdo.SetOwner(ZDOMan.GetSessionID());
             return zdo;
         }
     }

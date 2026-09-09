@@ -62,8 +62,8 @@ Rules for state wrappers:
 
 - **Re-check `IsOwner()` every tick.** Never cache it across steps.
 - **Prefer an existing vanilla RPC** over `ClaimOwnership()`. Stations register their own
-  (`Smelter`: `RPC_AddOre`, `RPC_AddFuel`) and those route to the owner for free. Read a
-  component's `Awake` for its registered RPCs before writing any ZDO key by hand.
+  (`Smelter`: invoke names `RPC_AddOre`, `RPC_AddFuel`) and those route to the owner for free. Run
+  the prefab probe and read the component's handler registration before relying on a contract.
 - Container writes only persist for the owner — `Container.OnContainerChanged` checks
   `IsOwner()` before saving.
 

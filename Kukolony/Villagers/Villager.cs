@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using Kukolony.Colonies;
 using Kukolony.Core;
 using Kukolony.Jobs;
-using Kukolony.WorkPosts;
 using UnityEngine;
 
 namespace Kukolony.Villagers
@@ -23,8 +22,8 @@ namespace Kukolony.Villagers
         private const float HomeStopDistance = 2f;
 
         /// <summary>
-        ///     Every loaded villager. Mirrors WorkPost.Instances and vanilla's
-        ///     BaseAI.Instances - iterating a list beats scanning the scene, and claim
+        ///     Every loaded villager. Mirrors vanilla's BaseAI.Instances; iterating a list
+        ///     beats scanning the scene, and claim
         ///     checks run inside the find step.
         /// </summary>
         internal static List<Villager> Instances { get; } = new List<Villager>();
@@ -36,7 +35,7 @@ namespace Kukolony.Villagers
         private Container _bag;
 
         private bool _pathFailureReported;
-        private readonly JobRunner _jobRunner = new JobRunner();
+        private float _nextWorkTick;
 
         /// <summary>Short description of what this villager is doing, for hover text.</summary>
         internal string Activity { get; private set; } = "idle";
@@ -278,31 +277,16 @@ namespace Kukolony.Villagers
         }
 
         /// <summary>
-        ///     Where this villager belongs. An assigned bed wins; otherwise it falls back
-        ///     to the position it was first created at, so an unassigned villager behaves
-        ///     exactly as it did before homes existed.
-        ///
-        ///     The bed's ZDO is read directly, so an unloaded bed still gives a position
-        ///     to walk towards rather than reading as "no home".
+        ///     Where this villager idles when no queued job can run.
         /// </summary>
         private Vector3 ResolveHome(VillagerState state)
         {
-            ZDOID bed = state.HomeBed;
-            if (!bed.IsNone() && ZDOMan.instance != null)
-            {
-                ZDO bedZdo = ZDOMan.instance.GetZDO(bed);
-                if (bedZdo != null && bedZdo.IsValid())
-                {
-                    return bedZdo.GetPosition();
-                }
-            }
-
             return state.Home;
         }
 
         /// <summary>
         ///     Executes the villager's explicit colony queue. There is deliberately no
-        ///     nearest-work-post fallback: a villager only works work that a player queued.
+        ///     automatic assignment fallback: a villager only runs work a player queued.
         /// </summary>
         private bool TryWork(float deltaTime)
         {
@@ -312,117 +296,22 @@ namespace Kukolony.Villagers
             {
                 return false;
             }
-            List<ColonyJobConfig> jobs = colony.State.GetJobs();
-            string id = QueueRunner.Current(State, jobs);
-            ColonyJobConfig job = jobs.Find(j => j.Id == id);
+            List<ColonyJobConfig> jobs = colony.State.GetEffectiveJobs();
+            ColonyJobConfig job = QueueRunner.Current(State, jobs);
             if (job == null)
             {
                 return false;
             }
-            bool eligible = HasEligibleTarget(colony, job);
-            JobResult result = eligible ? JobResult.Running : JobResult.Skipped;
-            QueueRunner.Apply(State, jobs, result);
-            CurrentJob = ColonyJobCatalog.DisplayName(job.Type);
-            SetActivity(eligible ? "working: " + CurrentJob : "skipping: no eligible target");
-            return true;
-        }
-
-        private static bool HasEligibleTarget(Colony colony, ColonyJobConfig job)
-        {
-            StructureCapability wanted = ColonyJobCatalog.RequiredCapability(job.Type);
-            foreach (StructureRecord record in colony.State.GetStructures())
+            if (Time.time < _nextWorkTick)
             {
-                if ((record.Capabilities & wanted) == 0 || !record.IsLiveIn(colony)) continue;
-                if (job.Targets == TargetMode.Ignore && job.SelectedStructures.Contains(record.Id)) continue;
-                if (job.Targets == TargetMode.Selected && !job.SelectedStructures.Contains(record.Id)) continue;
                 return true;
             }
-            return job.Type == ColonyJobType.HaulLoose && job.Targets != TargetMode.Selected;
-        }
-
-        /// <summary>
-        ///     The bound post, claiming the nearest one if unemployed. Binding is by
-        ///     ZDOID so it survives the post unloading and reloading.
-        /// </summary>
-        private WorkPost ResolvePost()
-        {
-            VillagerState state = State;
-            ZDOID bound = state.Post;
-
-            if (!bound.IsNone())
-            {
-                GameObject postObject = ZNetScene.instance.FindInstance(bound);
-                if (postObject != null && postObject.TryGetComponent(out WorkPost existing))
-                {
-                    return existing;
-                }
-
-                // Out of range or destroyed. Stay bound rather than stealing another
-                // post - a villager whose post is merely unloaded should not resign.
-                return null;
-            }
-
-            // Fall back to claiming a post, scoped by colony membership where there is a
-            // colony. Membership is a more predictable rule than a radius: a villager
-            // never wanders off to a post that belongs to someone else's settlement.
-            WorkPost nearest = FindClaimablePost();
-            if (nearest == null)
-            {
-                return null;
-            }
-
-            ZDOID id = nearest.Id;
-            if (id.IsNone())
-            {
-                return null;
-            }
-
-            state.SetPost(id);
-            Log.Info($"Villager '{state.Name}' took up work at a post");
-            return nearest;
-        }
-
-        /// <summary>
-        ///     A post this villager may claim: one belonging to its colony if it has one,
-        ///     otherwise the nearest within range, as before colonies existed.
-        /// </summary>
-        private WorkPost FindClaimablePost()
-        {
-            ZDOID colonyId = _nview != null && _nview.IsValid()
-                ? ColonyMembership.GetColony(_nview.GetZDO())
-                : ZDOID.None;
-
-            if (colonyId.IsNone())
-            {
-                return WorkPost.FindNearest(transform.position, ModConfig.PostBindRadius.Value);
-            }
-
-            WorkPost closest = null;
-            float closestDistance = float.MaxValue;
-
-            foreach (WorkPost post in WorkPost.Instances)
-            {
-                if (post == null || !post.TryGetComponent(out ZNetView postView) || !postView.IsValid())
-                {
-                    continue;
-                }
-
-                if (!ColonyMembership.BelongsTo(postView.GetZDO(), colonyId))
-                {
-                    continue;
-                }
-
-                float distance = Utils.DistanceXZ(post.transform.position, transform.position);
-                if (distance >= closestDistance)
-                {
-                    continue;
-                }
-
-                closest = post;
-                closestDistance = distance;
-            }
-
-            return closest;
+            JobResult result = ColonyJobEngine.Tick(this, _ai, _bag, colony, job, out string activity);
+            QueueRunner.Apply(State, jobs, result);
+            if (result == JobResult.Skipped) _nextWorkTick = Time.time + .5f;
+            CurrentJob = ColonyJobCatalog.DisplayName(job.Type);
+            SetActivity(activity);
+            return true;
         }
 
         /// <summary>
@@ -476,8 +365,7 @@ namespace Kukolony.Villagers
 
         /// <summary>
         ///     Where this villager would walk to when idle. Exposed for the acceptance
-        ///     test, which has to check the assigned bed is actually used rather than
-        ///     merely recorded.
+        ///     test, which verifies the persistent fallback home.
         /// </summary>
         internal Vector3 ResolveHomeForTest() => ResolveHome(State);
 

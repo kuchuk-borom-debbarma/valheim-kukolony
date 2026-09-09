@@ -1,619 +1,421 @@
+using System;
 using System.Collections.Generic;
 using Jotunn.Managers;
 using Kukolony.Colonies;
-using Kukolony.Core;
+using Kukolony.Jobs;
 using Kukolony.Villagers;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace Kukolony.Gui
 {
-    /// <summary>
-    ///     Manage a colony: name it, spawn villagers, add buildings, and assign each
-    ///     villager a home and a workstation.
-    ///
-    ///     A front end over ZDO fields the AI already reads, so nothing here changes
-    ///     behaviour - it is the only way a player can set what previously needed code.
-    ///     Villagers are addressed by ZDOID throughout, so ones that are nowhere near a
-    ///     player still appear and can still be assigned.
-    ///
-    ///     Same three rules WorkPostPanel had to get right: claim ownership before
-    ///     writing, pair every BlockInput, and rebuild on scene change.
-    /// </summary>
     internal sealed class ColonyPanel : MonoBehaviour
     {
-        private const int VillagerRows = 4;
-        private const int PickerRows = 5;
-
-        // Two heights, because the picker is only sometimes there. A panel sized for the
-        // picker leaves a tall empty band below the rows whenever it is closed, which
-        // reads as though something failed to draw.
-        private const float PanelWidth = 700f;
-        private const float HeightWithPicker = 676f;
-        private const float HeightCollapsed = 452f;
-        private const float PickerHintHeight = 46f;
-        private const float PickerRowStride = 30f;
-
-        /// <summary>What the shared picker strip is currently offering.</summary>
-        private enum PickerMode
-        {
-            Hidden,
-            AddNearby,
-            AssignHome,
-            AssignStation
-        }
-
+        private enum Tab { Structures, Members, Jobs }
+        private const int Rows = 4;
         internal static ColonyPanel Instance { get; private set; }
 
         private GameObject _root;
-        private InputField _nameField;
-        private Text _counts;
-        private Text _cost;
-        private Text _hint;
-        private readonly List<Text> _nameLabels = new List<Text>();
-        private readonly List<Text> _homeLabels = new List<Text>();
-        private readonly List<Text> _workLabels = new List<Text>();
-        private readonly List<Text> _jobLabels = new List<Text>();
-        private Text _pageLabel;
-        private readonly List<Button> _homeButtons = new List<Button>();
-        private readonly List<Button> _workButtons = new List<Button>();
-        private readonly List<Button> _pickerButtons = new List<Button>();
-
+        private GameObject _content;
+        private InputField _name;
         private Colony _colony;
+        private Tab _tab;
         private int _page;
-        private PickerMode _mode = PickerMode.Hidden;
-        private ColonyMemberKind _addingKind = ColonyMemberKind.Container;
-        private ZDOID _subject = ZDOID.None;
-        private bool _inputBlocked;
+        private string _search = string.Empty;
+        private StructureSort _sort;
+        private StructureCapability _capabilityFilter;
+        private ZDOID _selectedMember = ZDOID.None;
+        private readonly HashSet<ZDOID> _selectedMembers = new HashSet<ZDOID>();
+        private int _memberJobIndex;
+        private ColonyJobConfig _selectedJob;
+        private bool _showPresets;
+        private bool _showTargetPicker;
+        private bool _blocked;
 
         internal bool IsOpen => _root != null && _root.activeSelf;
-
         internal static void Register() => GUIManager.OnCustomGUIAvailable += Rebuild;
 
         private static void Rebuild()
         {
-            if (Instance != null)
-            {
-                Object.Destroy(Instance.gameObject);
-            }
-
+            if (Instance != null) Destroy(Instance.gameObject);
             GameObject holder = new GameObject("KukolonyColonyPanel");
-            holder.transform.SetParent(GUIManager.CustomGUIFront.transform, worldPositionStays: false);
+            holder.transform.SetParent(GUIManager.CustomGUIFront.transform, false);
             Instance = holder.AddComponent<ColonyPanel>();
             Instance.Build();
         }
 
+        private void Build()
+        {
+            _root = GUIManager.Instance.CreateWoodpanel(transform, new Vector2(.5f,.5f),
+                new Vector2(.5f,.5f), Vector2.zero, 860f, 680f, true);
+            _root.SetActive(false);
+            TextAt(_root.transform, "Colony management", 0, -28, 24, 600);
+            _name = GUIManager.Instance.CreateInputField(_root.transform, new Vector2(.5f,1),
+                new Vector2(.5f,1), new Vector2(0,-68), InputField.ContentType.Standard,
+                "colony name", 24, 420, 30).GetComponent<InputField>();
+            _name.onEndEdit.AddListener(value => { if (_colony != null && !string.IsNullOrWhiteSpace(value)) { _colony.State.SetName(value.Trim()); Refresh(); } });
+            AddButton(_root.transform, "Structures", -230, -110, 190, () => SetTab(Tab.Structures));
+            AddButton(_root.transform, "Members", 0, -110, 190, () => SetTab(Tab.Members));
+            AddButton(_root.transform, "Jobs", 230, -110, 190, () => SetTab(Tab.Jobs));
+            _content = new GameObject("Content", typeof(RectTransform));
+            _content.transform.SetParent(_root.transform, false);
+            RectTransform contentRect = (RectTransform)_content.transform;
+            contentRect.anchorMin = Vector2.zero;
+            contentRect.anchorMax = Vector2.one;
+            contentRect.offsetMin = Vector2.zero;
+            contentRect.offsetMax = Vector2.zero;
+            AddButton(_root.transform, "Close", 0, -640, 140, Close);
+        }
+
         internal void Open(Colony colony)
         {
-            if (_root == null || colony == null)
-            {
-                return;
-            }
-
+            if (_root == null || colony == null) return;
             _colony = colony;
-            _page = 0;
-            _mode = PickerMode.Hidden;
-            _subject = ZDOID.None;
-
-            if (colony.TryGetComponent(out ZNetView nview) && nview.IsValid())
-            {
-                nview.ClaimOwnership();
-            }
-
+            if (colony.TryGetComponent(out ZNetView view) && view.IsValid()) view.ClaimOwnership();
             colony.EnsureNamed();
-
-            // A destroyed bed would otherwise linger in the picker. Prune on open, when
-            // it is cheap and the player is about to look at the list.
-            ColonyState state = colony.State;
-            if (state.IsValid)
-            {
-                foreach (ColonyMemberKind kind in new[]
-                         {
-                             ColonyMemberKind.Villager, ColonyMemberKind.Container,
-                             ColonyMemberKind.Station, ColonyMemberKind.Home
-                         })
-                {
-                    state.PruneMissing(kind);
-                }
-            }
-
-            RefreshAll();
+            _name.text = colony.State.Name;
+            _tab = Tab.Structures; _page = 0; _search = string.Empty;
             _root.SetActive(true);
-            SetInputBlocked(true);
+            Block(true);
+            Refresh();
         }
 
         internal void Close()
         {
-            if (_root != null)
-            {
-                _root.SetActive(false);
-            }
-
-            _colony = null;
-            SetInputBlocked(false);
+            if (_root != null) _root.SetActive(false);
+            _colony = null; Block(false);
         }
 
-        /// <summary>
-        ///     BlockInput is refcounted, so an unpaired open leaves the player unable to
-        ///     move. Tracking our own state means a double open or close cannot leak one.
-        /// </summary>
-        private void SetInputBlocked(bool blocked)
+        internal void ShowTabForTest(string tab)
         {
-            if (_inputBlocked == blocked)
-            {
-                return;
-            }
-
-            _inputBlocked = blocked;
-            GUIManager.BlockInput(blocked);
+            if (Enum.TryParse(tab, true, out Tab parsed)) SetTab(parsed);
         }
 
-        private void OnDestroy()
+        internal void ShowMemberDetailForTest(int index)
         {
-            SetInputBlocked(false);
-            if (Instance == this)
-            {
-                Instance = null;
-            }
+            List<ZDOID> members = _colony?.State.GetMembers(ColonyMemberKind.Villager);
+            if (members != null && index >= 0 && index < members.Count)
+            { _selectedMember = members[index]; _tab = Tab.Members; Refresh(); }
         }
+
+        internal void ShowJobForTest(int index)
+        {
+            List<ColonyJobConfig> jobs = _colony?.State.GetEffectiveJobs();
+            if (jobs != null && index >= 0 && index < jobs.Count)
+            { _selectedJob = jobs[index]; _tab = Tab.Jobs; Refresh(); }
+        }
+
+        internal void ShowPresetsForTest() { _tab = Tab.Jobs; _selectedJob = null; _showPresets = true; Refresh(); }
+        internal void ShowPageForTest(int page) { _page = Mathf.Max(0, page); Refresh(); }
+        internal void ShowTargetPickerForTest() { if (_selectedJob != null) { _showTargetPicker = true; Refresh(); } }
 
         private void Update()
         {
-            if (IsOpen && Input.GetKeyDown(KeyCode.Escape))
+            if (IsOpen && Input.GetKeyDown(KeyCode.Escape)) Close();
+        }
+
+        private void OnDestroy() { Block(false); if (Instance == this) Instance = null; }
+        private void Block(bool value) { if (_blocked == value) return; _blocked = value; GUIManager.BlockInput(value); }
+        private void SetTab(Tab tab)
+        {
+            _tab = tab; _page = 0;
+            if (tab != Tab.Members) _selectedMember = ZDOID.None;
+            if (tab != Tab.Jobs) { _selectedJob = null; _showPresets = false; _showTargetPicker = false; }
+            Refresh();
+        }
+
+        private void Refresh()
+        {
+            if (_colony == null || _content == null) return;
+            foreach (Transform child in new List<Transform>(Children(_content.transform))) Destroy(child.gameObject);
+            switch (_tab)
             {
-                Close();
+                case Tab.Structures: BuildStructures(); break;
+                case Tab.Members: BuildMembers(); break;
+                default: BuildJobs(); break;
             }
         }
 
-        private void Build()
+        private void BuildStructures()
         {
-            _root = GUIManager.Instance.CreateWoodpanel(
-                transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                new Vector2(0f, 0f), PanelWidth, HeightWithPicker, draggable: true);
-            _root.SetActive(false);
+            InputField search = GUIManager.Instance.CreateInputField(_content.transform, new Vector2(.5f,1),
+                new Vector2(.5f,1), new Vector2(-150,-155), InputField.ContentType.Standard,
+                "search structures", 24, 360, 30).GetComponent<InputField>();
+            search.text = _search;
+            search.onEndEdit.AddListener(value => { _search = value; _page = 0; Refresh(); });
+            AddButton(_content.transform, "Register nearby", 155, -155, 160, () =>
+            { ColonyOperations.RegisterDiscovered(_colony); Refresh(); });
+            AddButton(_content.transform, "Sort: " + _sort, 285, -155, 100, () =>
+            { _sort = (StructureSort)(((int)_sort + 1) % 4); Refresh(); });
+            AddButton(_content.transform, "Filter: " + CapabilityName(_capabilityFilter), 375, -155, 85, () =>
+            { _capabilityFilter = NextCapability(_capabilityFilter); _page = 0; Refresh(); });
 
-            Title("Colony", -26f);
-
-            GameObject nameField = GUIManager.Instance.CreateInputField(_root.transform,
-                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -62f),
-                InputField.ContentType.Standard, "colony name", 16, 380f, 30f);
-            _nameField = nameField.GetComponent<InputField>();
-            _nameField.onEndEdit.AddListener(ApplyName);
-
-            _counts = Label(string.Empty, -96f, 15, Color.white);
-            _cost = Label(string.Empty, -118f, 13, Color.grey);
-
-            // Four buttons across the panel: the stride has to exceed the width or the
-            // borders overlap and it reads as one smeared control.
-            AddNearbyButton("+ storage", ColonyMemberKind.Container, -AddStride * 1.5f);
-            AddNearbyButton("+ stations", ColonyMemberKind.Station, -AddStride * 0.5f);
-            AddNearbyButton("+ homes", ColonyMemberKind.Home, AddStride * 0.5f);
-
-            GameObject spawn = GUIManager.Instance.CreateButton("+ villager", _root.transform,
-                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                new Vector2(AddStride * 1.5f, -150f), AddWidth, 28f);
-            spawn.GetComponent<Button>().onClick.AddListener(SpawnVillager);
-
-            BuildVillagerRows();
-            BuildPicker();
-
-            GameObject close = GUIManager.Instance.CreateButton("Close", _root.transform,
-                new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 32f), 140f, 32f);
-            close.GetComponent<Button>().onClick.AddListener(Close);
-        }
-
-        private const float AddWidth = 124f;
-        private const float AddStride = 132f;
-
-        private void AddNearbyButton(string text, ColonyMemberKind kind, float x)
-        {
-            GameObject button = GUIManager.Instance.CreateButton(text, _root.transform,
-                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(x, -150f), AddWidth, 28f);
-            button.GetComponent<Button>().onClick.AddListener(() => ShowAddNearby(kind));
-        }
-
-        private void BuildVillagerRows()
-        {
-            Title("Villagers", -196f);
-
-            for (int i = 0; i < VillagerRows; i++)
+            List<StructureRecord> records = ColonyOperations.FilterStructures(_colony, _search,
+                _capabilityFilter, _sort);
+            int start = _page * Rows;
+            for (int row = 0; row < Rows && start + row < records.Count; row++)
             {
-                float y = -226f - i * 34f;
-                int row = i;
-
-                _nameLabels.Add(Column(108f, 18f, y));
-                _homeLabels.Add(Column(104f, 132f, y));
-                _workLabels.Add(Column(94f, 244f, y));
-                _jobLabels.Add(Column(92f, 346f, y));
-
-                GameObject home = GUIManager.Instance.CreateButton("home", _root.transform,
-                    new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-156f, y), 84f, 26f);
-                home.GetComponent<Button>().onClick.AddListener(() => BeginAssign(row, PickerMode.AssignHome));
-                _homeButtons.Add(home.GetComponent<Button>());
-
-                GameObject work = GUIManager.Instance.CreateButton("work", _root.transform,
-                    new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-66f, y), 84f, 26f);
-                work.GetComponent<Button>().onClick.AddListener(() => BeginAssign(row, PickerMode.AssignStation));
-                _workButtons.Add(work.GetComponent<Button>());
+                StructureRecord record = records[start + row];
+                string status = record.IsLiveIn(_colony) ? "ready" : "invalid/out of radius";
+                InputField rename = InputAt(_content.transform, record.Name, -285, -205-row*48, 190);
+                rename.onEndEdit.AddListener(value => { ColonyOperations.RenameStructure(_colony, record.Id, value); Refresh(); });
+                TextAt(_content.transform, record.Prefab, -45, -205-row*48, 14, 190, TextAnchor.MiddleLeft);
+                TextAt(_content.transform, record.Capabilities.ToString(), 155, -205-row*48, 14, 180, TextAnchor.MiddleLeft);
+                TextAt(_content.transform, status, 315, -205-row*48, 13, 130, TextAnchor.MiddleLeft,
+                    record.IsLiveIn(_colony) ? Color.green : Color.gray);
+                AddButton(_content.transform, "Remove", 370, -205-row*48, 75, () =>
+                { _colony.RemoveStructure(record.Id); Refresh(); });
             }
-
-            GameObject prev = GUIManager.Instance.CreateButton("< prev", _root.transform,
-                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(-80f, -374f), 100f, 26f);
-            prev.GetComponent<Button>().onClick.AddListener(() => ChangePage(-1));
-
-            GameObject next = GUIManager.Instance.CreateButton("next >", _root.transform,
-                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(80f, -374f), 100f, 26f);
-            next.GetComponent<Button>().onClick.AddListener(() => ChangePage(1));
-
-            // Without this, a colony of five villagers hides one behind a next button
-            // that gives no sign there is anything behind it.
-            _pageLabel = Label(string.Empty, -374f, 14, Color.grey);
-
-            // Label() boxes are left-aligned like the counts above; the page indicator
-            // belongs between the two pager buttons instead.
-            _pageLabel.alignment = TextAnchor.MiddleCenter;
-
-            Header("Villager", 18f);
-            Header("Bed", 132f);
-            Header("Post", 244f);
-            Header("Job", 346f);
+            Pager(records.Count);
+            TextAt(_content.transform, $"{records.Count} registered • radius {_colony.EffectiveRadius:F0}m",
+                -250, -570, 14, 320, TextAnchor.MiddleLeft, Color.gray);
         }
 
-        private void Header(string text, float left)
+        private void BuildMembers()
         {
-            Text header = Column(90f, left, -208f);
-            header.text = text;
-            header.color = GUIManager.Instance.ValheimOrange;
-        }
-
-        /// <summary>
-        ///     A left-aligned column of fixed width. Positions are offsets of the box
-        ///     centre from the panel's top-left corner, hence the half-width.
-        /// </summary>
-        private Text Column(float width, float left, float y)
-        {
-            Text text = GUIManager.Instance.CreateText(string.Empty, _root.transform,
-                new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(left + width * 0.5f, y),
-                GUIManager.Instance.AveriaSerifBold, 15, Color.white,
-                true, Color.black, width, 26f, false).GetComponent<Text>();
-            text.alignment = TextAnchor.MiddleLeft;
-            text.horizontalOverflow = HorizontalWrapMode.Overflow;
-            return text;
-        }
-
-        private void BuildPicker()
-        {
-            _hint = Label(string.Empty, -418f, 14, GUIManager.Instance.ValheimOrange);
-
-            for (int i = 0; i < PickerRows; i++)
+            List<ZDOID> members = _colony.State.GetMembers(ColonyMemberKind.Villager);
+            if (!_selectedMember.IsNone())
             {
-                GameObject row = GUIManager.Instance.CreateButton(string.Empty, _root.transform,
-                    new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                    new Vector2(0f, -448f - i * PickerRowStride), 500f, 28f);
-                row.SetActive(false);
-                _pickerButtons.Add(row.GetComponent<Button>());
-            }
-        }
-
-        private void Title(string text, float y)
-        {
-            GUIManager.Instance.CreateText(text, _root.transform,
-                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, y),
-                GUIManager.Instance.AveriaSerifBold, 18, GUIManager.Instance.ValheimOrange,
-                true, Color.black, 460f, 26f, false);
-        }
-
-        private Text Label(string text, float y, int size, Color colour)
-        {
-            return GUIManager.Instance.CreateText(text, _root.transform,
-                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, y),
-                GUIManager.Instance.AveriaSerifBold, size, colour,
-                true, Color.black, 520f, 24f, false).GetComponent<Text>();
-        }
-
-        private List<ZDOID> CurrentVillagers() =>
-            _colony != null && _colony.State.IsValid
-                ? _colony.State.GetMembers(ColonyMemberKind.Villager)
-                : new List<ZDOID>();
-
-        private void ChangePage(int delta)
-        {
-            int pages = Mathf.Max(1, Mathf.CeilToInt(CurrentVillagers().Count / (float)VillagerRows));
-            _page = Mathf.Clamp(_page + delta, 0, pages - 1);
-            RefreshAll();
-        }
-
-        private void BeginAssign(int row, PickerMode mode)
-        {
-            List<ZDOID> villagers = CurrentVillagers();
-            int index = _page * VillagerRows + row;
-            if (index >= villagers.Count)
-            {
+                BuildMemberDetail(members);
                 return;
             }
-
-            _subject = villagers[index];
-            _mode = mode;
-            RefreshPicker();
+            TextAt(_content.transform, "Villagers", -310, -160, 18, 180, TextAnchor.MiddleLeft);
+            for (int row = 0; row < Rows && _page*Rows+row < members.Count; row++)
+            {
+                ZDOID id = members[_page*Rows+row];
+                bool selected = _selectedMembers.Contains(id);
+                AddButton(_content.transform, selected ? "✓" : "○", -330, -210-row*48, 45,
+                    () => { if (!_selectedMembers.Add(id)) _selectedMembers.Remove(id); Refresh(); });
+                TextAt(_content.transform, ColonyAssignments.NameOf(id), -210, -210-row*48, 16, 190, TextAnchor.MiddleLeft);
+                TextAt(_content.transform, ColonyAssignments.DescribeActivity(id), 40, -210-row*48, 14, 230, TextAnchor.MiddleLeft, Color.gray);
+                AddButton(_content.transform, "Details", 300, -210-row*48, 120, () => { _selectedMember=id; Refresh(); });
+            }
+            List<ColonyJobConfig> jobs = _colony.State.GetEffectiveJobs();
+            if (jobs.Count > 0)
+            {
+                _memberJobIndex = Mathf.Clamp(_memberJobIndex, 0, jobs.Count - 1);
+                AddButton(_content.transform, "Job: " + Short(jobs[_memberJobIndex].Name, 18), -120, -520, 230,
+                    () => { _memberJobIndex = (_memberJobIndex + 1) % jobs.Count; Refresh(); });
+                AddButton(_content.transform, "Assign selected (" + _selectedMembers.Count + ")", 130, -520, 220,
+                    () => { foreach (ZDOID member in _selectedMembers) ColonyAssignments.AppendJob(member, jobs[_memberJobIndex].Id); Refresh(); });
+            }
+            if (ModConfig.DebugSpawnEnabled.Value)
+                AddButton(_content.transform, "+ Debug villager", 275, -570, 180, SpawnVillager);
+            Pager(members.Count);
         }
 
-        /// <summary>Opens the home picker for a row, for the screenshot harness.</summary>
-        internal void ShowHomePickerForTest(int row) => BeginAssign(row, PickerMode.AssignHome);
-
-        private void ShowAddNearby(ColonyMemberKind kind)
+        private void BuildMemberDetail(List<ZDOID> members)
         {
-            _addingKind = kind;
-            _mode = PickerMode.AddNearby;
-            _subject = ZDOID.None;
-            RefreshPicker();
+            ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(_selectedMember) : null;
+            VillagerState state = new VillagerState(zdo);
+            AddButton(_content.transform, "← Members", -315, -160, 140, () => { _selectedMember=ZDOID.None; Refresh(); });
+            TextAt(_content.transform, ColonyAssignments.NameOf(_selectedMember), -120, -160, 22, 280, TextAnchor.MiddleLeft);
+            TextAt(_content.transform, "Current activity: " + ColonyAssignments.DescribeActivity(_selectedMember),
+                -250, -210, 15, 560, TextAnchor.MiddleLeft, Color.gray);
+            List<string> queue = state.GetQueue();
+            TextAt(_content.transform, "Queue", -300, -255, 18, 160, TextAnchor.MiddleLeft);
+            List<ColonyJobConfig> jobs = _colony.State.GetEffectiveJobs();
+            for (int i=0; i<queue.Count && i<6; i++)
+            {
+                ColonyJobConfig queued = jobs.Find(j => j.Id == queue[i]);
+                TextAt(_content.transform, $"{i+1}. {(queued != null ? queued.Name : "(missing job)")}",
+                    -220, -295-i*38, 15, 420, TextAnchor.MiddleLeft,
+                    i == state.QueuePosition ? GUIManager.Instance.ValheimOrange : Color.white);
+            }
+            int x=-300;
+            foreach (ColonyJobConfig job in jobs)
+            {
+                ColonyJobConfig captured=job;
+                AddButton(_content.transform, "+ "+Short(job.Name,15), x, -555, 130,
+                    () => { ColonyAssignments.AppendJob(_selectedMember, captured.Id); Refresh(); });
+                x += 140; if (x > 300) break;
+            }
+            AddButton(_content.transform, "Clear queue", 300, -600, 130,
+                () => { ColonyAssignments.SetQueue(_selectedMember, new List<string>()); Refresh(); });
         }
 
-        private void ApplyName(string value)
+        private void BuildJobs()
         {
-            if (_colony == null || string.IsNullOrEmpty(value))
+            List<ColonyJobConfig> jobs = _colony.State.GetEffectiveJobs();
+            if (_selectedJob != null) { BuildJobCard(jobs); return; }
+            AddButton(_content.transform, _showPresets ? "Configured jobs" : "Saved presets", 300, -155, 160,
+                () => { _showPresets = !_showPresets; _page = 0; Refresh(); });
+            if (_showPresets) { BuildPresets(jobs); return; }
+            TextAt(_content.transform, "Configured jobs", -290, -160, 18, 240, TextAnchor.MiddleLeft);
+            int start = _page * Rows;
+            for (int row=0; row<Rows && start+row<jobs.Count; row++)
             {
-                return;
+                ColonyJobConfig job=jobs[start+row];
+                TextAt(_content.transform, job.Name, -220, -210-row*48, 16, 390, TextAnchor.MiddleLeft);
+                TextAt(_content.transform, $"count {job.Count} • limit {job.StockLimit} • {job.Targets}",
+                    100, -210-row*48, 14, 250, TextAnchor.MiddleLeft, Color.gray);
+                AddButton(_content.transform, "Configure", 310, -210-row*48, 130, () => { _selectedJob=job; Refresh(); });
             }
+            Pager(jobs.Count);
+            TextAt(_content.transform, $"{_colony.State.GetPresets().Count} saved presets",
+                -285, -555, 14, 260, TextAnchor.MiddleLeft, Color.gray);
+        }
 
-            ColonyState state = _colony.State;
-            if (state.IsValid)
+        private void BuildPresets(List<ColonyJobConfig> jobs)
+        {
+            List<JobPreset> presets = _colony.State.GetPresets();
+            TextAt(_content.transform, "Saved presets", -290, -160, 18, 240, TextAnchor.MiddleLeft);
+            int start = _page * Rows;
+            for (int row = 0; row < Rows && start + row < presets.Count; row++)
             {
-                state.SetName(value);
-                RefreshAll();
+                JobPreset preset = presets[start + row];
+                TextAt(_content.transform, preset.Name, -220, -210-row*48, 16, 340, TextAnchor.MiddleLeft);
+                TextAt(_content.transform, preset.ColonyLocal ? "colony-local targets" : "portable settings",
+                    85, -210-row*48, 14, 220, TextAnchor.MiddleLeft, preset.ColonyLocal ? GUIManager.Instance.ValheimOrange : Color.gray);
+                AddButton(_content.transform, "Apply", 310, -210-row*48, 110, () =>
+                {
+                    jobs.Add(ColonyOperations.ApplyPreset(preset));
+                    _colony.State.SetJobs(jobs);
+                    _showPresets = false;
+                    Refresh();
+                });
             }
+            Pager(presets.Count);
+            TextAt(_content.transform, "Portable presets can be reused without stale ZDO targets.",
+                -260, -555, 14, 520, TextAnchor.MiddleLeft, Color.gray);
+        }
+
+        private void BuildJobCard(List<ColonyJobConfig> jobs)
+        {
+            if (_showTargetPicker) { BuildTargetPicker(jobs); return; }
+            AddButton(_content.transform, "← Jobs", -330, -160, 110, () => { _selectedJob=null; Refresh(); });
+            InputField jobName = InputAt(_content.transform, _selectedJob.Name, -110, -160, 330);
+            jobName.onEndEdit.AddListener(value => { if (!string.IsNullOrWhiteSpace(value)) _selectedJob.Name=value.Trim(); SaveJobs(jobs); });
+            TextAt(_content.transform, "Type: " + ColonyJobCatalog.DisplayName(_selectedJob.Type), -250, -215, 16, 520, TextAnchor.MiddleLeft);
+            TextAt(_content.transform, "Targets: " + _selectedJob.Targets, -250, -255, 16, 420, TextAnchor.MiddleLeft);
+            AddButton(_content.transform, "Target mode", 270, -255, 150, () =>
+            { _selectedJob.Targets=(TargetMode)(((int)_selectedJob.Targets+1)%3); SaveJobs(jobs); });
+            TextAt(_content.transform, $"Count: {_selectedJob.Count}", -250, -305, 16, 180, TextAnchor.MiddleLeft);
+            AddButton(_content.transform, "−", -80, -305, 45, () => { _selectedJob.Count=Mathf.Max(1,_selectedJob.Count-1); SaveJobs(jobs); });
+            AddButton(_content.transform, "+", -25, -305, 45, () => { _selectedJob.Count++; SaveJobs(jobs); });
+            TextAt(_content.transform, $"Stock limit: {_selectedJob.StockLimit}", 100, -305, 16, 220, TextAnchor.MiddleLeft);
+            AddButton(_content.transform, "−", 300, -305, 45, () => { _selectedJob.StockLimit=Mathf.Max(0,_selectedJob.StockLimit-1); SaveJobs(jobs); });
+            AddButton(_content.transform, "+", 355, -305, 45, () => { _selectedJob.StockLimit++; SaveJobs(jobs); });
+            TextAt(_content.transform, "Items: " + (_selectedJob.ItemFilters.Count == 0 ? "any" : string.Join(", ", _selectedJob.ItemFilters)),
+                -250, -360, 15, 560, TextAnchor.MiddleLeft, Color.gray);
+            InputField items = InputAt(_content.transform, string.Join(",", _selectedJob.ItemFilters), 170, -360, 300);
+            items.onEndEdit.AddListener(value =>
+            {
+                _selectedJob.ItemFilters.Clear();
+                foreach (string item in value.Split(',')) if (!string.IsNullOrWhiteSpace(item)) _selectedJob.ItemFilters.Add(item.Trim());
+                SaveJobs(jobs);
+            });
+            TextAt(_content.transform, "Selected structures: " + _selectedJob.SelectedStructures.Count,
+                -250, -405, 15, 360, TextAnchor.MiddleLeft, Color.gray);
+            AddButton(_content.transform, "Choose targets", 210, -405, 180,
+                () => { _showTargetPicker = true; _search = string.Empty; _page = 0; Refresh(); });
+            AddButton(_content.transform, "Source: " + Short(StructureName(_selectedJob.Source), 16), -195, -445, 250,
+                () => { _selectedJob.Source = NextStructure(_selectedJob.Source, StructureCapability.Container); SaveJobs(jobs); });
+            AddButton(_content.transform, "Destination: " + Short(StructureName(_selectedJob.Destination), 16), 120, -445, 280,
+                () => { _selectedJob.Destination = NextStructure(_selectedJob.Destination, StructureCapability.Container); SaveJobs(jobs); });
+            AddButton(_content.transform, _selectedJob.Reservations ? "Reservations: on" : "Reservations: off", 330, -445, 150,
+                () => { _selectedJob.Reservations = !_selectedJob.Reservations; SaveJobs(jobs); });
+            TextAt(_content.transform, $"Search: {_selectedJob.SearchRadius:F0}m", -255, -485, 16, 150, TextAnchor.MiddleLeft);
+            AddButton(_content.transform, "−", -130, -485, 45, () => { _selectedJob.SearchRadius=Mathf.Max(4,_selectedJob.SearchRadius-4); SaveJobs(jobs); });
+            AddButton(_content.transform, "+", -75, -485, 45, () => { _selectedJob.SearchRadius=Mathf.Min(128,_selectedJob.SearchRadius+4); SaveJobs(jobs); });
+            TextAt(_content.transform, $"Stop: {_selectedJob.StopDistance:F1}m", 40, -485, 16, 150, TextAnchor.MiddleLeft);
+            AddButton(_content.transform, "−", 175, -485, 45, () => { _selectedJob.StopDistance=Mathf.Max(.5f,_selectedJob.StopDistance-.5f); SaveJobs(jobs); });
+            AddButton(_content.transform, "+", 230, -485, 45, () => { _selectedJob.StopDistance=Mathf.Min(8,_selectedJob.StopDistance+.5f); SaveJobs(jobs); });
+            AddButton(_content.transform, "Save portable preset", -150, -530, 220,
+                () => { ColonyOperations.SavePreset(_colony, _selectedJob.Name+" portable", _selectedJob, false); Refresh(); });
+            AddButton(_content.transform, "Save local preset", 150, -530, 220,
+                () => { ColonyOperations.SavePreset(_colony, _selectedJob.Name+" local", _selectedJob, true); Refresh(); });
+            TextAt(_content.transform, "Portable presets omit exact structure IDs; local presets retain them.",
+                -250, -575, 14, 590, TextAnchor.MiddleLeft, Color.gray);
+        }
+
+        private void BuildTargetPicker(List<ColonyJobConfig> jobs)
+        {
+            StructureCapability required = ColonyJobCatalog.RequiredCapability(_selectedJob.Type);
+            AddButton(_content.transform, "← Job", -330, -160, 110, () => { _showTargetPicker=false; Refresh(); });
+            TextAt(_content.transform, "Choose " + CapabilityName(required) + " targets", -135, -160, 20, 370, TextAnchor.MiddleLeft);
+            InputField search = InputAt(_content.transform, _search, -110, -205, 420);
+            search.onEndEdit.AddListener(value => { _search=value; _page=0; Refresh(); });
+            AddButton(_content.transform, "Sort: " + _sort, 285, -205, 130,
+                () => { _sort=(StructureSort)(((int)_sort+1)%4); Refresh(); });
+            List<StructureRecord> choices = ColonyOperations.FilterStructures(_colony, _search, required, _sort);
+            int start = _page * Rows;
+            for (int row = 0; row < Rows && start + row < choices.Count; row++)
+            {
+                StructureRecord record = choices[start + row];
+                bool selected = _selectedJob.SelectedStructures.Contains(record.Id);
+                AddButton(_content.transform, selected ? "✓ " + Short(record.Name, 22) : "○ " + Short(record.Name, 22),
+                    -190, -260-row*48, 360, () =>
+                    {
+                        if (!_selectedJob.SelectedStructures.Remove(record.Id)) _selectedJob.SelectedStructures.Add(record.Id);
+                        SaveJobs(jobs);
+                    });
+                TextAt(_content.transform, record.IsLiveIn(_colony) ? "ready" : "unavailable",
+                    150, -260-row*48, 14, 150, TextAnchor.MiddleLeft,
+                    record.IsLiveIn(_colony) ? Color.green : Color.gray);
+            }
+            Pager(choices.Count);
+            AddButton(_content.transform, "Done", 300, -555, 120, () => { _showTargetPicker=false; Refresh(); });
+        }
+
+        private void SaveJobs(List<ColonyJobConfig> jobs) { _colony.State.SetJobs(jobs); Refresh(); }
+        private void Pager(int count)
+        {
+            int pages=Mathf.Max(1,Mathf.CeilToInt(count/(float)Rows)); _page=Mathf.Clamp(_page,0,pages-1);
+            AddButton(_content.transform, "‹", -65, -600, 50, () => { _page=Mathf.Max(0,_page-1); Refresh(); });
+            TextAt(_content.transform, $"{_page+1} / {pages}", 0, -600, 14, 80);
+            AddButton(_content.transform, "›", 65, -600, 50, () => { _page=Mathf.Min(pages-1,_page+1); Refresh(); });
         }
 
         private void SpawnVillager()
         {
-            if (_colony == null || ZNetScene.instance == null)
-            {
-                return;
-            }
-
-            GameObject prefab = ZNetScene.instance.GetPrefab(VillagerPrefab.PrefabName);
-            if (prefab == null)
-            {
-                Log.Error("Cannot spawn - villager prefab is not registered.");
-                return;
-            }
-
-            Vector3 position = _colony.transform.position + _colony.transform.forward * 2f + Vector3.up;
-            GameObject spawned = Object.Instantiate(prefab, position, Quaternion.identity);
-
-            if (spawned != null && spawned.TryGetComponent(out ZNetView view))
-            {
-                _colony.Register(ColonyMemberKind.Villager, view);
-            }
-
-            RefreshAll();
+            GameObject prefab=ZNetScene.instance?.GetPrefab(VillagerPrefab.PrefabName);
+            if (prefab == null) return;
+            GameObject spawned=Instantiate(prefab,_colony.transform.position+_colony.transform.forward*3f+Vector3.up,Quaternion.identity);
+            if (spawned != null && spawned.TryGetComponent(out ZNetView view)) _colony.Register(ColonyMemberKind.Villager,view);
+            Refresh();
         }
 
-        private void RefreshAll()
+        private static IEnumerable<Transform> Children(Transform parent) { foreach(Transform child in parent) yield return child; }
+        private static string Short(string value,int length) => value.Length<=length ? value : value.Substring(0,length-1)+"…";
+        private string StructureName(ZDOID id)
         {
-            if (_colony == null)
-            {
-                return;
-            }
-
-            ColonyState state = _colony.State;
-            if (!state.IsValid)
-            {
-                return;
-            }
-
-            if (_nameField != null && !_nameField.isFocused)
-            {
-                _nameField.text = state.Name;
-            }
-
-            _counts.text =
-                $"Villagers {state.CountMembers(ColonyMemberKind.Villager)}    "
-                + $"Storage {state.CountMembers(ColonyMemberKind.Container)}    "
-                + $"Workstations {state.CountMembers(ColonyMemberKind.Station)}    "
-                + $"Homes {state.CountMembers(ColonyMemberKind.Home)}";
-
-            // The colony has no radius, so nothing stops a member being assigned a long
-            // way off. Rather than forbid it, show what it costs.
-            _cost.text = $"holding {KeepAlive.KeepAliveZones.Count} of "
-                         + $"{ModConfig.KeepAliveMaxZones.Value} zones loaded";
-
-            RefreshVillagerRows(state);
-            RefreshPicker();
+            if (id.IsNone()) return "automatic";
+            StructureRecord record = _colony.State.GetStructures().Find(r => r.Id == id);
+            return record != null ? record.Name : "missing";
         }
-
-        private void RefreshVillagerRows(ColonyState state)
+        private ZDOID NextStructure(ZDOID current, StructureCapability capability)
         {
-            List<ZDOID> villagers = state.GetMembers(ColonyMemberKind.Villager);
-
-            for (int i = 0; i < VillagerRows; i++)
-            {
-                int index = _page * VillagerRows + i;
-                bool used = index < villagers.Count;
-
-                ColonyAssignments.VillagerRow row = used
-                    ? ColonyAssignments.DescribeVillager(state, villagers[index])
-                    : default;
-
-                _nameLabels[i].text = used ? row.Name : string.Empty;
-                _homeLabels[i].text = used ? row.Home : string.Empty;
-                _workLabels[i].text = used ? row.Work : string.Empty;
-                _jobLabels[i].text = used ? row.Job : string.Empty;
-
-                _homeButtons[i].gameObject.SetActive(used);
-                _workButtons[i].gameObject.SetActive(used);
-            }
-
-            int pages = Mathf.Max(1, Mathf.CeilToInt(villagers.Count / (float)VillagerRows));
-            _pageLabel.text = pages > 1 ? $"{_page + 1} / {pages}" : string.Empty;
+            List<StructureRecord> records = ColonyOperations.FilterStructures(_colony, string.Empty, capability, StructureSort.Name);
+            if (records.Count == 0) return ZDOID.None;
+            int index = records.FindIndex(r => r.Id == current);
+            return index < 0 ? records[0].Id : index + 1 < records.Count ? records[index + 1].Id : ZDOID.None;
         }
-
-        private void RefreshPicker()
+        private static StructureCapability NextCapability(StructureCapability current)
         {
-            if (_colony == null)
-            {
-                return;
-            }
-
-            ColonyState state = _colony.State;
-            switch (_mode)
-            {
-                case PickerMode.AddNearby:
-                    ShowNearbyCandidates();
-                    break;
-                case PickerMode.AssignHome:
-                    ShowMemberChoices(state, ColonyMemberKind.Home);
-                    break;
-                case PickerMode.AssignStation:
-                    ShowMemberChoices(state, ColonyMemberKind.Station);
-                    break;
-                default:
-                    HidePicker();
-                    return;
-            }
-
-            FitToPicker();
+            if (current == StructureCapability.None) return StructureCapability.Container;
+            int next = (int)current << 1;
+            return next > (int)StructureCapability.BeeHive ? StructureCapability.None : (StructureCapability)next;
         }
-
-        /// <summary>
-        ///     Grows the panel to just fit however many choices the picker is offering, so
-        ///     a two-bed colony does not get the same tall empty box as a five-bed one.
-        /// </summary>
-        private void FitToPicker()
+        private static string CapabilityName(StructureCapability capability) => capability == StructureCapability.None ? "All" : capability.ToString();
+        private static Button AddButton(Transform parent,string text,float x,float y,float width,UnityEngine.Events.UnityAction action)
         {
-            int shown = 0;
-            foreach (Button button in _pickerButtons)
-            {
-                if (button.gameObject.activeSelf)
-                {
-                    shown++;
-                }
-            }
-
-            float needed = HeightCollapsed + PickerHintHeight + shown * PickerRowStride;
-            Resize(Mathf.Min(needed, HeightWithPicker));
+            Button button=GUIManager.Instance.CreateButton(text,parent,new Vector2(.5f,1),new Vector2(.5f,1),new Vector2(x,y),width,30).GetComponent<Button>();
+            button.onClick.AddListener(action); return button;
         }
-
-        private void HidePicker()
+        private static InputField InputAt(Transform parent, string value, float x, float y, float width)
         {
-            _hint.text = string.Empty;
-            foreach (Button button in _pickerButtons)
-            {
-                button.gameObject.SetActive(false);
-            }
-
-            Resize(HeightCollapsed);
+            InputField input = GUIManager.Instance.CreateInputField(parent, new Vector2(.5f,1), new Vector2(.5f,1),
+                new Vector2(x,y), InputField.ContentType.Standard, string.Empty, 16, width, 30).GetComponent<InputField>();
+            input.text = value ?? string.Empty;
+            return input;
         }
-
-        /// <summary>
-        ///     Close is anchored to the bottom edge, so changing the height moves it with
-        ///     the panel and nothing else shifts.
-        /// </summary>
-        private void Resize(float height)
+        private static Text TextAt(Transform parent,string text,float x,float y,int size,float width,
+            TextAnchor anchor=TextAnchor.MiddleCenter,Color? colour=null)
         {
-            RectTransform rect = _root.transform as RectTransform;
-            if (rect != null)
-            {
-                rect.sizeDelta = new Vector2(PanelWidth, height);
-            }
-        }
-
-        private void ShowNearbyCandidates()
-        {
-            Vector3 around = Player.m_localPlayer != null
-                ? Player.m_localPlayer.transform.position
-                : _colony.transform.position;
-
-            List<NearbyMembers.Candidate> candidates = NearbyMembers.Find(_addingKind, around);
-            _hint.text = candidates.Count == 0
-                ? $"No {NearbyMembers.KindLabel(_addingKind).ToLower()} near you"
-                : $"Add {NearbyMembers.KindLabel(_addingKind).ToLower()} to the colony:";
-
-            for (int i = 0; i < _pickerButtons.Count; i++)
-            {
-                Button button = _pickerButtons[i];
-                if (i >= candidates.Count)
-                {
-                    button.gameObject.SetActive(false);
-                    continue;
-                }
-
-                NearbyMembers.Candidate candidate = candidates[i];
-                Bind(button, $"+ {NearbyMembers.Describe(candidate)}", () =>
-                {
-                    if (_colony.Register(_addingKind, candidate.View))
-                    {
-                        Log.Info($"Added {candidate.Label} to colony '{_colony.State.Name}'");
-                    }
-
-                    RefreshAll();
-                });
-            }
-        }
-
-        /// <summary>
-        ///     Offers only what the colony already owns. Adding and assigning stay two
-        ///     distinct steps, so the colony never grows as a side effect of assignment.
-        /// </summary>
-        private void ShowMemberChoices(ColonyState state, ColonyMemberKind kind)
-        {
-            if (_subject.IsNone())
-            {
-                HidePicker();
-                return;
-            }
-
-            List<ZDOID> members = state.GetMembers(kind);
-            string what = kind == ColonyMemberKind.Home ? "home" : "workstation";
-            _hint.text = $"Choose a {what} for {ColonyAssignments.NameOf(_subject)}:";
-
-            // First row always clears, so an assignment can be undone.
-            int row = 0;
-            Bind(_pickerButtons[row++], "- none -", () =>
-            {
-                if (kind == ColonyMemberKind.Home)
-                {
-                    ColonyAssignments.ClearHome(_subject);
-                }
-                else
-                {
-                    ColonyAssignments.ClearStation(_subject);
-                }
-
-                _mode = PickerMode.Hidden;
-                RefreshAll();
-            });
-
-            for (int i = 0; i < members.Count && row < _pickerButtons.Count; i++, row++)
-            {
-                ZDOID member = members[i];
-                Bind(_pickerButtons[row], ColonyAssignments.DescribeChoice(state, kind, member, i, _subject), () =>
-                {
-                    if (kind == ColonyMemberKind.Home)
-                    {
-                        ColonyAssignments.AssignHome(state, _subject, member);
-                    }
-                    else
-                    {
-                        ColonyAssignments.AssignStation(_subject, member);
-                    }
-
-                    _mode = PickerMode.Hidden;
-                    RefreshAll();
-                });
-            }
-
-            for (; row < _pickerButtons.Count; row++)
-            {
-                _pickerButtons[row].gameObject.SetActive(false);
-            }
-        }
-
-        private static void Bind(Button button, string label, UnityEngine.Events.UnityAction action)
-        {
-            button.gameObject.SetActive(true);
-            button.GetComponentInChildren<Text>().text = label;
-            button.onClick.RemoveAllListeners();
-            button.onClick.AddListener(action);
+            Text label=GUIManager.Instance.CreateText(text,parent,new Vector2(.5f,1),new Vector2(.5f,1),new Vector2(x,y),
+                GUIManager.Instance.AveriaSerifBold,size,colour??Color.white,true,Color.black,width,30,false).GetComponent<Text>();
+            label.alignment=anchor; return label;
         }
     }
 }

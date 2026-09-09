@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Kukolony.Gui
 {
     /// <summary>
-    ///     Searchable index of every item in the game, for the work post's item picker.
+    ///     Searchable index of every item in the game for concrete job filter editors.
     ///
     ///     Matching covers both the prefab name and the localised display name, because a
     ///     player thinking "Wood" and a player thinking "$item_wood" should both find it.

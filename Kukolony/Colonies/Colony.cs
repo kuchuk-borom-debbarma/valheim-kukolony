@@ -6,11 +6,8 @@ using UnityEngine;
 namespace Kukolony.Colonies
 {
     /// <summary>
-    ///     A placed colony hearth. Owns villagers, storage, workstations and homes.
-    ///
-    ///     The hearth is a marker, not a place: nothing is required to be near it, and it
-    ///     has no radius. Everything it does is bookkeeping that the villagers' AI and the
-    ///     keep-alive then read.
+    ///     A placed persistent colony hearth. Villager membership is explicit; structure
+    ///     registration and execution eligibility use its configurable live radius.
     /// </summary>
     internal sealed class Colony : MonoBehaviour, Hoverable, Interactable
     {
@@ -61,7 +58,7 @@ namespace Kukolony.Colonies
         }
 
         /// <summary>
-        ///     Registers a member both ways: into the colony's list, and as a back-pointer
+        ///     Registers a villager both ways: into the colony's list, and as a back-pointer
         ///     on the member itself.
         /// </summary>
         internal bool Register(ColonyMemberKind kind, ZNetView member)
@@ -127,7 +124,7 @@ namespace Kukolony.Colonies
         }
 
         /// <summary>
-        ///     How far above the object the hover text sits. Valheim 1.0 added this to
+        ///     How far above the object the hover text sits. Valheim added this to
         ///     Hoverable; zero keeps the vanilla placement.
         /// </summary>
         public float GetHoverOffset() => 0f;

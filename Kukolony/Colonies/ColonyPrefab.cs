@@ -9,8 +9,7 @@ namespace Kukolony.Colonies
     /// <summary>
     ///     Registers the colony hearth as a buildable piece.
     ///
-    ///     Same shape as WorkPostPrefab, and the same two traps: register on
-    ///     OnVanillaPrefabsAvailable so the prefab reaches ZNetScene, and activate the
+    ///     Register on OnVanillaPrefabsAvailable so the prefab reaches ZNetScene, and activate the
     ///     clone or its instances never run Awake and never get a ZDO.
     /// </summary>
     internal static class ColonyPrefab

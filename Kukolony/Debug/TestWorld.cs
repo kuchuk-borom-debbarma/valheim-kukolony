@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using Kukolony.Colonies;
 using Kukolony.Core;
 using Kukolony.Villagers;
-using Kukolony.WorkPosts;
 using UnityEngine;
 
 namespace Kukolony.Debug
@@ -15,7 +14,7 @@ namespace Kukolony.Debug
     ///     works if each run starts from a known state - otherwise villagers, posts and
     ///     wood accumulate and every run tests something slightly different.
     ///
-    ///     Deliberately blunt: it destroys every villager, work post, container and loose
+    ///     Deliberately blunt: it destroys every villager, colony fixture, container and loose
     ///     item near the player. That would be reckless in a real world, which is why it
     ///     only ever runs from the test harness in a world the harness created.
     /// </summary>
@@ -33,7 +32,6 @@ namespace Kukolony.Debug
         internal static void Purge(Vector3 around)
         {
             int villagers = DestroyAll(CollectVillagers());
-            int posts = DestroyAll(CollectPosts());
             int props = DestroyAll(CollectProps(around));
 
             // The lists above only see what is loaded. Anything the last run left in a
@@ -42,12 +40,11 @@ namespace Kukolony.Debug
             // hypothetical: a screenshot run left five villagers behind, they came back
             // during the next haul run, and their halos ate the zone budget.
             int stale = DestroyZdosWideWorld(VillagerPrefab.PrefabName)
-                        + DestroyZdosWideWorld(WorkPostPrefab.PrefabName)
                         + DestroyZdosWideWorld(ColonyPrefab.PrefabName);
 
             ColonyRegistry.Clear();
 
-            Log.Info($"[TestWorld] purged {villagers} villager(s), {posts} post(s), "
+            Log.Info($"[TestWorld] purged {villagers} villager(s), "
                      + $"{props} prop(s), {stale} unloaded ZDO(s)");
         }
 
@@ -102,20 +99,6 @@ namespace Kukolony.Debug
             return found;
         }
 
-        private static List<GameObject> CollectPosts()
-        {
-            List<GameObject> found = new List<GameObject>();
-            foreach (WorkPost post in WorkPost.Instances)
-            {
-                if (post != null)
-                {
-                    found.Add(post.gameObject);
-                }
-            }
-
-            return found;
-        }
-
         /// <summary>Chests and loose items left behind by a previous run.</summary>
         private static List<GameObject> CollectProps(Vector3 around)
         {
@@ -125,7 +108,9 @@ namespace Kukolony.Debug
             Piece.GetAllPiecesInRadius(around, PurgeRadius, pieces);
             foreach (Piece piece in pieces)
             {
-                if (piece != null && piece.GetComponent<Container>() != null)
+                if (piece != null && (piece.GetComponent<Container>() != null
+                    || StructureRegistry.TryCapabilities(piece.gameObject, out _)
+                    || piece.GetComponent<Colony>() != null))
                 {
                     found.Add(piece.gameObject);
                 }

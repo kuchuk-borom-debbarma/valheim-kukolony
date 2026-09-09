@@ -40,9 +40,6 @@ namespace Kukolony.Colonies
 
                 ColonyState state = new ColonyState(colonyZdo);
 
-                AddPositions(state, ColonyMemberKind.Container, into);
-                AddPositions(state, ColonyMemberKind.Station, into);
-                AddPositions(state, ColonyMemberKind.Home, into);
                 foreach (StructureRecord structure in state.GetStructures())
                 {
                     ZDO zdo = ZDOMan.instance.GetZDO(structure.Id);
@@ -54,18 +51,7 @@ namespace Kukolony.Colonies
             }
         }
 
-        private static void AddPositions(ColonyState state, ColonyMemberKind kind, List<Vector3> into)
-        {
-            foreach (ZDOID member in state.GetMembers(kind))
-            {
-                ZDO zdo = ZDOMan.instance.GetZDO(member);
-                if (zdo != null && zdo.IsValid())
-                {
-                    into.Add(zdo.GetPosition());
-                }
-            }
-        }
-
+        internal static IReadOnlyList<ZDO> GetKnownColonies() => ColonyZdos;
         internal static void Clear() => ColonyZdos.Clear();
 
         /// <summary>

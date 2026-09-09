@@ -1,6 +1,6 @@
 # NPC design research
 
-Everything needed to build a player-model villager and a composable job system, gathered
+Everything needed to build a player-model villager and a concrete typed job system, gathered
 before implementation. Sources: the decompiled client assembly, a runtime prefab probe, and
 the RagnarsRokare (RRR) MobAI/SlaveGreylings source.
 
@@ -116,10 +116,10 @@ something similar.
 
 ---
 
-## 3. Job architecture — what to take from RRR, and what not to
+## 3. Job architecture — concrete catalog, shared runtime
 
-RRR's `SlaveGreylings` is the closest prior art: creatures that do assigned work. Their
-`IBehaviour` is exactly the "input/output puzzle piece" model.
+RRR's `SlaveGreylings` is useful prior art for creatures that do assigned work. Its
+in-memory behavior graph is not Kukolony's player-facing configuration model.
 
 ```csharp
 public interface IBehaviour
@@ -142,14 +142,11 @@ public string FailState { get; set; }
 public string Postfix { get; set; }   // lets one behaviour appear twice in one machine
 ```
 
-### Worth adopting
+### Lessons retained
 
-- **Explicit Input / Output / Settings sections** on every fragment. It makes the
-  composition contract obvious and is exactly the puzzle-piece model.
-- **Caller-supplied `SuccessState` / `FailState`.** The fragment does not know what comes
-  next; the job wires it. This is what makes fragments reusable.
-- **A `Postfix` discriminator** so the same fragment can appear more than once in one job
-  (our haul job needs two move-to steps).
+- **Explicit typed settings** on each concrete job make its contract inspectable.
+- **A shared result vocabulary** (`Running`, `Completed`, `Failed`, `Skipped`) gives every
+  queue the same count and loop semantics without exposing a graph editor.
 - **Reverse-patching `BaseAI.UpdateAI`'s housekeeping.** RRR reimplement the base
   bookkeeping — takeoff/landing, jump timer, regeneration, `m_alerted` sync — so they can
   skip vanilla `MonsterAI` without losing it. **Our current `MonsterAiTickPatch` drops all
@@ -162,10 +159,9 @@ public string Postfix { get; set; }   // lets one behaviour appear twice in one 
   keyed by a ZDO GUID. That state is lost when a mob unloads or changes owner. Our
   multiplayer requirement (`multiplayer.md`) makes that unacceptable — ownership can move
   mid-job, so job progress must live on the ZDO.
-- **The `Stateless` library.** RRR depend on it for hierarchical state machines. It is a
-  real dependency to ship, and its `StateMachine<string,string>` holds state in memory,
-  which conflicts with the point above. A small purpose-built step runner that stores the
-  current step index on the ZDO fits our constraints better.
+- **The `Stateless` library and generic step graphs.** They add a dependency and keep
+  mutable state in memory. Kukolony persists queue position, target, phase and progress
+  directly on the villager ZDO.
 
 ### Identifying our creatures
 
@@ -177,14 +173,14 @@ while villagers are a prefab we own. Revisit if we ever want to employ vanilla c
 
 ---
 
-## 4. Mechanics the job steps need
+## 4. Mechanics concrete executors need
 
 **Ground items have a registry.** `ItemDrop.s_instances` is a private static list — no
 `Physics.OverlapSphere` needed.
 
 **Pickup requires ZDO ownership.** `ItemDrop.CanPickup()` returns `m_nview.IsOwner()`.
 Vanilla requests it with `ItemDrop.RequestOwn()`, which invokes `RPC_RequestOwn` with
-exponential backoff (`0.2 * 2^n`, capped at 30s). A pickup step must request ownership and
+exponential backoff (`0.2 * 2^n`, capped at 30s). A pickup phase must request ownership and
 wait, not assume it.
 
 **Carried items do not persist by default.** `Humanoid.m_inventory` is
