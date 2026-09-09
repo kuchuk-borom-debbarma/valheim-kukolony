@@ -45,6 +45,31 @@ startup.OnWorldStart();                              // public
 Wait a few seconds after `FejdStartup.instance` appears before touching it — the profile
 and world lists populate asynchronously.
 
+### One world, purged between runs
+
+**Reuse a single test world; do not generate a fresh one per run.** Terrain generation
+costs around five minutes, against roughly seventy seconds to load an existing world —
+measured at 388s versus 75s for the same scenario. Generating per run also litters the save
+folder with throwaway worlds.
+
+Reuse only works if each run starts from a known state, so `Debug/TestWorld.Purge` destroys
+every villager, work post, container and loose item near the player before the scenario
+builds. Without it, leftovers accumulate and each run quietly tests something different.
+
+The purge is deliberately blunt — it does not try to identify "our" objects. That would be
+reckless in a real world, which is why it only ever runs from the harness, in a world the
+harness created.
+
+```
+[TestWorld] purged 3 villager(s), 1 post(s), 1 prop(s)
+```
+
+Destroy through `ZNetScene.Destroy` so the ZDO goes with the object. Only the owner may
+destroy a ZDO, and the harness owns everything it spawned.
+
+**Persistence tests are the exception**: a run that must prove state survives a reload
+cannot purge. `VillagerSelfTest` deliberately does not.
+
 ### Using a world we own
 
 The harness creates its own world rather than borrowing one:
