@@ -74,6 +74,7 @@ namespace Kukolony.Jobs.Steps
             }
 
             context.Target = ZDOID.None;
+            context.Villager.State.SetActiveItem(string.Empty);
             Log.Debug($"[job] deposited {moved} stack(s)");
             return StepStatus.Succeeded;
         }

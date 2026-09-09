@@ -24,6 +24,7 @@ namespace Kukolony.Gui
 
         private GameObject _root;
         private InputField _itemFilter;
+        private InputField _presetName;
         private Text _summary;
         private readonly List<Button> _itemButtons = new List<Button>();
         private readonly List<Button> _containerButtons = new List<Button>();
@@ -143,7 +144,7 @@ namespace Kukolony.Gui
         {
             _root = GUIManager.Instance.CreateWoodpanel(
                 transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                new Vector2(0f, 0f), 520f, 520f, draggable: true);
+                new Vector2(0f, 0f), 520f, 580f, draggable: true);
             _root.SetActive(false);
 
             GUIManager.Instance.CreateText("Work Post", _root.transform,
@@ -156,6 +157,17 @@ namespace Kukolony.Gui
                 GUIManager.Instance.AveriaSerifBold, 16, Color.white,
                 true, Color.black, 460f, 44f, false).GetComponent<Text>();
 
+            GameObject preset = GUIManager.Instance.CreateInputField(_root.transform,
+                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(-80f, -104f),
+                InputField.ContentType.Standard, "preset name", 16, 270f, 30f);
+            _presetName = preset.GetComponent<InputField>();
+            GameObject save = GUIManager.Instance.CreateButton("Save preset", _root.transform,
+                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(154f, -104f), 120f, 30f);
+            save.GetComponent<Button>().onClick.AddListener(SavePreset);
+            GameObject load = GUIManager.Instance.CreateButton("Load", _root.transform,
+                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(234f, -104f), 60f, 30f);
+            load.GetComponent<Button>().onClick.AddListener(LoadPreset);
+
             BuildItemPicker();
             BuildContainerPicker();
 
@@ -167,12 +179,12 @@ namespace Kukolony.Gui
         private void BuildItemPicker()
         {
             GUIManager.Instance.CreateText("Item to work with", _root.transform,
-                new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(150f, -110f),
+                new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(150f, -150f),
                 GUIManager.Instance.AveriaSerifBold, 16, GUIManager.Instance.ValheimOrange,
                 true, Color.black, 300f, 24f, false);
 
             GameObject field = GUIManager.Instance.CreateInputField(_root.transform,
-                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -140f),
+                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -180f),
                 InputField.ContentType.Standard, "search items...", 16, 440f, 32f);
             _itemFilter = field.GetComponent<InputField>();
             _itemFilter.onValueChanged.AddListener(_ => RefreshItemResults());
@@ -181,7 +193,7 @@ namespace Kukolony.Gui
             {
                 GameObject row = GUIManager.Instance.CreateButton(string.Empty, _root.transform,
                     new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                    new Vector2(0f, -176f - i * 30f), 440f, 28f);
+                    new Vector2(0f, -216f - i * 30f), 440f, 28f);
                 row.SetActive(false);
                 _itemButtons.Add(row.GetComponent<Button>());
             }
@@ -190,7 +202,7 @@ namespace Kukolony.Gui
         private void BuildContainerPicker()
         {
             GUIManager.Instance.CreateText("Destination", _root.transform,
-                new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(130f, -366f),
+                new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(130f, -406f),
                 GUIManager.Instance.AveriaSerifBold, 16, GUIManager.Instance.ValheimOrange,
                 true, Color.black, 300f, 24f, false);
 
@@ -198,7 +210,7 @@ namespace Kukolony.Gui
             {
                 GameObject row = GUIManager.Instance.CreateButton(string.Empty, _root.transform,
                     new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                    new Vector2(0f, -396f - i * 30f), 440f, 28f);
+                    new Vector2(0f, -436f - i * 30f), 440f, 28f);
                 row.SetActive(false);
                 _containerButtons.Add(row.GetComponent<Button>());
             }
@@ -220,7 +232,8 @@ namespace Kukolony.Gui
 
                 ItemCatalogue.Entry entry = matches[i];
                 button.gameObject.SetActive(true);
-                button.GetComponentInChildren<Text>().text = $"{entry.DisplayName}  ({entry.PrefabName})";
+                bool selected = _post != null && _post.State.ItemFilters.Contains(entry.PrefabName);
+                button.GetComponentInChildren<Text>().text = $"{(selected ? "✓ " : string.Empty)}{entry.DisplayName}  ({entry.PrefabName})";
                 button.onClick.RemoveAllListeners();
                 button.onClick.AddListener(() => ApplyItem(entry.PrefabName));
             }
@@ -255,7 +268,10 @@ namespace Kukolony.Gui
 
                 NearbyContainers.Entry entry = _containers[index];
                 button.gameObject.SetActive(true);
-                button.GetComponentInChildren<Text>().text = entry.Describe();
+                bool selected = _post != null && entry.Container != null
+                    && entry.Container.TryGetComponent(out ZNetView selectedView)
+                    && _post.State.Destinations.Contains(selectedView.GetZDO().m_uid);
+                button.GetComponentInChildren<Text>().text = (selected ? "✓ " : string.Empty) + entry.Describe();
                 button.onClick.RemoveAllListeners();
                 button.onClick.AddListener(() =>
                 {
@@ -281,8 +297,38 @@ namespace Kukolony.Gui
                 return;
             }
 
-            state.SetItemFilter(prefabName);
-            Log.Info($"Work post set to work with '{prefabName}'");
+            List<string> items = state.ItemFilters;
+            if (items.Contains(prefabName)) items.Remove(prefabName); else items.Add(prefabName);
+            state.SetItemFilters(items);
+            Log.Info($"Work post item selection now has {items.Count} item(s)");
+            RefreshItemResults();
+            RefreshSummary();
+        }
+
+        private void SavePreset()
+        {
+            if (_post == null || _presetName == null) return;
+            WorkPostState state = _post.State;
+            if (state.IsValid && JobPresetStore.Save(_presetName.text, state.ItemFilters, state.Destinations))
+            {
+                Log.Info($"Saved job preset '{_presetName.text}'");
+            }
+        }
+
+        private void LoadPreset()
+        {
+            if (_post == null || _presetName == null) return;
+            if (!JobPresetStore.TryLoad(_presetName.text, out List<string> items, out List<ZDOID> destinations))
+            {
+                Log.Warning($"No usable job preset named '{_presetName.text}'");
+                return;
+            }
+            WorkPostState state = _post.State;
+            if (!state.IsValid) return;
+            state.SetItemFilters(items);
+            state.SetDestinations(destinations);
+            RefreshItemResults();
+            RefreshContainers();
             RefreshSummary();
         }
 
@@ -299,10 +345,14 @@ namespace Kukolony.Gui
                 return;
             }
 
-            state.SetDestination(container);
-            Log.Info(container.IsNone()
-                ? "Work post destination set to auto"
-                : "Work post destination bound to a container");
+            List<ZDOID> destinations = state.Destinations;
+            if (container.IsNone()) destinations.Clear();
+            else if (destinations.Contains(container)) destinations.Remove(container);
+            else destinations.Add(container);
+            state.SetDestinations(destinations);
+            Log.Info(destinations.Count == 0 ? "Work post destination set to auto"
+                : $"Work post has {destinations.Count} destination(s)");
+            RefreshContainers();
             RefreshSummary();
         }
 
@@ -315,8 +365,8 @@ namespace Kukolony.Gui
 
             WorkPostState state = _post.State;
             string job = state.HasJob ? state.JobId : "none";
-            string item = string.IsNullOrEmpty(state.ItemFilter) ? "not set" : state.ItemFilter;
-            string destination = state.Destination.IsNone() ? "auto" : "bound container";
+            string item = state.ItemFilters.Count == 0 ? "not set" : string.Join(", ", state.ItemFilters.ToArray());
+            string destination = state.Destinations.Count == 0 ? "auto" : $"{state.Destinations.Count} selected";
 
             _summary.text = $"Job: {job}    Item: {item}    Destination: {destination}";
         }

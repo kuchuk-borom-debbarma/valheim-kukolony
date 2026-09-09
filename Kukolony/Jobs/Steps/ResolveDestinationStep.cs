@@ -25,26 +25,32 @@ namespace Kukolony.Jobs.Steps
 
         public StepStatus Tick(JobContext context)
         {
-            ZDOID bound = context.Post.State.Destination;
-            if (!bound.IsNone())
+            List<ZDOID> boundDestinations = context.Post.State.Destinations;
+            if (boundDestinations.Count > 0)
             {
-                GameObject boundObject = ZNetScene.instance.FindInstance(bound);
-                if (boundObject != null && boundObject.GetComponent<Container>() != null)
+                foreach (ZDOID bound in boundDestinations)
                 {
-                    context.Target = bound;
-                    return StepStatus.Succeeded;
+                    GameObject boundObject = ZNetScene.instance.FindInstance(bound);
+                    if (boundObject != null && boundObject.GetComponent<Container>() != null)
+                    {
+                        context.Target = bound;
+                        return StepStatus.Succeeded;
+                    }
                 }
 
                 // "Not instantiated" is a routine state off-screen and must not be read as
                 // "destroyed" - doing so made a villager quietly deposit into a different
                 // chest whenever the bound one was outside its loaded area, which is
                 // correct while a player watches and wrong the moment they leave.
-                if (ZDOMan.instance.GetZDO(bound) != null)
+                foreach (ZDOID bound in boundDestinations)
                 {
-                    return StepStatus.Running;
+                    if (ZDOMan.instance.GetZDO(bound) != null)
+                    {
+                        return StepStatus.Running;
+                    }
                 }
 
-                Log.Debug("[job] bound container no longer exists, falling back to nearest match");
+                Log.Debug("[job] bound containers no longer exist, falling back to nearest match");
             }
 
             Container nearest = FindNearestContainerHolding(context);

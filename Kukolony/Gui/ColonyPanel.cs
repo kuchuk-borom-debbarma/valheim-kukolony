@@ -28,7 +28,7 @@ namespace Kukolony.Gui
         // Two heights, because the picker is only sometimes there. A panel sized for the
         // picker leaves a tall empty band below the rows whenever it is closed, which
         // reads as though something failed to draw.
-        private const float PanelWidth = 580f;
+        private const float PanelWidth = 700f;
         private const float HeightWithPicker = 676f;
         private const float HeightCollapsed = 452f;
         private const float PickerHintHeight = 46f;
@@ -53,6 +53,7 @@ namespace Kukolony.Gui
         private readonly List<Text> _nameLabels = new List<Text>();
         private readonly List<Text> _homeLabels = new List<Text>();
         private readonly List<Text> _workLabels = new List<Text>();
+        private readonly List<Text> _jobLabels = new List<Text>();
         private Text _pageLabel;
         private readonly List<Button> _homeButtons = new List<Button>();
         private readonly List<Button> _workButtons = new List<Button>();
@@ -220,17 +221,18 @@ namespace Kukolony.Gui
                 float y = -226f - i * 34f;
                 int row = i;
 
-                _nameLabels.Add(Column(112f, 18f, y));
-                _homeLabels.Add(Column(136f, 138f, y));
-                _workLabels.Add(Column(124f, 282f, y));
+                _nameLabels.Add(Column(108f, 18f, y));
+                _homeLabels.Add(Column(104f, 132f, y));
+                _workLabels.Add(Column(94f, 244f, y));
+                _jobLabels.Add(Column(92f, 346f, y));
 
                 GameObject home = GUIManager.Instance.CreateButton("home", _root.transform,
-                    new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-146f, y), 84f, 26f);
+                    new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-156f, y), 84f, 26f);
                 home.GetComponent<Button>().onClick.AddListener(() => BeginAssign(row, PickerMode.AssignHome));
                 _homeButtons.Add(home.GetComponent<Button>());
 
                 GameObject work = GUIManager.Instance.CreateButton("work", _root.transform,
-                    new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-56f, y), 84f, 26f);
+                    new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-66f, y), 84f, 26f);
                 work.GetComponent<Button>().onClick.AddListener(() => BeginAssign(row, PickerMode.AssignStation));
                 _workButtons.Add(work.GetComponent<Button>());
             }
@@ -250,6 +252,18 @@ namespace Kukolony.Gui
             // Label() boxes are left-aligned like the counts above; the page indicator
             // belongs between the two pager buttons instead.
             _pageLabel.alignment = TextAnchor.MiddleCenter;
+
+            Header("Villager", 18f);
+            Header("Bed", 132f);
+            Header("Post", 244f);
+            Header("Job", 346f);
+        }
+
+        private void Header(string text, float left)
+        {
+            Text header = Column(90f, left, -208f);
+            header.text = text;
+            header.color = GUIManager.Instance.ValheimOrange;
         }
 
         /// <summary>
@@ -421,8 +435,9 @@ namespace Kukolony.Gui
                     : default;
 
                 _nameLabels[i].text = used ? row.Name : string.Empty;
-                _homeLabels[i].text = used ? $"home: {row.Home}" : string.Empty;
-                _workLabels[i].text = used ? $"work: {row.Work}" : string.Empty;
+                _homeLabels[i].text = used ? row.Home : string.Empty;
+                _workLabels[i].text = used ? row.Work : string.Empty;
+                _jobLabels[i].text = used ? row.Job : string.Empty;
 
                 _homeButtons[i].gameObject.SetActive(used);
                 _workButtons[i].gameObject.SetActive(used);

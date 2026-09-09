@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Kukolony.Colonies;
 using Kukolony.Core;
 using Kukolony.Villagers;
+using Kukolony.WorkPosts;
 using UnityEngine;
 
 namespace Kukolony.Gui
@@ -150,16 +151,18 @@ namespace Kukolony.Gui
         /// </summary>
         internal readonly struct VillagerRow
         {
-            internal VillagerRow(string name, string home, string work)
+            internal VillagerRow(string name, string home, string work, string job)
             {
                 Name = name;
                 Home = home;
                 Work = work;
+                Job = job;
             }
 
             internal string Name { get; }
             internal string Home { get; }
             internal string Work { get; }
+            internal string Job { get; }
         }
 
         internal static VillagerRow DescribeVillager(ColonyState colony, ZDOID villager)
@@ -167,7 +170,7 @@ namespace Kukolony.Gui
             ZDO zdo = ZDOMan.instance?.GetZDO(villager);
             if (zdo == null)
             {
-                return new VillagerRow("(missing)", "-", "-");
+                return new VillagerRow("(missing)", "-", "-", "-");
             }
 
             VillagerState state = new VillagerState(zdo);
@@ -177,8 +180,11 @@ namespace Kukolony.Gui
             string work = !state.Post.IsNone()
                 ? LabelFor(colony, ColonyMemberKind.Station, state.Post)
                 : "-";
+            ZDO postZdo = !state.Post.IsNone() ? ZDOMan.instance?.GetZDO(state.Post) : null;
+            string job = postZdo != null ? new WorkPostState(postZdo).JobId : string.Empty;
 
-            return new VillagerRow(NameOf(villager), home, work);
+            return new VillagerRow(NameOf(villager), home, work,
+                string.IsNullOrEmpty(job) ? "idle" : job);
         }
 
         /// <summary>

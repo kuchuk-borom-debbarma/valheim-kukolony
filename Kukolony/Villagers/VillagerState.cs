@@ -29,6 +29,7 @@ namespace Kukolony.Villagers
         private static readonly int StepKey = "kukolony.step".GetStableHashCode();
         private static readonly KeyValuePair<int, int> StepTargetKey = ZDO.GetHashZDOID("kukolony.step.target");
         private static readonly int ClaimedSinceKey = "kukolony.step.since".GetStableHashCode();
+        private static readonly int ActiveItemKey = "kukolony.step.item".GetStableHashCode();
 
         // Distinct from HomeKey, which is the spawn-position fallback for a villager with
         // no bed assigned.
@@ -74,6 +75,8 @@ namespace Kukolony.Villagers
         /// <summary>The bed this villager calls home, or None if it has not been given one.</summary>
         internal ZDOID HomeBed => _zdo?.GetZDOID(HomeBedKey) ?? ZDOID.None;
 
+        internal string ActiveItem => _zdo?.GetString(ActiveItemKey, string.Empty) ?? string.Empty;
+
         internal bool HasHomeBed => !HomeBed.IsNone();
 
         internal void SetHome(Vector3 position) => _zdo.Set(HomeKey, position);
@@ -83,6 +86,8 @@ namespace Kukolony.Villagers
         internal void SetPost(ZDOID post) => _zdo.Set(PostKey, post);
 
         internal void SetStepIndex(int index) => _zdo.Set(StepKey, index);
+
+        internal void SetActiveItem(string prefabName) => _zdo.Set(ActiveItemKey, prefabName);
 
         /// <summary>
         ///     Net time this villager took its current target, used to expire claims held

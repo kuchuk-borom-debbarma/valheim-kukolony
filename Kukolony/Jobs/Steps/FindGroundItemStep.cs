@@ -18,8 +18,7 @@ namespace Kukolony.Jobs.Steps
 
         public StepStatus Tick(JobContext context)
         {
-            string wanted = context.ItemFilter;
-            if (string.IsNullOrEmpty(wanted))
+            if (context.ItemFilters.Count == 0)
             {
                 return StepStatus.Failed;
             }
@@ -36,7 +35,8 @@ namespace Kukolony.Jobs.Steps
                     continue;
                 }
 
-                if (Utils.GetPrefabName(drop.gameObject) != wanted)
+                string prefabName = Utils.GetPrefabName(drop.gameObject);
+                if (!context.ItemFilters.Contains(prefabName))
                 {
                     continue;
                 }
@@ -64,7 +64,8 @@ namespace Kukolony.Jobs.Steps
             }
 
             context.Target = closest.GetComponent<ZNetView>().GetZDO().m_uid;
-            Log.Debug($"[job] found {wanted} at {closestDistance:F0}m");
+            context.Villager.State.SetActiveItem(Utils.GetPrefabName(closest.gameObject));
+            Log.Debug($"[job] found {context.ItemFilter} at {closestDistance:F0}m");
             return StepStatus.Succeeded;
         }
     }
