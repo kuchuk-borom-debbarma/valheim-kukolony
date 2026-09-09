@@ -166,6 +166,32 @@ This was only caught by running the control with claims disabled and finding it 
 passed** — the assertion was measuring the chest, which is shared on purpose. A test that
 has never failed proves nothing.
 
+## Configuring a post in game
+
+`WorkPost` is `Interactable`; using it opens a panel built from Jötunn's `GUIManager`
+primitives. The panel is a **front end over the same ZDO keys the job already reads** — it
+adds no parallel path, and a post stays fully configurable without it.
+
+Three things it has to get right:
+
+- **Claim ownership on open.** The panel writes the post's ZDO, and a non-owner write
+  lands locally and is clobbered on the next sync. Same rule that shaped the claim system.
+- **`BlockInput` is refcounted.** An unpaired open leaves the player unable to move, so the
+  panel tracks its own blocked state; double-closing is harmless, and the block is released
+  on destroy as well as on close. Escape closes it too, so the block is always escapable.
+- **Rebuild on scene change.** `GUIManager.CustomGUIFront` is destroyed and recreated per
+  scene, so the panel is rebuilt with it. Caching one across a world reload leaves a dead
+  reference and a panel that never opens again.
+
+The item picker searches all ~1080 items by prefab name *and* localised name, scoring
+exact over prefix over substring. Scoring matters: returning the first N in catalogue order
+meant searching "wood" filled every row with `WoodArrow` and friends and never showed
+`Wood` — the one item the player meant.
+
+The destination picker lists containers within the post's radius using the same registry
+lookup `ResolveDestinationStep` uses, so what the panel offers is exactly what a villager
+can reach. The first row is always "auto", so a bound chest can be un-bound.
+
 ## Known gaps
 
 - **A failed cycle keeps whatever is in the bag.** Items are not dropped, and the next

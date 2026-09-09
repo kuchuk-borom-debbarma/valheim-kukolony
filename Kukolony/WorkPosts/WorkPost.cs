@@ -14,7 +14,7 @@ namespace Kukolony.WorkPosts
     ///     shared state, and a post can be reconfigured without disturbing anyone midway
     ///     through a cycle.
     /// </summary>
-    internal sealed class WorkPost : MonoBehaviour, Hoverable
+    internal sealed class WorkPost : MonoBehaviour, Hoverable, Interactable
     {
         private ZNetView _nview;
 
@@ -101,6 +101,20 @@ namespace Kukolony.WorkPosts
             return TryGetComponent(out _nview);
         }
 
+        /// <summary>Opens the configuration panel. Hold and alt do nothing.</summary>
+        public bool Interact(Humanoid user, bool hold, bool alt)
+        {
+            if (hold || alt)
+            {
+                return false;
+            }
+
+            Gui.WorkPostPanel.Instance?.Open(this);
+            return true;
+        }
+
+        public bool UseItem(Humanoid user, ItemDrop.ItemData item) => false;
+
         public string GetHoverName() => "$kukolony_workpost";
 
         public string GetHoverText()
@@ -116,7 +130,8 @@ namespace Kukolony.WorkPosts
             int workers = CountBoundVillagers();
 
             return Localization.instance.Localize(
-                $"$kukolony_workpost\n<color=grey>{job} {item} - {workers} villager(s)</color>");
+                $"$kukolony_workpost\n<color=grey>{job} {item} - {workers} villager(s)</color>"
+                + "\n[<color=yellow><b>$KEY_Use</b></color>] configure");
         }
 
         private int CountBoundVillagers()
