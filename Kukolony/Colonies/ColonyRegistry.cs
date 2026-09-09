@@ -43,6 +43,14 @@ namespace Kukolony.Colonies
                 AddPositions(state, ColonyMemberKind.Container, into);
                 AddPositions(state, ColonyMemberKind.Station, into);
                 AddPositions(state, ColonyMemberKind.Home, into);
+                foreach (StructureRecord structure in state.GetStructures())
+                {
+                    ZDO zdo = ZDOMan.instance.GetZDO(structure.Id);
+                    if (zdo != null && zdo.IsValid())
+                    {
+                        into.Add(zdo.GetPosition());
+                    }
+                }
             }
         }
 

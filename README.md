@@ -1,5 +1,10 @@
 # Kukolony
 
+Kukolony now centres a placed Colony Hearth: it owns live-radius registered structures,
+members and typed concrete job queues. The retired work-post and JSON-job model is not
+loaded on startup. See [colonies](docs/colonies.md), [structure registry](docs/structure-registry.md),
+and [job catalog](docs/job-catalog.md).
+
 A colony management system for Valheim. Recruit NPC villagers, give them a work post, and
 they keep the base running — hauling, loading smelters, cooking, crafting, repairing —
 whether or not you are standing there watching.

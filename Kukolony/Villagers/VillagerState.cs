@@ -30,6 +30,10 @@ namespace Kukolony.Villagers
         private static readonly KeyValuePair<int, int> StepTargetKey = ZDO.GetHashZDOID("kukolony.step.target");
         private static readonly int ClaimedSinceKey = "kukolony.step.since".GetStableHashCode();
         private static readonly int ActiveItemKey = "kukolony.step.item".GetStableHashCode();
+        private static readonly int QueueKey = "kukolony.queue.v1".GetStableHashCode();
+        private static readonly int QueuePositionKey = "kukolony.queue.position".GetStableHashCode();
+        private static readonly int QueueAttemptKey = "kukolony.queue.attempt".GetStableHashCode();
+        private static readonly int QueueProgressKey = "kukolony.queue.progress".GetStableHashCode();
 
         // Distinct from HomeKey, which is the spawn-position fallback for a villager with
         // no bed assigned.
@@ -76,6 +80,18 @@ namespace Kukolony.Villagers
         internal ZDOID HomeBed => _zdo?.GetZDOID(HomeBedKey) ?? ZDOID.None;
 
         internal string ActiveItem => _zdo?.GetString(ActiveItemKey, string.Empty) ?? string.Empty;
+        internal int QueuePosition => _zdo?.GetInt(QueuePositionKey, 0) ?? 0;
+        internal int QueueAttempt => _zdo?.GetInt(QueueAttemptKey, 0) ?? 0;
+        internal int QueueProgress => _zdo?.GetInt(QueueProgressKey, 0) ?? 0;
+
+        internal List<string> GetQueue()
+        {
+            List<string> result = new List<string>(); string encoded = _zdo?.GetString(QueueKey, string.Empty) ?? string.Empty;
+            if (string.IsNullOrEmpty(encoded)) return result;
+            try { ZPackage p = new ZPackage(encoded); if (p.ReadInt() != 1) return result; int count = p.ReadInt(); if(count < 0 || count > 256) return result; for(int i=0;i<count;i++) result.Add(p.ReadString()); }
+            catch (System.Exception) { result.Clear(); }
+            return result;
+        }
 
         internal bool HasHomeBed => !HomeBed.IsNone();
 
@@ -88,6 +104,14 @@ namespace Kukolony.Villagers
         internal void SetStepIndex(int index) => _zdo.Set(StepKey, index);
 
         internal void SetActiveItem(string prefabName) => _zdo.Set(ActiveItemKey, prefabName);
+        internal void SetQueue(List<string> jobs)
+        {
+            ZPackage p = new ZPackage(); p.Write(1); p.Write(jobs.Count); foreach (string id in jobs) p.Write(id ?? string.Empty);
+            _zdo.Set(QueueKey, p.GetBase64()); SetQueuePosition(0); SetQueueAttempt(0); SetQueueProgress(0);
+        }
+        internal void SetQueuePosition(int position) => _zdo.Set(QueuePositionKey, position);
+        internal void SetQueueAttempt(int attempt) => _zdo.Set(QueueAttemptKey, attempt);
+        internal void SetQueueProgress(int progress) => _zdo.Set(QueueProgressKey, progress);
 
         /// <summary>
         ///     Net time this villager took its current target, used to expire claims held

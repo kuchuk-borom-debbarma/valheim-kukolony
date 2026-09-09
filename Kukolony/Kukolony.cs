@@ -30,11 +30,9 @@ namespace Kukolony
             ModConfig.Bind(Config);
             AddLocalization();
 
-            Jobs.JobLibrary.Load();
-            Gui.WorkPostPanel.Register();
             Gui.ColonyPanel.Register();
+            Gui.ColonyPicker.Register();
             VillagerPrefab.Register();
-            WorkPosts.WorkPostPrefab.Register();
             Colonies.ColonyPrefab.Register();
             _harmony.PatchAll(Assembly.GetExecutingAssembly());
 
@@ -43,7 +41,7 @@ namespace Kukolony
             gameObject.AddComponent<Debug.AutoBoot>();
             gameObject.AddComponent<Debug.VillagerSelfTest>();
             gameObject.AddComponent<Debug.PrefabProbe>();
-            gameObject.AddComponent<Debug.HaulJobSelfTest>();
+            gameObject.AddComponent<Debug.ColonySelfTest>();
             gameObject.AddComponent<Debug.DedicatedServerProbe>();
             gameObject.AddComponent<Debug.PanelScreenshot>();
 
@@ -54,13 +52,10 @@ namespace Kukolony
         {
             Localization.AddTranslation("English", "kukolony_villager", "Villager");
             Localization.AddTranslation("English", "kukolony_villager_bag", "Villager's bag");
-            Localization.AddTranslation("English", "kukolony_workpost", "Work Post");
-            Localization.AddTranslation("English", "kukolony_workpost_desc",
-                "Villagers nearby will work this post.");
             Localization.AddTranslation("English", "kukolony_colony", "Colony Hearth");
             Localization.AddTranslation("English", "kukolony_colony_desc",
-                "Records a colony: its people, storage, workstations and homes. "
-                + "Members can be anywhere - the hearth is a ledger, not a boundary.");
+                "Records a colony, its villagers, structures, jobs and presets. "
+                + "Only placed structures inside its live radius can be registered.");
         }
     }
 }

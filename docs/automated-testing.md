@@ -1,5 +1,13 @@
 # Automated testing — removing the human from the loop
 
+## Colony redesign coverage
+
+The config-gated self-driving suite covers structure registration, naming/search/sort,
+radius invalidation and capabilities; the two-launch persistence path; queue completion,
+failure, skip, count exhaustion and loop; portable/local presets; and all concrete jobs
+with full, invalid and concurrent targets. Claims and keep-alive require paired controls.
+Screenshot artifacts cover picker, structures, members/detail, jobs and presets.
+
 Verifying a Valheim mod normally means: build, launch, click through menus, load a world,
 do something, watch, describe what you saw. That does not scale, it is not repeatable, and
 "it looked fine" is not evidence.

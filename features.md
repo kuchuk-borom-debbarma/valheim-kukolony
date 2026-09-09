@@ -1,5 +1,8 @@
 # Kukolony — current features
 
+The current pre-release redesign uses colony-owned structure records and explicit villager
+job queues. Work posts, bed assignment and player-authored JSON job graphs are retired.
+
 Kukolony turns a Valheim base into a small working settlement. It is still in active
 development, but the features below are implemented and have been exercised by the
 in-game acceptance suite.

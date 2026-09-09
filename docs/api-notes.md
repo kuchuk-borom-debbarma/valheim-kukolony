@@ -1,5 +1,11 @@
 # API notes
 
+## Station-job verification gate
+
+Before enabling a station executor, run the in-game PrefabProbe and record the exact
+component and vanilla RPC contract here. Use ownership-safe inventory operations and
+vanilla RPCs; never mutate guessed internal ZDO keys.
+
 What we will actually call, read from the decompiled `assembly_valheim` (Unity
 6000.0.61f1) and `Jotunn.dll` 2.27.1. Line refs point into
 `.reference/assembly_valheim.decompiled.cs` (gitignored).

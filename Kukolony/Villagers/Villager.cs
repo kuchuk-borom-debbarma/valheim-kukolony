@@ -301,29 +301,43 @@ namespace Kukolony.Villagers
         }
 
         /// <summary>
-        ///     Binds to a work post if unemployed, then runs one step of its job.
+        ///     Executes the villager's explicit colony queue. There is deliberately no
+        ///     nearest-work-post fallback: a villager only works work that a player queued.
         /// </summary>
-        /// <returns>True if the villager is working, so idling should be skipped.</returns>
         private bool TryWork(float deltaTime)
         {
-            WorkPost post = ResolvePost();
-            if (post == null)
+            ZDO villagerZdo = _nview.GetZDO();
+            Colony colony = Colony.FindFor(villagerZdo);
+            if (colony == null)
             {
                 return false;
             }
-
-            post.EnsureDefaults();
-
-            Job job = JobLibrary.Find(post.State.JobId);
+            List<ColonyJobConfig> jobs = colony.State.GetJobs();
+            string id = QueueRunner.Current(State, jobs);
+            ColonyJobConfig job = jobs.Find(j => j.Id == id);
             if (job == null)
             {
                 return false;
             }
-
-            string doing = _jobRunner.Tick(job, new JobContext(this, _ai, _bag, post, deltaTime));
-            CurrentJob = post.State.JobId;
-            SetActivity(doing);
+            bool eligible = HasEligibleTarget(colony, job);
+            JobResult result = eligible ? JobResult.Running : JobResult.Skipped;
+            QueueRunner.Apply(State, jobs, result);
+            CurrentJob = ColonyJobCatalog.DisplayName(job.Type);
+            SetActivity(eligible ? "working: " + CurrentJob : "skipping: no eligible target");
             return true;
+        }
+
+        private static bool HasEligibleTarget(Colony colony, ColonyJobConfig job)
+        {
+            StructureCapability wanted = ColonyJobCatalog.RequiredCapability(job.Type);
+            foreach (StructureRecord record in colony.State.GetStructures())
+            {
+                if ((record.Capabilities & wanted) == 0 || !record.IsLiveIn(colony)) continue;
+                if (job.Targets == TargetMode.Ignore && job.SelectedStructures.Contains(record.Id)) continue;
+                if (job.Targets == TargetMode.Selected && !job.SelectedStructures.Contains(record.Id)) continue;
+                return true;
+            }
+            return job.Type == ColonyJobType.HaulLoose && job.Targets != TargetMode.Selected;
         }
 
         /// <summary>

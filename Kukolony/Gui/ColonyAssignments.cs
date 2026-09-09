@@ -3,6 +3,7 @@ using Kukolony.Colonies;
 using Kukolony.Core;
 using Kukolony.Villagers;
 using Kukolony.WorkPosts;
+using Kukolony.Jobs;
 using UnityEngine;
 
 namespace Kukolony.Gui
@@ -20,6 +21,14 @@ namespace Kukolony.Gui
     /// </summary>
     internal static class ColonyAssignments
     {
+        /// <summary>Assigns an ordered queue; unlike retired post binding this is explicit.</summary>
+        internal static bool SetQueue(ZDOID villager, List<string> jobIds)
+        {
+            ZDO villagerZdo = Claim(villager);
+            if (villagerZdo == null) return false;
+            new VillagerState(villagerZdo).SetQueue(jobIds);
+            return true;
+        }
         /// <summary>A bed belongs to exactly one villager. Stations are shared.</summary>
         internal static ZDOID HomeOwner(ColonyState colony, ZDOID bed)
         {

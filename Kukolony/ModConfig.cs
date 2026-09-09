@@ -14,6 +14,7 @@ namespace Kukolony
     {
         /// <summary>How far a villager may drift from home before walking back.</summary>
         internal static ConfigEntry<float> GoHomeRadius { get; private set; }
+        internal static ConfigEntry<float> ColonyRadius { get; private set; }
 
         /// <summary>How far villagers range from their work post.</summary>
         internal static ConfigEntry<float> WorkPostRadius { get; private set; }
@@ -51,6 +52,7 @@ namespace Kukolony
 
         /// <summary>Development aid. Off by default so it never fires for a normal install.</summary>
         internal static ConfigEntry<bool> DebugSpawnEnabled { get; private set; }
+        internal static ConfigEntry<KeyCode> ColonyPickerHotkey { get; private set; }
 
         /// <summary>Boot straight into a world and run the villager acceptance test.</summary>
         internal static ConfigEntry<bool> AutoTestEnabled { get; private set; }
@@ -88,6 +90,9 @@ namespace Kukolony
                 new ConfigDescription(
                     "How far a villager may wander from its home before it walks back, in metres.",
                     new AcceptableValueRange<float>(2f, 64f)));
+
+            ColonyRadius = config.Bind("1 - Colony", nameof(ColonyRadius), 48f,
+                new ConfigDescription("Live registration radius around a colony hearth. Registered records outside it remain visible but are ineligible.", new AcceptableValueRange<float>(8f, 128f)));
 
             WorkPostRadius = config.Bind(
                 "2 - Work posts",
@@ -173,6 +178,10 @@ namespace Kukolony
                 nameof(DebugSpawnEnabled),
                 false,
                 "Enable the Ctrl+Shift+K hotkey that spawns a villager in front of you. Development aid.");
+
+            ColonyPickerHotkey = config.Bind(
+                "1 - Colony", nameof(ColonyPickerHotkey), KeyCode.C,
+                "Press this key (outside chat) to open the colony picker.");
 
             AutoTestEnabled = config.Bind(
                 "9 - Development",

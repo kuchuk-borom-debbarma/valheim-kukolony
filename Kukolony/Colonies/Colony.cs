@@ -23,6 +23,8 @@ namespace Kukolony.Colonies
 
         internal ZDOID Id => Bind() && _nview.IsValid() ? _nview.GetZDO().m_uid : ZDOID.None;
 
+        internal float EffectiveRadius => ModConfig.ColonyRadius != null ? ModConfig.ColonyRadius.Value : 48f;
+
         private void Awake() => Instances.Add(this);
 
         private void OnDestroy() => Instances.Remove(this);
@@ -103,6 +105,27 @@ namespace Kukolony.Colonies
             return removed;
         }
 
+        internal bool RegisterStructure(StructureRecord record)
+        {
+            if (record == null || !record.IsLiveIn(this) || !Bind() || !_nview.IsValid()) return false;
+            _nview.ClaimOwnership();
+            List<StructureRecord> records = State.GetStructures();
+            int index = records.FindIndex(r => r.Id == record.Id);
+            if (index >= 0) records[index] = record; else records.Add(record);
+            State.SetStructures(records);
+            return true;
+        }
+
+        internal bool RemoveStructure(ZDOID id)
+        {
+            if (!Bind() || !_nview.IsValid()) return false;
+            _nview.ClaimOwnership();
+            List<StructureRecord> records = State.GetStructures();
+            bool removed = records.RemoveAll(r => r.Id == id) > 0;
+            if (removed) State.SetStructures(records);
+            return removed;
+        }
+
         /// <summary>
         ///     How far above the object the hover text sits. Valheim 1.0 added this to
         ///     Hoverable; zero keeps the vanilla placement.
@@ -124,9 +147,7 @@ namespace Kukolony.Colonies
             return Localization.instance.Localize(
                 $"$kukolony_colony\n<color=orange>{name}</color>\n"
                 + $"<color=grey>{state.CountMembers(ColonyMemberKind.Villager)} villagers, "
-                + $"{state.CountMembers(ColonyMemberKind.Container)} storage, "
-                + $"{state.CountMembers(ColonyMemberKind.Station)} stations, "
-                + $"{state.CountMembers(ColonyMemberKind.Home)} homes</color>"
+                + $"{state.GetStructures().Count} registered structures</color>"
                 + "\n[<color=yellow><b>$KEY_Use</b></color>] manage");
         }
 

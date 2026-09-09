@@ -61,9 +61,10 @@ namespace Kukolony.Debug
                 yield break;
             }
 
-            // Let the villagers tick once so they have names and assignments to show.
+            Log.Info("[Screenshot] scenario built");
+
+            // Let villagers tick once so their persisted identity is visible.
             yield return new WaitForSeconds(3f);
-            AssignEveryone(colony);
 
             ColonyPanel panel = ColonyPanel.Instance;
             if (panel == null)
@@ -73,15 +74,18 @@ namespace Kukolony.Debug
                 yield break;
             }
 
+            Log.Info("[Screenshot] opening panel");
+
             panel.Open(colony);
             yield return new WaitForSeconds(1.5f);
 
+            Log.Info("[Screenshot] capturing colony panel");
             yield return Capture("colony-panel.png");
 
-            // And the picker mid-assignment, which is the busiest the panel ever gets.
-            panel.ShowHomePickerForTest(0);
+            // Capture the registered-structure state as well as the member list.
             yield return new WaitForSeconds(1f);
-            yield return Capture("colony-panel-assigning.png");
+            Log.Info("[Screenshot] capturing structures panel");
+            yield return Capture("colony-panel-structures.png");
 
             panel.Close();
             yield return new WaitForSeconds(0.5f);
@@ -100,56 +104,20 @@ namespace Kukolony.Debug
 
             colony.EnsureNamed();
 
-            Register(colony, ColonyMemberKind.Station,
-                Spawn<WorkPosts.WorkPost>(WorkPosts.WorkPostPrefab.PrefabName, origin + Vector3.right * 5f));
-            Register(colony, ColonyMemberKind.Container,
-                Spawn<Container>("piece_chest_wood", origin + Vector3.right * 8f));
-
-            for (int i = 0; i < 3; i++)
-            {
-                Register(colony, ColonyMemberKind.Home,
-                    Spawn<Bed>("bed", origin + Vector3.left * (5f + i * 3f)));
-            }
+            Container chest = Spawn<Container>("piece_chest_wood", origin + Vector3.right * 8f);
+            if (chest != null && chest.TryGetComponent(out ZNetView chestView))
+                colony.RegisterStructure(new StructureRecord { Id = chestView.GetZDO().m_uid, Name = "Screenshot chest", Prefab = chest.gameObject.name, Capabilities = StructureCapability.Container });
 
             for (int i = 0; i < 5; i++)
             {
-                Register(colony, ColonyMemberKind.Villager,
-                    Spawn<Villager>(VillagerPrefab.PrefabName, origin + Vector3.back * (3f + i)));
+                Villager villager = Spawn<Villager>(VillagerPrefab.PrefabName, origin + Vector3.back * (3f + i));
+                if (villager != null && villager.TryGetComponent(out ZNetView view))
+                    colony.Register(ColonyMemberKind.Villager, view);
             }
 
             return colony;
         }
 
-        /// <summary>Gives the rows something to show rather than a column of dashes.</summary>
-        private static void AssignEveryone(Colony colony)
-        {
-            ColonyState state = colony.State;
-            List<ZDOID> villagers = state.GetMembers(ColonyMemberKind.Villager);
-            List<ZDOID> homes = state.GetMembers(ColonyMemberKind.Home);
-            List<ZDOID> stations = state.GetMembers(ColonyMemberKind.Station);
-
-            for (int i = 0; i < villagers.Count; i++)
-            {
-                if (i < homes.Count)
-                {
-                    ColonyAssignments.AssignHome(state, villagers[i], homes[i]);
-                }
-
-                if (stations.Count > 0 && i % 2 == 0)
-                {
-                    ColonyAssignments.AssignStation(villagers[i], stations[0]);
-                }
-            }
-        }
-
-        private static void Register<T>(Colony colony, ColonyMemberKind kind, T component)
-            where T : Component
-        {
-            if (component != null && component.TryGetComponent(out ZNetView view) && view.IsValid())
-            {
-                colony.Register(kind, view);
-            }
-        }
 
         private static T Spawn<T>(string prefabName, Vector3 position) where T : Component
         {

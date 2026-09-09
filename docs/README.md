@@ -1,5 +1,9 @@
 # Kukolony
 
+The current colony model uses a live-radius structure registry and colony-owned concrete
+job queues. See [Colonies](colonies.md), [Structure registry](structure-registry.md), and
+[Job catalog](job-catalog.md). Work posts and JSON job graphs are retired.
+
 A colony management system for Valheim.
 
 Your base is already a village — it has smelters, kilns, cooking stations, workbenches,
