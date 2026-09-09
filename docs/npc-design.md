@@ -199,3 +199,41 @@ full fidelity — durability, quality, variant, crafter, custom data.
 
 **Containers auto-save, but only for the owner.** `Container.OnContainerChanged` calls
 `Save()` only when `IsOwner()`.
+
+
+---
+
+## 5. Implementation findings
+
+Three things only surfaced by building it. All are the kind of detail that costs an
+afternoon if you meet them without knowing what you are looking at.
+
+**The Player prefab is stored inactive.** The game activates player objects explicitly when
+spawning them. A clone inherits `activeSelf == false`, an inactive instance never runs
+`Awake`, its `ZNetView` never creates a ZDO, and the villager is completely inert while
+looking perfectly well-formed in the component list. Fix: `prefab.SetActive(true)` after
+cloning. Jotunn keeps prefabs under an inactive container, so this does not wake the
+prefab itself.
+
+**The Player prefab is not persistent.** `ZNetView.m_persistent` is false, because player
+characters live in their own profile rather than as world ZDOs. Inheriting that is fatal:
+`ZNetScene.RemoveObjects` destroys the ZDO of any non-persistent object leaving the active
+area. Fix: set `m_persistent = true` (base was `persistent=False type=Prioritized`).
+
+**A new player starts in rags, and the clone inherits the kit.**
+`Humanoid.GiveDefaultItems()` hands out `m_defaultItems` on spawn, which for the Player
+prefab is the starting rags. Those equip *over* whatever appearance we chose, so villagers
+silently changed clothes on their first reload. Fix: clear `m_defaultItems`,
+`m_randomWeapon`, `m_randomArmor`, `m_randomShield`, `m_randomSets` and `m_randomItems` on
+the clone, leaving VisEquipment as the only thing that dresses a villager.
+
+Field transplant volume, for reference: **172 Character fields and 47 Humanoid fields**
+copied from the Player component.
+
+### Verifying appearance
+
+`VisEquipment` stores equipment slots as the prefab name's **stable hash**, not the name —
+`zdo.GetString(ZDOVars.s_chestItem)` returns empty and reads as "not dressed". Use
+`GetInt`. Its live `m_chestItem`/`m_hairItem` fields sync from the ZDO over several frames,
+so sampling them early also reads empty. Compare ZDO hashes across runs; that is what
+proves an appearance is stable.

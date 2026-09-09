@@ -21,6 +21,8 @@ namespace Kukolony.Villagers
         private MonsterAI _ai;
         private Character _character;
         private ZNetView _nview;
+        private VisEquipment _visEquipment;
+        private Container _bag;
 
         private bool _pathFailureReported;
 
@@ -51,7 +53,12 @@ namespace Kukolony.Villagers
                 : $"Villager '{State.Name}' is now {activity} ({detail})");
         }
 
-        internal VillagerState State => new VillagerState(_nview != null && _nview.IsValid() ? _nview.GetZDO() : null);
+        /// <summary>
+        ///     Binds on demand. Callers outside the AI tick - hover text, diagnostics -
+        ///     can read state before the villager has ever ticked.
+        /// </summary>
+        internal VillagerState State =>
+            new VillagerState(Bind() && _nview.IsValid() ? _nview.GetZDO() : null);
 
         /// <summary>
         ///     Runs one AI step.
@@ -73,6 +80,10 @@ namespace Kukolony.Villagers
                 return false;
             }
 
+            // Every client needs the bag so it can read the contents; only the owner
+            // may write to it.
+            EnsureBag();
+
             // AI runs only on the ZDO owner (BaseAI.UpdateAI enforces the same rule).
             // Ownership can move between ticks, so this is never cached.
             if (!_nview.IsOwner())
@@ -83,6 +94,7 @@ namespace Kukolony.Villagers
             // Identity first: everything below reports by name, and taming used to log
             // an empty one because it ran before the villager had been named.
             EnsureIdentity();
+            EnsureAppearance();
             EnsureTamed();
             StayNearHome(deltaTime);
             return true;
@@ -112,7 +124,42 @@ namespace Kukolony.Villagers
                 return false;
             }
 
-            return TryGetComponent(out _nview);
+            if (!TryGetComponent(out _nview))
+            {
+                return false;
+            }
+
+            TryGetComponent(out _visEquipment);
+            return true;
+        }
+
+        /// <summary>
+        ///     A bag that survives reloads and ownership transfer. Attached on every
+        ///     client, not just the owner, so non-owners can read its contents.
+        /// </summary>
+        private void EnsureBag()
+        {
+            if (_bag == null)
+            {
+                _bag = VillagerInventory.Attach(gameObject, _nview);
+            }
+        }
+
+        /// <summary>
+        ///     Rolls a face and outfit once. VisEquipment persists the result to the ZDO
+        ///     by itself, so this never needs to run again.
+        /// </summary>
+        private void EnsureAppearance()
+        {
+            VillagerState state = State;
+            if (state.HasAppearance || _visEquipment == null)
+            {
+                return;
+            }
+
+            VillagerAppearance.Randomise(_visEquipment);
+            state.MarkAppearanceRolled();
+            Log.Info($"Villager '{state.Name}' rolled its appearance");
         }
 
         /// <summary>
@@ -205,6 +252,49 @@ namespace Kukolony.Villagers
 
                     break;
             }
+        }
+
+        /// <summary>
+        ///     Explains why this villager is not operating. Diagnostics only - a villager
+        ///     that fails to bind is silent by design, which makes it invisible when
+        ///     something is wrong.
+        /// </summary>
+        internal string Diagnose()
+        {
+            if (!TryGetComponent(out MonsterAI _))
+            {
+                return "no MonsterAI component";
+            }
+
+            if (!TryGetComponent(out Character _))
+            {
+                return "no Character component";
+            }
+
+            if (!TryGetComponent(out ZNetView nview))
+            {
+                return "no ZNetView component";
+            }
+
+            if (nview.m_zdo == null)
+            {
+                // A prefab registered under Jotunn's container is a scene object too, so
+                // it can be mistaken for a spawned instance. The "(Clone)" suffix and the
+                // active flags tell the two apart.
+                return $"ZNetView never created a ZDO - name='{gameObject.name}' "
+                       + $"activeSelf={gameObject.activeSelf} "
+                       + $"activeInHierarchy={gameObject.activeInHierarchy} "
+                       + $"parent='{(transform.parent != null ? transform.parent.name : "<none>")}' "
+                       + $"scene='{gameObject.scene.name}'";
+            }
+
+            if (!nview.m_zdo.IsValid())
+            {
+                return $"ZDO exists but was invalidated (uid={nview.m_zdo.m_uid}, "
+                       + $"persistent={nview.m_zdo.Persistent}, owner={nview.m_zdo.HasOwner()})";
+            }
+
+            return "bound ok";
         }
 
         /// <summary>Hover line: who this is and what they are doing.</summary>

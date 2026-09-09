@@ -21,6 +21,7 @@ namespace Kukolony.Villagers
         // on a 20Hz path. Prefixed to stay clear of vanilla and other mods' keys.
         private static readonly int HomeKey = "kukolony.home".GetStableHashCode();
         private static readonly int NameKey = "kukolony.name".GetStableHashCode();
+        private static readonly int AppearanceKey = "kukolony.appearance".GetStableHashCode();
 
         private readonly ZDO _zdo;
 
@@ -32,16 +33,25 @@ namespace Kukolony.Villagers
         internal bool IsValid => _zdo != null;
 
         /// <summary>Where this villager belongs. Vector3.zero means "not yet assigned".</summary>
-        internal Vector3 Home => _zdo.GetVec3(HomeKey, Vector3.zero);
+        internal Vector3 Home => _zdo?.GetVec3(HomeKey, Vector3.zero) ?? Vector3.zero;
 
         internal bool HasHome => Home != Vector3.zero;
 
         /// <summary>Display name. Empty until the owner assigns one.</summary>
-        internal string Name => _zdo.GetString(NameKey, string.Empty);
+        internal string Name => _zdo?.GetString(NameKey, string.Empty) ?? string.Empty;
 
         internal bool HasName => !string.IsNullOrEmpty(Name);
 
+        /// <summary>
+        ///     Whether this villager has already rolled its face and outfit. VisEquipment
+        ///     persists the appearance itself, but nothing there says "chosen" versus
+        ///     "default", so we record the decision.
+        /// </summary>
+        internal bool HasAppearance => _zdo?.GetBool(AppearanceKey, false) ?? false;
+
         internal void SetHome(Vector3 position) => _zdo.Set(HomeKey, position);
+
+        internal void MarkAppearanceRolled() => _zdo.Set(AppearanceKey, true);
 
         internal void SetName(string name) => _zdo.Set(NameKey, name);
     }
