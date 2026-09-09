@@ -17,10 +17,15 @@
 mono_crash.*
 
 # Build results
-[Dd]ebug/
-[Dd]ebugPublic/
-[Rr]elease/
-[Rr]eleases/
+# Anchored to build-output locations only. Unanchored, these match any directory
+# of that name at any depth - which silently swallowed the whole Kukolony/Debug
+# source namespace, so the tree did not compile from a fresh clone.
+[Bb]in/[Dd]ebug/
+[Bb]in/[Dd]ebugPublic/
+[Bb]in/[Rr]elease/
+[Bb]in/[Rr]eleases/
+[Oo]bj/[Dd]ebug/
+[Oo]bj/[Rr]elease/
 x64/
 x86/
 [Ww][Ii][Nn]32/
