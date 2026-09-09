@@ -24,6 +24,16 @@ namespace Kukolony
         /// <summary>How far a villager will look for a post to work at.</summary>
         internal static ConfigEntry<float> PostBindRadius { get; private set; }
 
+        /// <summary>
+        ///     Whether villagers reserve what they are working on. Off is the old
+        ///     behaviour and exists so the claim test can be shown to fail without it -
+        ///     an assertion that has never failed proves nothing.
+        /// </summary>
+        internal static ConfigEntry<bool> ClaimsEnabled { get; private set; }
+
+        /// <summary>How long a villager may hold a target before others may take it.</summary>
+        internal static ConfigEntry<float> ClaimTtlSeconds { get; private set; }
+
         /// <summary>Development aid. Off by default so it never fires for a normal install.</summary>
         internal static ConfigEntry<bool> DebugSpawnEnabled { get; private set; }
 
@@ -79,6 +89,22 @@ namespace Kukolony
                 new ConfigDescription(
                     "How far a villager will look for a work post to bind itself to, in metres.",
                     new AcceptableValueRange<float>(4f, 128f)));
+
+            ClaimsEnabled = config.Bind(
+                "2 - Work posts",
+                nameof(ClaimsEnabled),
+                true,
+                "Villagers reserve what they are working on so two never walk to the same item. "
+                + "Disable only to compare against the unclaimed behaviour.");
+
+            ClaimTtlSeconds = config.Bind(
+                "2 - Work posts",
+                nameof(ClaimTtlSeconds),
+                30f,
+                new ConfigDescription(
+                    "How long a villager may reserve something before other villagers may take it. "
+                    + "Stops a stuck villager locking a resource forever.",
+                    new AcceptableValueRange<float>(5f, 300f)));
 
             DebugSpawnEnabled = config.Bind(
                 "9 - Development",

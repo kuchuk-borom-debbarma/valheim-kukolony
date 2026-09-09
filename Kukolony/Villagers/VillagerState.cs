@@ -28,6 +28,7 @@ namespace Kukolony.Villagers
         private static readonly KeyValuePair<int, int> PostKey = ZDO.GetHashZDOID("kukolony.post");
         private static readonly int StepKey = "kukolony.step".GetStableHashCode();
         private static readonly KeyValuePair<int, int> StepTargetKey = ZDO.GetHashZDOID("kukolony.step.target");
+        private static readonly int ClaimedSinceKey = "kukolony.step.since".GetStableHashCode();
 
         private readonly ZDO _zdo;
 
@@ -72,7 +73,26 @@ namespace Kukolony.Villagers
 
         internal void SetStepIndex(int index) => _zdo.Set(StepKey, index);
 
-        internal void SetStepTarget(ZDOID target) => _zdo.Set(StepTargetKey, target);
+        /// <summary>
+        ///     Net time this villager took its current target, used to expire claims held
+        ///     by a villager that got stuck. Net time rather than local time because it is
+        ///     shared across clients.
+        /// </summary>
+        internal double ClaimedSince => _zdo?.GetLong(ClaimedSinceKey, 0L) ?? 0L;
+
+        /// <summary>
+        ///     Sets the current target and stamps when it was taken.
+        ///
+        ///     The timestamp is written here rather than at call sites so a future step
+        ///     cannot set a target and silently create a claim that never expires.
+        /// </summary>
+        internal void SetStepTarget(ZDOID target)
+        {
+            _zdo.Set(StepTargetKey, target);
+            _zdo.Set(ClaimedSinceKey, target.IsNone() || ZNet.instance == null
+                ? 0L
+                : (long)ZNet.instance.GetTimeSeconds());
+        }
 
         internal void MarkAppearanceRolled() => _zdo.Set(AppearanceKey, true);
 

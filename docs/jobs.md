@@ -79,10 +79,57 @@ Cloned prefabs can also come back **inactive**, and an inactive instance never r
 so its `ZNetView` never creates a ZDO. `SetActive(true)` after cloning. This caught both
 the villager and the work post.
 
+## Target claims
+
+A villager's current step target **is** its reservation. `TargetClaims.IsClaimedByOther`
+walks the villager registry and skips anything another villager is already working on.
+No separate claim store, and it cleans itself up, because the target is already cleared on
+pickup, on deposit and on failure.
+
+The claim is deliberately **not** written onto the target. `ZDO.Set` ignores its
+`okForNotOwner` argument, so a write to a ZDO we do not own lands locally and is clobbered
+on the next sync from its owner — vanilla's own `Container.SetInUse` gates on `IsOwner()`
+for the same reason. Claiming a loose item that way would mean an ownership round trip
+before the villager had even started walking.
+
+Exclusivity is decided by **who asks**, not by tagging the target. Find steps ask, so two
+villagers never walk to the same log. Deposit steps do not, so any number of villagers can
+share one chest.
+
+`SetStepTarget` stamps `kukolony.step.since` with net time, and a claim older than
+`ClaimTtlSeconds` is ignored — otherwise a stuck villager would lock a resource forever.
+
+### Measured
+
+Three villagers, two logs, one post. `ClaimsEnabled` exists so the difference can be
+demonstrated rather than asserted:
+
+| | colliding samples | cycle restarts | time |
+|---|---|---|---|
+| Claims on | 0 | 5 | 16s |
+| Claims off | 795 | 10 | 27s |
+
+## A misdiagnosis worth recording
+
+The waste that prompted all this — villagers cycling `0:find → 1:move → 0:find` — was
+**not** contention. It was `MoveToTargetStep` treating a cold-start path failure as fatal.
+
+`BaseAI.FindPath` is throttled and returns false until it has actually run, so the first
+tick after taking a target reports failure even for a perfectly reachable target.
+`VillagerMovement` correctly reports that as `PathFailed`, and the step correctly gave up —
+so a villager restarted its cycle the instant it set off.
+
+The fix is a three second grace period: a missing path is retried, a missing *target* still
+fails immediately, because that will not fix itself. Restarts fell from 11-12 to 5.
+
+This was only caught by running the control with claims disabled and finding it **also
+passed** — the assertion was measuring the chest, which is shared on purpose. A test that
+has never failed proves nothing.
+
 ## Known gaps
 
-- **No target reservation.** Two villagers on one post can pick the same dropped item; the
-  loser's target vanishes, its move step fails, and it restarts the cycle. Correct, but
-  wasteful — observed directly in testing. A claim on the target ZDO is the fix.
 - **A failed cycle keeps whatever is in the bag.** Items are not dropped, and the next
   successful cycle deposits them, but a villager can accumulate if a post is misconfigured.
+- **Claims are best-effort across clients.** A villager simulated on another peer is
+  visible with its target, but two clients can still race inside one sync interval. That
+  degrades to fail-and-retry, not corruption.

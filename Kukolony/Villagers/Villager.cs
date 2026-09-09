@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Kukolony.Core;
 using Kukolony.Jobs;
 using Kukolony.WorkPosts;
@@ -20,6 +21,13 @@ namespace Kukolony.Villagers
         /// <summary>How close to home counts as home. Avoids jittering on the boundary.</summary>
         private const float HomeStopDistance = 2f;
 
+        /// <summary>
+        ///     Every loaded villager. Mirrors WorkPost.Instances and vanilla's
+        ///     BaseAI.Instances - iterating a list beats scanning the scene, and claim
+        ///     checks run inside the find step.
+        /// </summary>
+        internal static List<Villager> Instances { get; } = new List<Villager>();
+
         private MonsterAI _ai;
         private Character _character;
         private ZNetView _nview;
@@ -31,6 +39,13 @@ namespace Kukolony.Villagers
 
         /// <summary>Short description of what this villager is doing, for hover text.</summary>
         internal string Activity { get; private set; } = "idle";
+
+        private void Awake() => Instances.Add(this);
+
+        /// <summary>
+        ///     Must remove, or a destroyed villager keeps holding its claim forever.
+        /// </summary>
+        private void OnDestroy() => Instances.Remove(this);
 
         /// <summary>
         ///     Records what a villager is doing, logging only when it changes.

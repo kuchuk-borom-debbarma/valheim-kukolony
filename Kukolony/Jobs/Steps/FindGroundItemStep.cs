@@ -44,6 +44,13 @@ namespace Kukolony.Jobs.Steps
                     continue;
                 }
 
+                // Someone else is already walking to this one. Without the check every
+                // villager converges on the nearest item and all but one wastes the trip.
+                if (TargetClaims.IsClaimedByOther(nview.GetZDO().m_uid, context.Villager))
+                {
+                    continue;
+                }
+
                 closest = drop;
                 closestDistance = distance;
             }

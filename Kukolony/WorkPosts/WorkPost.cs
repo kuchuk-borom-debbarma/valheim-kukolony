@@ -127,8 +127,9 @@ namespace Kukolony.WorkPosts
                 return 0;
             }
 
-            return Object.FindObjectsByType<Villager>(FindObjectsSortMode.None)
-                .Count(v => v != null && v.State.Post == id);
+            // Registry rather than a scene scan: this runs from hover text, every frame
+            // the player looks at a post.
+            return Villager.Instances.Count(v => v != null && v.State.Post == id);
         }
     }
 }
