@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Kukolony.Core;
+using Kukolony.Gui;
 using Kukolony.Jobs;
 using Kukolony.Villagers;
 using Kukolony.WorkPosts;
@@ -54,7 +55,6 @@ namespace Kukolony.Debug
         /// </summary>
         private const float FarChestDistance = 140f;
 
-        private Colonies.Colony _colony;
         private Vector3 _colonyCentre;
         private int _rawCollisions;
         private string _rawSample;
@@ -188,6 +188,7 @@ namespace Kukolony.Debug
             }
 
             _report.Check(true, $"dropped {DroppedStacks} {HauledItem} on the ground");
+            CheckAssignments();
             CheckJobDefinitions();
             CheckPanel();
             GoAway();
@@ -309,6 +310,91 @@ namespace Kukolony.Debug
             _report.Check(containers.Count > 0, "destination picker finds containers",
                 $"{containers.Count} container(s) near the chest");
         }
+
+        /// <summary>
+        ///     Assignment rules, exercised through the same ColonyAssignments API the
+        ///     panel's buttons call - the closest the harness can get to a click.
+        ///
+        ///     Everything here addresses villagers by ZDOID and never touches a
+        ///     GameObject, which is also the proof that a villager who is nowhere near a
+        ///     player can still be assigned.
+        /// </summary>
+        private void CheckAssignments()
+        {
+            if (_hearth == null || _villagers.Count < 2)
+            {
+                return;
+            }
+
+            Colonies.ColonyState colony = _hearth.State;
+
+            // Two beds, so the steal has something to move between.
+            List<ZDOID> beds = new List<ZDOID>();
+            for (int i = 0; i < 2; i++)
+            {
+                Bed bed = Spawn<Bed>("bed", _colonyCentre + Vector3.left * (6f + i * 3f));
+                if (bed != null && bed.TryGetComponent(out ZNetView bedView) && bedView.IsValid())
+                {
+                    _hearth.Register(Colonies.ColonyMemberKind.Home, bedView);
+                    beds.Add(bedView.GetZDO().m_uid);
+                }
+            }
+
+            _report.Check(beds.Count == 2, "two beds registered as colony homes", $"{beds.Count}");
+            if (beds.Count < 2)
+            {
+                return;
+            }
+
+            ZDOID first = ZdoIdOf(_villagers[0]);
+            ZDOID second = ZdoIdOf(_villagers[1]);
+
+            // 1. Assign, and the villager's home should now resolve to the bed.
+            ColonyAssignments.AssignHome(colony, first, beds[0]);
+            _report.Check(_villagers[0].State.HomeBed == beds[0], "villager took the assigned bed");
+
+            Vector3 bedPosition = ZDOMan.instance.GetZDO(beds[0]).GetPosition();
+            float homeError = Utils.DistanceXZ(_villagers[0].ResolveHomeForTest(), bedPosition);
+            _report.Check(homeError < 1f, "home resolves to the bed, not the spawn position",
+                $"{homeError:F1}m from the bed");
+
+            // 2. The steal - the rule most likely to be got wrong.
+            ColonyAssignments.AssignHome(colony, second, beds[0]);
+            _report.Check(_villagers[1].State.HomeBed == beds[0], "reassigning moves the bed");
+            _report.Check(!_villagers[0].State.HasHomeBed,
+                "the previous owner lost the bed rather than sharing it");
+
+            // 3. Clearing returns a villager to unassigned behaviour.
+            ColonyAssignments.ClearHome(second);
+            _report.Check(!_villagers[1].State.HasHomeBed, "clearing a home unassigns it");
+            _report.Check(ColonyAssignments.HomeOwner(colony, beds[0]).IsNone(),
+                "the bed reads as free again");
+
+            // 4. Stations are shared, unlike beds.
+            if (_post != null && _post.TryGetComponent(out ZNetView postView) && postView.IsValid())
+            {
+                ZDOID station = postView.GetZDO().m_uid;
+                ColonyAssignments.AssignStation(first, station);
+                ColonyAssignments.AssignStation(second, station);
+
+                _report.Check(_villagers[0].State.Post == station && _villagers[1].State.Post == station,
+                    "two villagers can share one workstation");
+                _report.Check(ColonyAssignments.StationWorkerCount(colony, station) >= 2,
+                    "the station reports both workers",
+                    $"{ColonyAssignments.StationWorkerCount(colony, station)}");
+            }
+
+            // 5. Assignment addressed purely by ZDOID, never touching a GameObject.
+            ColonyAssignments.AssignHome(colony, first, beds[1]);
+            ZDO byIdOnly = ZDOMan.instance.GetZDO(first);
+            _report.Check(byIdOnly != null && new VillagerState(byIdOnly).HomeBed == beds[1],
+                "a villager can be assigned through its ZDO alone (works when not loaded)");
+        }
+
+        private static ZDOID ZdoIdOf(Villager villager) =>
+            villager != null && villager.TryGetComponent(out ZNetView view) && view.IsValid()
+                ? view.GetZDO().m_uid
+                : ZDOID.None;
 
         /// <summary>
         ///     Stage B assertions: the job in use must have come from a definition file,

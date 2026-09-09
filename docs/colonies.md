@@ -78,6 +78,37 @@ Villagers take an explicit home and workstation, and fall back when unassigned:
   *belonging to its colony*. Membership is a more predictable scoping rule than a distance,
   and a villager never wanders off to another settlement's post.
 
+## Assigning from the panel
+
+Each villager gets a row with a **home** and a **work** button. Clicking either turns the
+panel's picker strip into a chooser for that villager.
+
+- **Homes are exclusive.** One villager per bed. Assigning a bed that is taken *steals* it,
+  and the previous owner reverts to spawn-position behaviour. That is destructive, so the
+  picker labels every bed with its current owner before you click, and the reassignment is
+  logged.
+- **Workstations are shared.** Several villagers on one post already works, because
+  `TargetClaims` stops them contending over the same item, so nothing is stolen and labels
+  show how many are working each.
+- **The picker only offers what the colony owns.** Adding a building and assigning it stay
+  two separate steps, so a colony never grows as a side effect of assignment.
+- **A "- none -" row clears an assignment**, returning the villager to spawn-position home
+  and to claiming the nearest post in its colony.
+
+Beds and posts have no names in Valheim, so they are labelled by their index in the
+colony's list — stable, because the list order is — plus distance from the hearth.
+
+### It works on villagers who are not loaded
+
+Everything is addressed by ZDOID and read through `ZDOMan`, never through a GameObject.
+That is not incidental: managing a colony from the far side of the map is the point of
+colonies, and a panel that only worked on loaded villagers would be useless for the case it
+exists to serve. Writing to such a ZDO takes ownership first, the same rule everything else
+here follows.
+
+The rules live in `Gui/ColonyAssignments`, not in the click handlers, which is what lets
+the harness test them — it calls exactly what the buttons call.
+
 ## The cost, and why it is shown rather than capped
 
 With no radius, nothing bounds keep-alive cost except the zone cap. A chest assigned 5km

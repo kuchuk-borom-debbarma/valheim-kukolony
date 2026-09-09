@@ -419,6 +419,13 @@ namespace Kukolony.Villagers
         }
 
         /// <summary>
+        ///     Where this villager would walk to when idle. Exposed for the acceptance
+        ///     test, which has to check the assigned bed is actually used rather than
+        ///     merely recorded.
+        /// </summary>
+        internal Vector3 ResolveHomeForTest() => ResolveHome(State);
+
+        /// <summary>
         ///     Explains why this villager is not operating. Diagnostics only - a villager
         ///     that fails to bind is silent by design, which makes it invisible when
         ///     something is wrong.
