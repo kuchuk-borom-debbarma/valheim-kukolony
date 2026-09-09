@@ -18,6 +18,48 @@ namespace Kukolony.Jobs
     internal enum TargetMode { All, Selected, Ignore }
     internal enum JobResult { Running, Completed, Failed, Skipped }
 
+    // "Customisation" is the player-facing term.  These typed values are the
+    // contract used to validate a pipeline without exposing an untyped JSON editor.
+    internal enum JobCustomisation { ItemFilter, Target, Source, Destination, StockLimit, Movement, Reservation }
+    internal enum JobPieceKind { Start, StopAtStockLimit, FindLooseItem, SelectSource, SelectTarget, MoveToTarget, PickUp, TakeItem, PutItem, OperateStation, End }
+
+    internal sealed class JobPiece
+    {
+        internal JobPieceKind Kind;
+        internal StructureCapability Capability;
+        internal JobPiece Clone() => new JobPiece { Kind = Kind, Capability = Capability };
+    }
+
+    internal static class JobPipeline
+    {
+        internal static List<JobPiece> For(ColonyJobType type)
+        {
+            List<JobPiece> pieces = new List<JobPiece> { new JobPiece { Kind = JobPieceKind.Start }, new JobPiece { Kind = JobPieceKind.StopAtStockLimit } };
+            switch (type)
+            {
+                case ColonyJobType.HaulLoose:
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.FindLooseItem }); pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget }); pieces.Add(new JobPiece { Kind = JobPieceKind.PickUp }); pieces.Add(new JobPiece { Kind = JobPieceKind.SelectTarget, Capability = StructureCapability.Container }); pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget }); pieces.Add(new JobPiece { Kind = JobPieceKind.PutItem }); break;
+                case ColonyJobType.Transfer:
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.SelectSource, Capability = StructureCapability.Container }); pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget }); pieces.Add(new JobPiece { Kind = JobPieceKind.TakeItem }); pieces.Add(new JobPiece { Kind = JobPieceKind.SelectTarget, Capability = StructureCapability.Container }); pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget }); pieces.Add(new JobPiece { Kind = JobPieceKind.PutItem }); break;
+                default:
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.SelectTarget, Capability = ColonyJobCatalog.RequiredCapability(type) }); pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget }); pieces.Add(new JobPiece { Kind = JobPieceKind.OperateStation, Capability = ColonyJobCatalog.RequiredCapability(type) }); break;
+            }
+            pieces.Add(new JobPiece { Kind = JobPieceKind.End }); return pieces;
+        }
+
+        internal static bool IsValid(ColonyJobConfig job, out string message)
+        {
+            List<JobPiece> pieces = job.Pieces;
+            if (pieces.Count < 2 || pieces[0].Kind != JobPieceKind.Start || pieces[pieces.Count - 1].Kind != JobPieceKind.End) { message = "A job must start with Start and end with End."; return false; }
+            for (int i = 1; i < pieces.Count; i++)
+                if (pieces[i].Kind == JobPieceKind.PickUp && !HasBefore(pieces, i, JobPieceKind.FindLooseItem) ||
+                    pieces[i].Kind == JobPieceKind.TakeItem && !HasBefore(pieces, i, JobPieceKind.SelectSource) ||
+                    pieces[i].Kind == JobPieceKind.PutItem && !HasBefore(pieces, i, JobPieceKind.SelectTarget)) { message = "This piece is missing compatible customisation from an earlier selection piece."; return false; }
+            message = string.Empty; return true;
+        }
+        private static bool HasBefore(List<JobPiece> pieces, int index, JobPieceKind kind) { for (int i = 0; i < index; i++) if (pieces[i].Kind == kind) return true; return false; }
+    }
+
     internal sealed class ColonyJobConfig
     {
         internal string Id = Guid.NewGuid().ToString("N");
@@ -33,6 +75,7 @@ namespace Kukolony.Jobs
         internal bool Reservations = true;
         internal float SearchRadius = 32f;
         internal float StopDistance = 2f;
+        internal readonly List<JobPiece> Pieces = new List<JobPiece>();
 
         internal ColonyJobConfig Clone(bool includeTargets)
         {
@@ -52,6 +95,8 @@ namespace Kukolony.Jobs
             };
             copy.ItemFilters.AddRange(ItemFilters);
             if (includeTargets) copy.SelectedStructures.AddRange(SelectedStructures);
+            foreach (JobPiece piece in Pieces) copy.Pieces.Add(piece.Clone());
+            if (copy.Pieces.Count == 0) copy.Pieces.AddRange(JobPipeline.For(copy.Type));
             return copy;
         }
     }
@@ -104,6 +149,7 @@ namespace Kukolony.Jobs
                         break;
                 }
                 jobs.Add(job);
+                job.Pieces.AddRange(JobPipeline.For(type));
             }
             return jobs;
         }

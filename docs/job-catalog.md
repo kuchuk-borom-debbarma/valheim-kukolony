@@ -1,4 +1,11 @@
-# Job catalog
+# Job catalog and job pieces
+
+The player-facing editor composes linear pipelines from these pieces: Start, End,
+Stop at stock limit, Find loose item, Select source container, Select target structure,
+Move to target, Pick up loose item, Take matching item, Put carried item, and Operate
+verified station. Each is configured through guided customisation fields and only accepts
+compatible earlier outputs. This catalog intentionally excludes generic scripting,
+branches, and loops.
 
 Every card below is implemented as a concrete executor. Common controls include name,
 count, reservations, movement distance, item filters, and eligible-target mode.

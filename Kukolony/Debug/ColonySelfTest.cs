@@ -104,6 +104,14 @@ namespace Kukolony.Debug
             jobs[0].StockLimit = 10;
             colony.State.SetJobs(jobs);
             report.Check(colony.State.GetJobs().Count == 7, "all seven concrete job configurations persist");
+            report.Check(jobs.All(job => JobPipeline.IsValid(job, out _) && job.Pieces.Count >= 3),
+                "starter jobs are valid typed piece pipelines");
+            ColonyJobConfig invalidPipeline = new ColonyJobConfig { Name = "invalid" };
+            invalidPipeline.Pieces.Add(new JobPiece { Kind = JobPieceKind.Start });
+            invalidPipeline.Pieces.Add(new JobPiece { Kind = JobPieceKind.PutItem });
+            invalidPipeline.Pieces.Add(new JobPiece { Kind = JobPieceKind.End });
+            report.Check(!JobPipeline.IsValid(invalidPipeline, out _),
+                "pipeline validation blocks missing compatible customisation");
 
             ColonyOperations.SavePreset(colony, "portable", jobs[0], false);
             ColonyOperations.SavePreset(colony, "local", jobs[0], true);
@@ -173,6 +181,8 @@ namespace Kukolony.Debug
             report.Check(state.GetStructures().Any(r => r.Name == "Renamed storage"),
                 "registered structure and name survived save and relaunch");
             report.Check(state.GetJobs().Count == 7, "job configurations survived save and relaunch");
+            report.Check(state.GetJobs().All(job => JobPipeline.IsValid(job, out _) && job.Pieces.Count >= 3),
+                "typed pipeline definitions survived save and relaunch");
             report.Check(state.GetPresets().Count == 2, "portable and local presets survived save and relaunch");
             List<ZDOID> members = state.GetMembers(ColonyMemberKind.Villager);
             report.Check(members.Count > 0, "member list survived save and relaunch");

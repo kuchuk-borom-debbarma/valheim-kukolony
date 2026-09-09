@@ -59,15 +59,15 @@ namespace Kukolony.Colonies
         {
             List<ColonyJobConfig> result = new List<ColonyJobConfig>(); string encoded = _zdo?.GetString(JobsKey, string.Empty) ?? string.Empty;
             if (string.IsNullOrEmpty(encoded)) return result;
-            try { ZPackage p = new ZPackage(encoded); if (p.ReadInt() != 2) return result; int count = p.ReadInt(); if (count < 0 || count > 512) return result;
-                for (int i = 0; i < count; i++) result.Add(ReadJob(p)); }
+            try { ZPackage p = new ZPackage(encoded); int version=p.ReadInt(); if (version != 2 && version != 3) return result; int count = p.ReadInt(); if (count < 0 || count > 512) return result;
+                for (int i = 0; i < count; i++) result.Add(ReadJob(p, version)); }
             catch (System.Exception e) { Core.Log.Warning("[colony] invalid job registry: " + e.Message); }
             return result;
         }
 
         internal void SetJobs(List<ColonyJobConfig> jobs)
         {
-            ZPackage p = new ZPackage(); p.Write(2); p.Write(jobs.Count);
+            ZPackage p = new ZPackage(); p.Write(3); p.Write(jobs.Count);
             foreach (ColonyJobConfig j in jobs) WriteJob(p, j);
             _zdo.Set(JobsKey, p.GetBase64());
         }
@@ -86,11 +86,11 @@ namespace Kukolony.Colonies
             try
             {
                 ZPackage p = new ZPackage(encoded);
-                if (p.ReadInt() != 2) return result;
+                int version=p.ReadInt(); if (version != 2 && version != 3) return result;
                 int count = p.ReadInt();
                 if (count < 0 || count > 512) return result;
                 for (int i = 0; i < count; i++)
-                    result.Add(new JobPreset { Name = p.ReadString(), ColonyLocal = p.ReadBool(), Settings = ReadJob(p) });
+                    result.Add(new JobPreset { Name = p.ReadString(), ColonyLocal = p.ReadBool(), Settings = ReadJob(p, version) });
             }
             catch (System.Exception e) { Core.Log.Warning("[colony] invalid preset registry: " + e.Message); }
             return result;
@@ -98,7 +98,7 @@ namespace Kukolony.Colonies
 
         internal void SetPresets(List<JobPreset> presets)
         {
-            ZPackage p = new ZPackage(); p.Write(2); p.Write(presets.Count);
+            ZPackage p = new ZPackage(); p.Write(3); p.Write(presets.Count);
             foreach (JobPreset preset in presets)
             {
                 p.Write(preset.Name ?? string.Empty);
@@ -108,7 +108,7 @@ namespace Kukolony.Colonies
             _zdo.Set(PresetsKey, p.GetBase64());
         }
 
-        private static ColonyJobConfig ReadJob(ZPackage p)
+        private static ColonyJobConfig ReadJob(ZPackage p, int version)
         {
             ColonyJobConfig job = new ColonyJobConfig
             {
@@ -130,6 +130,13 @@ namespace Kukolony.Colonies
             int filters = p.ReadInt();
             if (filters < 0 || filters > 4096) throw new System.IO.InvalidDataException("invalid filter count");
             for (int i = 0; i < filters; i++) job.ItemFilters.Add(p.ReadString());
+            if (version >= 3)
+            {
+                int pieces = p.ReadInt();
+                if (pieces < 2 || pieces > 128) throw new System.IO.InvalidDataException("invalid pipeline piece count");
+                for (int i = 0; i < pieces; i++) job.Pieces.Add(new JobPiece { Kind = (JobPieceKind)p.ReadInt(), Capability = (StructureCapability)p.ReadInt() });
+            }
+            else job.Pieces.AddRange(JobPipeline.For(job.Type));
             return job;
         }
 
@@ -141,6 +148,8 @@ namespace Kukolony.Colonies
             p.Write(job.SearchRadius); p.Write(job.StopDistance);
             p.Write(job.SelectedStructures.Count); foreach (ZDOID id in job.SelectedStructures) p.Write(id);
             p.Write(job.ItemFilters.Count); foreach (string item in job.ItemFilters) p.Write(item ?? string.Empty);
+            List<JobPiece> pieces = job.Pieces.Count == 0 ? JobPipeline.For(job.Type) : job.Pieces;
+            p.Write(pieces.Count); foreach (JobPiece piece in pieces) { p.Write((int)piece.Kind); p.Write((int)piece.Capability); }
         }
 
         internal List<ZDOID> GetMembers(ColonyMemberKind kind) =>

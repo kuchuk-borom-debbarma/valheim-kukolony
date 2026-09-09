@@ -242,12 +242,19 @@ namespace Kukolony.Gui
                 () => { _showPresets = !_showPresets; _page = 0; Refresh(); });
             if (_showPresets) { BuildPresets(jobs); return; }
             TextAt(_content.transform, "Configured jobs", -290, -160, 18, 240, TextAnchor.MiddleLeft);
+            AddButton(_content.transform, "New pipeline", 170, -160, 140, () =>
+            {
+                ColonyJobConfig created = new ColonyJobConfig { Name = "New job", Type = ColonyJobType.HaulLoose };
+                created.Pieces.Add(new JobPiece { Kind = JobPieceKind.Start });
+                created.Pieces.Add(new JobPiece { Kind = JobPieceKind.End });
+                jobs.Add(created); SaveJobs(jobs);
+            });
             int start = _page * Rows;
             for (int row=0; row<Rows && start+row<jobs.Count; row++)
             {
                 ColonyJobConfig job=jobs[start+row];
                 TextAt(_content.transform, job.Name, -220, -210-row*48, 16, 390, TextAnchor.MiddleLeft);
-                TextAt(_content.transform, $"count {job.Count} • limit {job.StockLimit} • {job.Targets}",
+                TextAt(_content.transform, $"{job.Pieces.Count} pieces • count {job.Count} • {job.Targets}",
                     100, -210-row*48, 14, 250, TextAnchor.MiddleLeft, Color.gray);
                 AddButton(_content.transform, "Configure", 310, -210-row*48, 130, () => { _selectedJob=job; Refresh(); });
             }
@@ -286,8 +293,12 @@ namespace Kukolony.Gui
             AddButton(_content.transform, "← Jobs", -330, -160, 110, () => { _selectedJob=null; Refresh(); });
             InputField jobName = InputAt(_content.transform, _selectedJob.Name, -110, -160, 330);
             jobName.onEndEdit.AddListener(value => { if (!string.IsNullOrWhiteSpace(value)) _selectedJob.Name=value.Trim(); SaveJobs(jobs); });
-            TextAt(_content.transform, "Type: " + ColonyJobCatalog.DisplayName(_selectedJob.Type), -250, -215, 16, 520, TextAnchor.MiddleLeft);
-            TextAt(_content.transform, "Targets: " + _selectedJob.Targets, -250, -255, 16, 420, TextAnchor.MiddleLeft);
+            bool valid = JobPipeline.IsValid(_selectedJob, out string validation);
+            TextAt(_content.transform, valid ? "Pipeline valid — compatible customisation auto-connects." : validation,
+                -250, -215, 14, 590, TextAnchor.MiddleLeft, valid ? Color.green : Color.red);
+            TextAt(_content.transform, "Pieces: " + string.Join(" → ", _selectedJob.Pieces.ConvertAll(piece => piece.Kind.ToString()).ToArray()), -250, -242, 13, 590, TextAnchor.MiddleLeft, Color.gray);
+            AddButton(_content.transform, "Duplicate", 310, -160, 110, () => { ColonyJobConfig copy=_selectedJob.Clone(true); copy.Id=System.Guid.NewGuid().ToString("N"); copy.Name += " copy"; jobs.Add(copy); SaveJobs(jobs); });
+            TextAt(_content.transform, "Targets: " + _selectedJob.Targets, -250, -275, 16, 420, TextAnchor.MiddleLeft);
             AddButton(_content.transform, "Target mode", 270, -255, 150, () =>
             { _selectedJob.Targets=(TargetMode)(((int)_selectedJob.Targets+1)%3); SaveJobs(jobs); });
             TextAt(_content.transform, $"Count: {_selectedJob.Count}", -250, -305, 16, 180, TextAnchor.MiddleLeft);
