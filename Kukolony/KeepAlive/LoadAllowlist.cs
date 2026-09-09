@@ -49,6 +49,12 @@ namespace Kukolony.KeepAlive
 
         internal static bool Contains(int prefabHash) => Allowed.Contains(prefabHash);
 
+        /// <summary>
+        ///     Dropped when a world unloads - prefab hashes are per-session once mods can
+        ///     register their own, so carrying a list across worlds risks stale entries.
+        /// </summary>
+        internal static void Clear() => Allowed.Clear();
+
         private static bool Matters(GameObject prefab)
         {
             // Anything the player built, so villagers path around walls rather than

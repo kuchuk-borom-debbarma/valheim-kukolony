@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using Kukolony.Core;
@@ -30,11 +31,30 @@ namespace Kukolony.KeepAlive
         private float _refreshTimer;
         private float _scanTimer;
         private bool _scanning;
+        private bool _wasInWorld;
 
         private void Update()
         {
-            if (!ModConfig.KeepAliveEnabled.Value || ZNetScene.instance == null || ZDOMan.instance == null)
+            if (!InWorld())
             {
+                // Leaving a world invalidates everything we were holding.
+                if (_wasInWorld)
+                {
+                    Shutdown();
+                }
+
+                return;
+            }
+
+            _wasInWorld = true;
+
+            if (!ShouldDrive())
+            {
+                // Zones are only ever cleared inside Rebuild, so an early return that
+                // skipped it used to leave the last computed set live indefinitely -
+                // toggling the config off did not restore vanilla behaviour, and a
+                // previous world's zones survived into the next one.
+                KeepAliveZones.Clear();
                 return;
             }
 
@@ -58,6 +78,41 @@ namespace Kukolony.KeepAlive
 
             _refreshTimer = 0f;
             Refresh();
+        }
+
+        private static bool InWorld() =>
+            ZNetScene.instance != null && ZDOMan.instance != null && ZNet.instance != null;
+
+        /// <summary>
+        ///     Only the server simulates idle colonies: ZDOMan.ReleaseNearbyZDOS is
+        ///     server-side, and AI runs only on the ZDO owner. A client forcing zones
+        ///     would load every colony in the world for objects it does not own and cannot
+        ///     tick - and would take on all of these patches' side effects for nothing.
+        ///
+        ///     In single-player and host-and-play the player is the server, so this is
+        ///     true for everyone who is not a joining client.
+        /// </summary>
+        private static bool ShouldDrive() =>
+            ModConfig.KeepAliveEnabled.Value && ZNet.instance.IsServer();
+
+        /// <summary>
+        ///     Drops everything held across a world boundary.
+        ///
+        ///     ZDOs matter here: ZDOMan.ShutDown releases them to a pool that hands the
+        ///     same objects back out for unrelated ZDOs, so keeping references across
+        ///     sessions is a use-after-free. A recycled ZDO reports IsValid again with a
+        ///     different prefab and position, and would hold zones open at random places.
+        /// </summary>
+        private void Shutdown()
+        {
+            _wasInWorld = false;
+            _scanning = false;
+            _scanTimer = 0f;
+            _refreshTimer = 0f;
+            _villagerZdos.Clear();
+            KeepAliveZones.Clear();
+            LoadAllowlist.Clear();
+            StopAllCoroutines();
         }
 
         private void Refresh()
@@ -95,17 +150,49 @@ namespace Kukolony.KeepAlive
         {
             _scanning = true;
 
-            List<ZDO> found = new List<ZDO>();
-            int index = 0;
-
-            while (!ZDOMan.instance.GetAllZDOsWithPrefabIterative(VillagerPrefab.PrefabName, found, ref index))
+            try
             {
-                yield return null;
-            }
+                List<ZDO> found = new List<ZDO>();
+                int index = 0;
 
-            _villagerZdos.Clear();
-            _villagerZdos.AddRange(found);
-            _scanning = false;
+                while (true)
+                {
+                    // The scan yields across frames, so the world can go away underneath
+                    // it. Without this check it throws, the coroutine dies, and the latch
+                    // below never clears - leaving the scan dead for the rest of the
+                    // process and off-screen colonies unable to bootstrap ever again.
+                    if (!InWorld())
+                    {
+                        yield break;
+                    }
+
+                    bool done;
+                    try
+                    {
+                        done = ZDOMan.instance.GetAllZDOsWithPrefabIterative(
+                            VillagerPrefab.PrefabName, found, ref index);
+                    }
+                    catch (Exception e)
+                    {
+                        Log.Warning($"[KeepAlive] villager scan aborted: {e.Message}");
+                        yield break;
+                    }
+
+                    if (done)
+                    {
+                        break;
+                    }
+
+                    yield return null;
+                }
+
+                _villagerZdos.Clear();
+                _villagerZdos.AddRange(found);
+            }
+            finally
+            {
+                _scanning = false;
+            }
         }
     }
 }

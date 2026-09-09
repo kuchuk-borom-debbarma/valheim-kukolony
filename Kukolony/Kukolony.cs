@@ -42,6 +42,7 @@ namespace Kukolony
             gameObject.AddComponent<Debug.VillagerSelfTest>();
             gameObject.AddComponent<Debug.PrefabProbe>();
             gameObject.AddComponent<Debug.HaulJobSelfTest>();
+            gameObject.AddComponent<Debug.DedicatedServerProbe>();
 
             Log.Info($"{ModInfo.Name} {ModInfo.Version} loaded");
         }

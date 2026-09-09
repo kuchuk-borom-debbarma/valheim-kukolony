@@ -162,3 +162,58 @@ built.
 
 Because the million-coordinate line is a deliberate performance saving, the radius and
 colony caps matter more on a dedicated server than on a client.
+
+
+---
+
+## Dedicated servers — simulation still unverified
+
+Off-screen simulation runs on **the server only**. `ZDOMan.ReleaseNearbyZDOS` is server-side
+and AI runs only on the ZDO owner, so a client forcing zones would load every colony in the
+world for objects it does not own and cannot tick — while taking on all the side effects of
+the keep-alive patches for nothing. `KeepAliveDriver` therefore gates on
+`ZNet.instance.IsServer()`.
+
+In single-player and host-and-play the player **is** the server, so this is true for
+everyone except a joining client.
+
+### What we could not test, and why
+
+Whether a *dedicated* server actually instantiates GameObjects is still open. Attempting to
+run one with BepInEx on macOS failed twice, before BepInEx ever loaded:
+
+```
+DllNotFoundException: .../valheim_server/Data/Managed/../lib/libmono-native.dylib
+Rethrow as TypeInitializationException: The type initializer for 'Sys' threw an exception.
+```
+
+The stock server starts fine (`ZNET START`, world generation), so the injection is the
+cause, not the server. Removing `DYLD_LIBRARY_PATH` did not help. **The BepInEx pack ships
+only a Linux server script** (`LD_PRELOAD`, `libdoorstop_x64.so`, `valheim_server.x86_64`) —
+a strong signal that a modded macOS dedicated server is a path nobody has trodden, and not
+one worth debugging, since real servers run Linux or Windows.
+
+Do not repeat this on macOS. Test on Linux if dedicated-server support ever matters.
+
+### What the server assembly does tell us
+
+Decompiling `valheim_server/Data/Managed/assembly_valheim.dll` shows the machinery is all
+present and identical to the client — `ZNetScene.CreateDestroyObjects`, the
+`IsZoneReadyForType` guard, `BaseAI.UpdateAI`, and the fixed 0.05s `MonoUpdaters` tick. The
+only difference is `Game.FixedUpdate` parking the reference position at
+`(1000000, 0, 1000000)`.
+
+So the server has everything it needs; the open question is narrowly whether zones out at a
+million ever load, which is what decides if vanilla's own creation path runs there at all.
+
+### Why gating is safe regardless
+
+If a dedicated server cannot instantiate, colonies there are broken **with or without** the
+gate — a client loading them does not help unless it also owns the ZDOs, and the server
+holds ownership of anything near no player. So gating removes wasted client work without
+creating a failure mode.
+
+The one case where it could matter: ownership of a *distant* colony sticks with whoever last
+held it, which can be a client. If that client is gated off, nothing ticks that colony until
+the server takes ownership back. Unmeasured, and worth revisiting alongside proper
+dedicated-server testing.

@@ -102,11 +102,31 @@ postfixes that only widen behaviour, so with an empty zone set the game is exact
 | Patch | Why |
 |---|---|
 | `ZoneSystem.CreateLocalZones` | `PokeLocalZone` our zones — loads terrain, resets the unload timer |
-| `ZoneSystem.IsActiveAreaLoaded` | Do not create objects against terrain that has not arrived |
-| `ZNetScene.InActiveArea` ×2 | Our zones count as active |
-| `ZNetScene.OutsideActiveArea` ×2 | …and are not outside it |
+| `ZNetScene.InActiveArea` ×2 | Our zones count as active, which keeps ownership stable |
 | `ZDOMan.FindSectorObjects` | **Append our zones' ZDOs to the create list** |
-| `ZDOMan.FindDistantObjects` | Skip our zones so nothing is added twice |
+| `ZNetScene.CreateDestroyObjects` | Prefix/finalizer marking the one call path where the append is correct |
+
+**Three patches a chunk-loader mod uses are deliberately absent**, because each caused real
+damage:
+
+- **`ZoneSystem.IsActiveAreaLoaded`** — its only caller is `CreateObjectsSorted`, which
+  returns immediately when false. Forcing it false while a colony zone was still loading
+  stopped object creation *everywhere*, including around the player. It is not needed
+  either: `CreateObjectsSorted` already checks `IsZoneReadyForType` per object.
+- **`ZNetScene.OutsideActiveArea`** — not used for loading at all. Its callers are
+  `SpawnArea` (already player-gated), a falling-support check, and `WearNTear.UpdateWear`,
+  which uses it as the shortcut that stops structures decaying when nobody is around.
+  Patching it made colony buildings weather and collapse over long absences.
+- **`ZDOMan.FindDistantObjects`** — chunk loaders suppress it because they append the whole
+  zone to the near list, so the distant pass would duplicate. We filter, and distant scenery
+  is not on the allowlist, so there is nothing to duplicate. Suppressing it only deleted the
+  big-tree LOD around every colony.
+
+**`FindSectorObjects` must be scoped to `CreateDestroyObjects`.** It has three other
+callers, and appending for them is actively harmful — most severely `ZNetScene.IsAreaReady`,
+which returns false if any ZDO in the list lacks an instance. `Game.FindSpawnPoint` and
+player teleport gate on it, so an unscoped append turned "is this area ready" into "is every
+colony in the world fully instantiated", and could hang world join or a portal.
 
 `FindSectorObjects` is the load-bearing one: `RemoveObjects` destroys any instance *not* in
 the lists it is handed, so appending is simultaneously what creates our objects and what

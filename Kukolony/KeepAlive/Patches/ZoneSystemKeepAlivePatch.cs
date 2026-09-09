@@ -6,65 +6,54 @@ namespace Kukolony.KeepAlive.Patches
     /// <summary>
     ///     Keeps the terrain of colony zones loaded.
     ///
-    ///     Every patch here only ever widens what the game considers active, so with an
-    ///     empty zone set the behaviour is exactly stock.
+    ///     IsActiveAreaLoaded is deliberately NOT patched. Its only vanilla use is
+    ///     ZNetScene.CreateObjectsSorted, which returns immediately when it is false - so
+    ///     forcing it false while any colony zone was still loading stopped object
+    ///     creation everywhere, including around the player. It is not needed either:
+    ///     CreateObjectsSorted already checks IsZoneReadyForType per object, so a colony
+    ///     object cannot be created before its own zone is ready.
     /// </summary>
     internal static class ZoneSystemKeepAlivePatch
     {
-        /// <summary>
-        ///     Pokes our zones alongside the player's. Poking loads the zone root - the
-        ///     terrain, and with it the collider the navmesh is built from - and resets
-        ///     the zone's unload timer.
-        /// </summary>
         [HarmonyPatch(typeof(ZoneSystem), nameof(ZoneSystem.CreateLocalZones))]
         private static class CreateLocalZones
         {
             private static void Postfix(ZoneSystem __instance, ref bool __result)
             {
-                if (__result || KeepAliveZones.IsEmpty)
+                if (KeepAliveZones.IsEmpty)
                 {
                     return;
                 }
 
+                // Vanilla spawns at most one zone per pass to spread the cost, and
+                // __result reports whether that already happened.
+                bool spawnedThisPass = __result;
+
                 foreach (Vector2i zone in KeepAliveZones.All)
                 {
-                    if (!__instance.PokeLocalZone(zone))
+                    bool alreadyLoaded = __instance.m_zones.ContainsKey(zone);
+
+                    // Poking a loaded zone only resets its unload timer, so it must happen
+                    // every pass regardless. Skipping it - as an early return on __result
+                    // used to - let kept zones age past m_zoneTTL during any sustained
+                    // vanilla zone loading, and get destroyed along with the terrain
+                    // collider the villager needs to path on.
+                    if (alreadyLoaded)
+                    {
+                        __instance.PokeLocalZone(zone);
+                        continue;
+                    }
+
+                    if (spawnedThisPass)
                     {
                         continue;
                     }
 
-                    // Matching vanilla: it reports "something was loaded this pass" and
-                    // then stops, so zone loading stays spread across frames.
-                    __result = true;
-                    break;
-                }
-            }
-        }
-
-        /// <summary>
-        ///     ZNetScene refuses to create objects until the active area is loaded. Our
-        ///     zones count as part of it, so a colony's objects are not created against
-        ///     terrain that has not arrived yet.
-        /// </summary>
-        [HarmonyPatch(typeof(ZoneSystem), nameof(ZoneSystem.IsActiveAreaLoaded))]
-        private static class IsActiveAreaLoaded
-        {
-            private static void Postfix(ZoneSystem __instance, ref bool __result)
-            {
-                if (!__result || KeepAliveZones.IsEmpty)
-                {
-                    return;
-                }
-
-                foreach (Vector2i zone in KeepAliveZones.All)
-                {
-                    if (__instance.m_zones.ContainsKey(zone))
+                    if (__instance.PokeLocalZone(zone))
                     {
-                        continue;
+                        spawnedThisPass = true;
+                        __result = true;
                     }
-
-                    __result = false;
-                    return;
                 }
             }
         }

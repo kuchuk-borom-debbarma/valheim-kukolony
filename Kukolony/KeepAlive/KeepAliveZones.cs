@@ -15,6 +15,9 @@ namespace Kukolony.KeepAlive
     {
         private static readonly HashSet<Vector2i> Zones = new HashSet<Vector2i>();
 
+        /// <summary>Latched so the cap is reported on change rather than every second.</summary>
+        private static bool _reportedCapped;
+
         internal static int Count => Zones.Count;
 
         internal static bool IsEmpty => Zones.Count == 0;
@@ -22,6 +25,14 @@ namespace Kukolony.KeepAlive
         internal static bool Contains(Vector2i zone) => Zones.Count != 0 && Zones.Contains(zone);
 
         internal static IEnumerable<Vector2i> All => Zones;
+
+        /// <summary>
+        ///     Stops holding anything open. Must be called on every path that skips
+        ///     Rebuild, or the last computed set stays live - which meant disabling the
+        ///     feature did not restore vanilla behaviour, and one world's zones leaked
+        ///     into the next.
+        /// </summary>
+        internal static void Clear() => Zones.Clear();
 
         /// <summary>
         ///     Rebuilds from every villager position we know about - loaded ones from the
@@ -46,9 +57,14 @@ namespace Kukolony.KeepAlive
 
             foreach (Vector3 position in villagerPositions)
             {
+                if (capped)
+                {
+                    break;
+                }
+
                 Vector2i centre = ZoneSystem.GetZone(position);
 
-                for (int y = -rings; y <= rings; y++)
+                for (int y = -rings; y <= rings && !capped; y++)
                 {
                     for (int x = -rings; x <= rings; x++)
                     {
@@ -63,11 +79,20 @@ namespace Kukolony.KeepAlive
                 }
             }
 
-            if (capped)
+            // Never truncate silently - a colony that stops working for an invisible
+            // reason is the worst failure here. But Rebuild runs every second, so warning
+            // unconditionally buried the rest of the log; report only on the transition.
+            if (capped != _reportedCapped)
             {
-                // Never truncate silently - a colony that stops working for an invisible
-                // reason is the worst possible failure here.
-                Log.Warning($"[KeepAlive] zone cap of {cap} reached; some villagers will not be kept loaded.");
+                _reportedCapped = capped;
+                if (capped)
+                {
+                    Log.Warning($"[KeepAlive] zone cap of {cap} reached - some villagers are not being kept loaded.");
+                }
+                else
+                {
+                    Log.Info("[KeepAlive] back under the zone cap.");
+                }
             }
         }
     }
