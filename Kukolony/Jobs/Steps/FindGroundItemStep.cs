@@ -13,6 +13,9 @@ namespace Kukolony.Jobs.Steps
     {
         public string Name => "find_ground_item";
 
+        public string Describe(JobContext context) =>
+            $"looking for {Readable.Item(context.ItemFilter)}";
+
         public StepStatus Tick(JobContext context)
         {
             string wanted = context.ItemFilter;

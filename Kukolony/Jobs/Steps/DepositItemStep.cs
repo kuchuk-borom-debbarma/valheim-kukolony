@@ -18,6 +18,9 @@ namespace Kukolony.Jobs.Steps
     {
         public string Name => "deposit_item";
 
+        public string Describe(JobContext context) =>
+            $"storing {Readable.Item(context.ItemFilter)}";
+
         public StepStatus Tick(JobContext context)
         {
             GameObject target = context.ResolveTarget();

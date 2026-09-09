@@ -35,6 +35,9 @@ namespace Kukolony.Jobs.Steps
 
         public string Name => "move_to_target";
 
+        public string Describe(JobContext context) =>
+            $"walking to {Readable.Target(context)}";
+
         public StepStatus Tick(JobContext context)
         {
             GameObject target = context.ResolveTarget();

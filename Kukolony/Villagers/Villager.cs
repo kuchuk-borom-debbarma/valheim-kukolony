@@ -40,6 +40,9 @@ namespace Kukolony.Villagers
         /// <summary>Short description of what this villager is doing, for hover text.</summary>
         internal string Activity { get; private set; } = "idle";
 
+        /// <summary>The job it is employed on, or empty when unemployed.</summary>
+        internal string CurrentJob { get; private set; } = string.Empty;
+
         private void Awake() => Instances.Add(this);
 
         /// <summary>
@@ -119,6 +122,7 @@ namespace Kukolony.Villagers
             // nothing else to do.
             if (!TryWork(deltaTime))
             {
+                CurrentJob = string.Empty;
                 StayNearHome(deltaTime);
             }
 
@@ -250,8 +254,9 @@ namespace Kukolony.Villagers
                 return false;
             }
 
-            _jobRunner.Tick(job, new JobContext(this, _ai, _bag, post, deltaTime));
-            SetActivity("working");
+            string doing = _jobRunner.Tick(job, new JobContext(this, _ai, _bag, post, deltaTime));
+            CurrentJob = post.State.JobId;
+            SetActivity(doing);
             return true;
         }
 
@@ -395,8 +400,11 @@ namespace Kukolony.Villagers
                 return string.Empty;
             }
 
-            float distance = Utils.DistanceXZ(state.Home, transform.position);
-            return $"{state.Name}\n<color=grey>{Activity}, {distance:F0}m from home</color>";
+            string headline = string.IsNullOrEmpty(CurrentJob)
+                ? "<color=grey>no job</color>"
+                : $"<color=orange>{CurrentJob}</color>";
+
+            return $"{state.Name}\n{headline}\n<color=grey>{Activity}</color>";
         }
 
         internal string DisplayName()

@@ -18,12 +18,20 @@ namespace Kukolony.Jobs
         private float _cooldown;
         private string _lastReportedStep;
 
-        internal void Tick(Job job, JobContext context)
+        /// <summary>
+        ///     Runs one step and reports what the villager is doing, in words - so the
+        ///     log and the hover text cannot drift apart.
+        /// </summary>
+        internal string Tick(Job job, JobContext context)
         {
             if (_cooldown > 0f)
             {
                 _cooldown -= context.DeltaTime;
-                return;
+
+                // No countdown in the label. A value that changes every tick makes every
+                // tick look like a new activity, which floods the transition log - the
+                // same trap that "walking home (34m)" fell into.
+                return "waiting to retry";
             }
 
             VillagerState state = context.Villager.State;
@@ -35,7 +43,8 @@ namespace Kukolony.Jobs
             }
 
             IJobStep step = job.Steps[index];
-            Report(context, step, index);
+            string description = Describe(step, context);
+            Report(context, step, index, description);
 
             switch (step.Tick(context))
             {
@@ -54,10 +63,28 @@ namespace Kukolony.Jobs
                     _cooldown = RetryCooldownSeconds;
                     break;
             }
+
+            return description;
+        }
+
+        /// <summary>
+        ///     A step describing itself must never break the villager, so a throwing
+        ///     Describe degrades to the step's machine name rather than killing the tick.
+        /// </summary>
+        private static string Describe(IJobStep step, JobContext context)
+        {
+            try
+            {
+                return step.Describe(context);
+            }
+            catch (System.Exception)
+            {
+                return step.Name;
+            }
         }
 
         /// <summary>Logs on step change only - per-tick logging would flood at 20Hz.</summary>
-        private void Report(JobContext context, IJobStep step, int index)
+        private void Report(JobContext context, IJobStep step, int index, string description)
         {
             string label = $"{index}:{step.Name}";
             if (_lastReportedStep == label)
@@ -66,7 +93,7 @@ namespace Kukolony.Jobs
             }
 
             _lastReportedStep = label;
-            Log.Info($"Villager '{context.Villager.State.Name}' -> {label}");
+            Log.Info($"Villager '{context.Villager.State.Name}' -> {label} ({description})");
         }
     }
 }

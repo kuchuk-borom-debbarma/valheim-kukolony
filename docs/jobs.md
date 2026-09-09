@@ -37,6 +37,45 @@ rather than knowing what it is walking to. That is the composition claim, demons
 Verified in game: a villager bound itself to a post, found dropped wood, carried it to the
 bound chest and deposited it, in about seven seconds.
 
+## Seeing what a villager is doing
+
+Hovering a villager shows its name, its job, and the stage of that job it is at:
+
+```
+Ingrid
+haul
+walking to Wood
+```
+
+The wording lives on the step, via `IJobStep.Describe(JobContext)`, rather than in a lookup
+table — only the step knows what it is currently acting on. That is why `move_to_target`
+reads correctly as both "walking to Wood" and "walking to Chest" without knowing which it
+is: it describes whatever `JobContext.Target` resolves to.
+
+A full cycle reads:
+
+```
+looking for Wood -> walking to Wood -> picking up Wood
+  -> finding somewhere to put Wood -> walking to Chest -> storing Wood
+```
+
+The same string feeds the log, so a trace and the hover can never disagree:
+
+```
+Villager 'Alvar' -> 2:pick_up_item (picking up Wood)
+```
+
+Two rules for these descriptions:
+
+- **No values that change every tick.** A countdown in the label makes every tick look like
+  a new activity and floods the change-only log. Keep the label stable and put varying
+  detail elsewhere.
+- **Never throw.** A step that fails to describe itself degrades to its machine name rather
+  than killing the villager's tick.
+
+`Describe` must also work on a client that does not own the villager, since hover text is
+rendered by whoever is looking.
+
 ## Where state lives
 
 | Owner | Key | Meaning |

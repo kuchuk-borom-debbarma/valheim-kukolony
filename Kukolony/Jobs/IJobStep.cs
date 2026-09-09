@@ -10,8 +10,19 @@ namespace Kukolony.Jobs
     /// </summary>
     internal interface IJobStep
     {
-        /// <summary>Short name, used in logs and diagnostics.</summary>
+        /// <summary>Short machine name, used in logs, diagnostics and job files.</summary>
         string Name { get; }
+
+        /// <summary>
+        ///     What this step is doing right now, in words a player would use - "walking
+        ///     to Wood", not "move_to_target". Shown on hover.
+        ///
+        ///     Lives on the step rather than in a lookup table because only the step knows
+        ///     what it is currently acting on. Must tolerate being called on a client that
+        ///     does not own the villager, since hover text is rendered by whoever is
+        ///     looking at it.
+        /// </summary>
+        string Describe(JobContext context);
 
         StepStatus Tick(JobContext context);
     }

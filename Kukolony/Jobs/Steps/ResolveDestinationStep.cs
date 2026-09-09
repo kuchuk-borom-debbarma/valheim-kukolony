@@ -20,6 +20,9 @@ namespace Kukolony.Jobs.Steps
 
         public string Name => "resolve_destination";
 
+        public string Describe(JobContext context) =>
+            $"finding somewhere to put {Readable.Item(context.ItemFilter)}";
+
         public StepStatus Tick(JobContext context)
         {
             ZDOID bound = context.Post.State.Destination;

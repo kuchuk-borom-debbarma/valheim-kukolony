@@ -25,6 +25,9 @@ namespace Kukolony.Jobs.Steps
 
         public string Name => "pick_up_item";
 
+        public string Describe(JobContext context) =>
+            $"picking up {Readable.Item(context.ItemFilter)}";
+
         public StepStatus Tick(JobContext context)
         {
             GameObject target = context.ResolveTarget();
