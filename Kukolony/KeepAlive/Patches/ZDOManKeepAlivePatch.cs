@@ -50,17 +50,19 @@ namespace Kukolony.KeepAlive.Patches
         [HarmonyPatch(typeof(ZDOMan), nameof(ZDOMan.FindSectorObjects))]
         private static class FindSectorObjects
         {
-            private static void Postfix(ZDOMan __instance, Vector2i sector, int area, List<ZDO> sectorObjects)
+            private static void Postfix(ZDOMan __instance, Vector2s sector, SimulationDistance simulationDistance,
+                List<ZDO> sectorObjects)
             {
                 if (!_inCreateDestroy || KeepAliveZones.IsEmpty)
                 {
                     return;
                 }
 
-                foreach (Vector2i zone in KeepAliveZones.All)
+                foreach (Vector2s zone in KeepAliveZones.All)
                 {
                     // Already covered by the player's own active area - vanilla loads it
                     // in full, and adding it again would duplicate every ZDO.
+                    int area = simulationDistance.NearSimulationDistance;
                     if (zone.x >= sector.x - area && zone.x <= sector.x + area
                         && zone.y >= sector.y - area && zone.y <= sector.y + area)
                     {
@@ -76,16 +78,16 @@ namespace Kukolony.KeepAlive.Patches
             ///     villager is standing in it does not need its trees, rocks or wildlife
             ///     instantiated - that is the bulk of the objects and none of the value.
             /// </summary>
-            private static void Append(ZDOMan zdoMan, Vector2i zone, List<ZDO> destination)
+            private static void Append(ZDOMan zdoMan, Vector2s zone, List<ZDO> destination)
             {
                 if (!ModConfig.KeepAliveFilterObjects.Value || !LoadAllowlist.IsReady)
                 {
-                    zdoMan.FindObjects(zone, destination);
+                    zdoMan.FindObjects(zone, destination, zdoMan.m_visitedSectorIndices);
                     return;
                 }
 
                 Buffer.Clear();
-                zdoMan.FindObjects(zone, Buffer);
+                zdoMan.FindObjects(zone, Buffer, zdoMan.m_visitedSectorIndices);
 
                 foreach (ZDO zdo in Buffer)
                 {

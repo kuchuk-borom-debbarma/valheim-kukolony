@@ -13,7 +13,7 @@ namespace Kukolony.KeepAlive
     /// </summary>
     internal static class KeepAliveZones
     {
-        private static readonly HashSet<Vector2i> Zones = new HashSet<Vector2i>();
+        private static readonly HashSet<Vector2s> Zones = new HashSet<Vector2s>();
 
         /// <summary>Latched so the cap is reported on change rather than every second.</summary>
         private static bool _reportedCapped;
@@ -22,9 +22,9 @@ namespace Kukolony.KeepAlive
 
         internal static bool IsEmpty => Zones.Count == 0;
 
-        internal static bool Contains(Vector2i zone) => Zones.Count != 0 && Zones.Contains(zone);
+        internal static bool Contains(Vector2s zone) => Zones.Count != 0 && Zones.Contains(zone);
 
-        internal static IEnumerable<Vector2i> All => Zones;
+        internal static IEnumerable<Vector2s> All => Zones;
 
         /// <summary>
         ///     Stops holding anything open. Must be called on every path that skips
@@ -68,13 +68,13 @@ namespace Kukolony.KeepAlive
                     break;
                 }
 
-                Vector2i centre = ZoneSystem.GetZone(position);
+                Vector2s centre = ZoneSystem.GetZone(position);
 
                 for (int y = -rings; y <= rings; y++)
                 {
                     for (int x = -rings; x <= rings; x++)
                     {
-                        Zones.Add(new Vector2i(centre.x + x, centre.y + y));
+                        Zones.Add(new Vector2s((short)(centre.x + x), (short)(centre.y + y)));
                     }
                 }
             }

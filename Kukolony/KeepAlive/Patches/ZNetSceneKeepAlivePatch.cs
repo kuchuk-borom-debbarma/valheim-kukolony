@@ -14,6 +14,11 @@ namespace Kukolony.KeepAlive.Patches
     ///     its ownership was never released and the colony froze permanently, with no
     ///     other peer able to claim it. Vanilla would at least have reset the owner to 0.
     ///
+    ///     Valheim 1.0 replaced the zone-pair overloads with a point-and-centre pair, and
+    ///     that centre is the peer being arbitrated for. So "is this us?" is now answerable
+    ///     from the arguments, and the flag that used to track it - set in a prefix on
+    ///     ReleaseNearbyZDOS, with all the ways a flag can get stuck - is gone.
+    ///
     ///     OutsideActiveArea is deliberately not patched: it is not a loading check. Its
     ///     callers are SpawnArea (already player-gated), a falling-support check, and
     ///     WearNTear.UpdateWear - which uses it as the shortcut that stops structures
@@ -21,73 +26,41 @@ namespace Kukolony.KeepAlive.Patches
     /// </summary>
     internal static class ZNetSceneKeepAlivePatch
     {
-        /// <summary>Whose active area is currently being evaluated, when inside ReleaseNearbyZDOS.</summary>
-        private static bool _inRelease;
-        private static long _releaseUid;
-
-        private static bool WideningAllowed()
+        /// <summary>
+        ///     Whether the area being asked about is our own.
+        ///
+        ///     Everything hangs on this. Our kept zones are ours alone: claiming a remote
+        ///     peer still has a zone active stops its ownership ever being released, and
+        ///     the colony freezes with nobody able to take it. Answering only for
+        ///     ourselves is both the safe direction and the true one.
+        /// </summary>
+        private static bool IsOurArea(Vector2s centreZone)
         {
-            // Outside ownership arbitration there is no peer to confuse - widening is
-            // about our own view of what is loaded.
-            if (!_inRelease)
+            if (ZNet.instance == null)
             {
-                return true;
+                return false;
             }
 
-            return _releaseUid == ZDOMan.GetSessionID();
-        }
-
-        [HarmonyPatch(typeof(ZDOMan), "ReleaseNearbyZDOS")]
-        private static class ReleaseNearbyZdosScope
-        {
-            private static void Prefix(long uid)
-            {
-                _inRelease = true;
-                _releaseUid = uid;
-            }
-
-            // Finalizer, so a throw cannot leave the scope flag stuck on.
-            private static void Finalizer() => _inRelease = false;
+            return ZoneSystem.GetZone(ZNet.instance.GetReferencePosition()) == centreZone;
         }
 
         /// <summary>
-        ///     Answers "does the ZDO's current owner still have this zone active?".
-        ///     Only true for us - another peer's kept zones are not ours to assert.
+        ///     The one widening point. Both public overloads funnel through this one, and
+        ///     IsInPeerActiveArea calls it with the owner's reference position - so a
+        ///     remote owner is filtered by IsOurArea without needing its own patch.
         /// </summary>
-        [HarmonyPatch(typeof(ZDOMan), "IsInPeerActiveArea")]
-        private static class IsInPeerActiveArea
-        {
-            private static void Postfix(Vector2i sector, long uid, ref bool __result)
-            {
-                if (!__result && uid == ZDOMan.GetSessionID() && KeepAliveZones.Contains(sector))
-                {
-                    __result = true;
-                }
-            }
-        }
-
         [HarmonyPatch(typeof(ZNetScene), nameof(ZNetScene.InActiveArea),
-            new[] { typeof(Vector2i), typeof(Vector2i) })]
+            new[] { typeof(Vector3), typeof(Vector2s) })]
         private static class InActiveArea
         {
-            private static void Postfix(Vector2i zone, ref bool __result)
+            private static void Postfix(Vector3 point, Vector2s centerZone, ref bool __result)
             {
-                // Inside arbitration this overload is only reached via IsInPeerActiveArea,
-                // which applies its own per-uid rule above.
-                if (!__result && !_inRelease && KeepAliveZones.Contains(zone))
+                if (__result || !IsOurArea(centerZone))
                 {
-                    __result = true;
+                    return;
                 }
-            }
-        }
 
-        [HarmonyPatch(typeof(ZNetScene), nameof(ZNetScene.InActiveArea),
-            new[] { typeof(Vector2i), typeof(Vector2i), typeof(int) })]
-        private static class InActiveAreaWithArea
-        {
-            private static void Postfix(Vector2i zone, ref bool __result)
-            {
-                if (!__result && WideningAllowed() && KeepAliveZones.Contains(zone))
+                if (KeepAliveZones.Contains(ZoneSystem.GetZone(point)))
                 {
                     __result = true;
                 }

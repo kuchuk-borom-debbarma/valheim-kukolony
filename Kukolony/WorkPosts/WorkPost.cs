@@ -115,6 +115,12 @@ namespace Kukolony.WorkPosts
 
         public bool UseItem(Humanoid user, ItemDrop.ItemData item) => false;
 
+        /// <summary>
+        ///     How far above the object the hover text sits. Valheim 1.0 added this to
+        ///     Hoverable; zero keeps the vanilla placement.
+        /// </summary>
+        public float GetHoverOffset() => 0f;
+
         public string GetHoverName() => "$kukolony_workpost";
 
         public string GetHoverText()

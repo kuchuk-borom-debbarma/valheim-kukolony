@@ -3,8 +3,8 @@
 The Valheim modding wiki and the JötunnModStub README both assume Windows. This records
 what was actually done on this machine, and why each step differs.
 
-Verified on: macOS 27, arm64, Valheim on Unity 6000.0.61f1, Jötunn 2.27.1,
-BepInEx 5.4.23.3.
+Verified on: macOS 27, arm64, Valheim 1.0 on Unity 6000.0.75f1, Jötunn 2.27.1,
+BepInEx 5.4.23.5 (Thunderstore pack `5.4.2350`).
 
 ## Toolchain
 
@@ -99,7 +99,7 @@ Two things make this work that usually don't:
 `DYLD_INSERT_LIBRARIES` injection needs. Without them BepInEx could not load at all.
 
 **Architecture.** `valheim.app` is a universal binary and runs **arm64 natively** — it is
-not a Rosetta x64 build. The doorstop shipped in BepInExPack_Valheim 5.4.2333 is
+not a Rosetta x64 build. The doorstop shipped in BepInExPack_Valheim 5.4.2350 is still
 Doorstop 4.4.0, x86_64-only, so it silently fails to inject. Fixed by dropping in the
 universal build from Doorstop 4.5.0:
 
@@ -119,7 +119,10 @@ Also set in the launcher:
 executable_name="valheim.app"    # was valheim.x86_64
 ```
 
-**A pack update will overwrite both changes.** Re-apply them after updating BepInEx.
+**A pack update will overwrite both changes.** Re-apply them after updating BepInEx. In
+particular, retain the universal Doorstop binary while upgrading the BepInEx `core/`
+assemblies. BepInEx 5.4.23.5 adds a macOS arm64 guard around the preloader console/runtime
+fixes required by Valheim 1.0, so upgrade the core rather than rolling it back.
 
 ## Launching
 

@@ -13,6 +13,7 @@ Read in this order:
 
 | Doc | What it covers |
 |---|---|
+| [Current features](features.md) | What is playable today, how to set it up, and what is still missing |
 | [What the mod is](docs/README.md) | Scope, milestones, design principles |
 | [Off-screen simulation](docs/off-screen-simulation.md) | How zone and instance lifetime work, and how we extend them |
 | [Multiplayer](docs/multiplayer.md) | ZDO ownership arbitration and what it forces on job code |
@@ -44,15 +45,14 @@ Build the **solution**, not the project — Jötunn's `Paths.props` imports
 
 ## Status
 
-Villagers exist, look like people, carry a persistent inventory, bind themselves to work
-posts and haul items into a chosen container. Jobs are composable fragments defined in
-JSON, and a post is configured from an in-game panel.
+Villagers have a persistent identity and inventory, can be organised from a colony hearth,
+assigned to work posts, and haul dropped items into a chosen container. The colony and work
+post panels, JSON-backed job definitions, target claims, and off-screen keep-alive are all
+implemented. See [current features](features.md) for the player-facing summary and known
+limits.
 
-All of it is verified by the mod testing itself — see
+The core workflow is verified by the mod testing itself — see
 [docs/automated-testing.md](docs/automated-testing.md).
-
-Next up is the off-screen keep-alive, so a colony keeps working when no player is nearby.
-The groundwork is in [docs/off-screen-simulation.md](docs/off-screen-simulation.md).
 
 ## Credits
 

@@ -132,6 +132,26 @@ they surface in a plain grep for errors.
 
 ## Running it
 
+### Launch through Steam — never open the app or launcher script directly
+
+The test only runs when BepInEx has injected before Valheim starts. On macOS, Steam is
+part of that launch chain: its Valheim launch option must be:
+
+```text
+"/Users/kuku/Library/Application Support/Steam/steamapps/common/Valheim/start_game_bepinex.sh" %command% -console
+```
+
+Start the game with `open "steam://rungameid/892970"`. **Do not** use `open valheim.app`,
+or execute `start_game_bepinex.sh` yourself. The script relies on Steam's `%command%` /
+`SteamLaunch` handoff; bypassing it starts an unmodded game that reaches the menu normally
+but never loads Kukolony or AutoBoot.
+
+Before waiting for a test result, confirm `BepInEx/LogOutput.log` is newly written and
+contains both `Loading [Kukolony 0.0.1]` and `Kukolony 0.0.1 loaded`. If either line is
+absent, stop there: it is a loader/launch problem, not a failed mod test. See
+[`SETUP-macos.md`](SETUP-macos.md#bepinex-on-apple-silicon) for the Doorstop replacement
+that a BepInEx pack update can overwrite.
+
 ```sh
 # build and deploy
 dotnet build Kukolony.sln -c Debug

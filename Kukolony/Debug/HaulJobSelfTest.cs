@@ -615,7 +615,7 @@ namespace Kukolony.Debug
                 _report.Check(distance > 200f, "colony is far outside the player's active area",
                     $"{distance:F0}m away");
 
-                bool outside = ZNetScene.OutsideActiveArea(_colonyCentre, playerPosition);
+                bool outside = ZNetScene.OutsideActiveArea(_colonyCentre, ZoneSystem.GetZone(playerPosition));
                 _report.Note(outside
                     ? "colony is outside the vanilla active area"
                     : "colony counts as inside the active area (the keep-alive patches make it so)");

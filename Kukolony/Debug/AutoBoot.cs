@@ -111,7 +111,7 @@ namespace Kukolony.Debug
                 m_needsDB = false
             };
 
-            created.SaveWorldMetaData(DateTime.Now);
+            created.SaveWorldFWLData(DateTime.Now);
             return created;
         }
 

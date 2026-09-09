@@ -50,11 +50,14 @@ namespace Kukolony.Villagers
             vis.SetSkinColor(RandomSkinTone());
             vis.SetHairColor(RandomHairTone());
 
-            vis.SetHairItem(Pick(Hair));
-            vis.SetBeardItem(vis.GetModelIndex() == 0 ? Pick(Beards) : string.Empty);
+            // 1.0 made these take the stable hash rather than the prefab name. The ZDO
+            // always stored a hash - the API just says so now. 0 means "nothing worn",
+            // which is what an empty name used to mean.
+            vis.SetHairItem(Pick(Hair).GetStableHashCode());
+            vis.SetBeardItem(vis.GetModelIndex() == 0 ? Pick(Beards).GetStableHashCode() : 0);
 
-            vis.SetChestItem(Pick(Chests));
-            vis.SetLegItem(Pick(Legs));
+            vis.SetChestItem(Pick(Chests).GetStableHashCode());
+            vis.SetLegItem(Pick(Legs).GetStableHashCode());
 
             Log.Debug($"Rolled villager appearance: model={vis.GetModelIndex()}");
         }

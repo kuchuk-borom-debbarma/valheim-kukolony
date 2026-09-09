@@ -103,6 +103,12 @@ namespace Kukolony.Colonies
             return removed;
         }
 
+        /// <summary>
+        ///     How far above the object the hover text sits. Valheim 1.0 added this to
+        ///     Hoverable; zero keeps the vanilla placement.
+        /// </summary>
+        public float GetHoverOffset() => 0f;
+
         public string GetHoverName() => "$kukolony_colony";
 
         public string GetHoverText()

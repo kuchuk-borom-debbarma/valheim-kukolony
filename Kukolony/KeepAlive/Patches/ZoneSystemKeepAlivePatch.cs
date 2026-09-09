@@ -29,7 +29,7 @@ namespace Kukolony.KeepAlive.Patches
                 // __result reports whether that already happened.
                 bool spawnedThisPass = __result;
 
-                foreach (Vector2i zone in KeepAliveZones.All)
+                foreach (Vector2s zone in KeepAliveZones.All)
                 {
                     bool alreadyLoaded = __instance.m_zones.ContainsKey(zone);
 
