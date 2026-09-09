@@ -55,25 +55,25 @@ namespace Kukolony.KeepAlive
             int cap = ModConfig.KeepAliveMaxZones.Value;
             bool capped = false;
 
+            int haloSize = (rings * 2 + 1) * (rings * 2 + 1);
+
             foreach (Vector3 position in villagerPositions)
             {
-                if (capped)
+                // All-or-nothing per villager. Applying the cap mid-halo could leave a
+                // villager holding a couple of neighbour zones but not the one it is
+                // standing in - paying the loading cost while not being kept alive at all.
+                if (Zones.Count + haloSize > cap)
                 {
+                    capped = true;
                     break;
                 }
 
                 Vector2i centre = ZoneSystem.GetZone(position);
 
-                for (int y = -rings; y <= rings && !capped; y++)
+                for (int y = -rings; y <= rings; y++)
                 {
                     for (int x = -rings; x <= rings; x++)
                     {
-                        if (Zones.Count >= cap)
-                        {
-                            capped = true;
-                            break;
-                        }
-
                         Zones.Add(new Vector2i(centre.x + x, centre.y + y));
                     }
                 }

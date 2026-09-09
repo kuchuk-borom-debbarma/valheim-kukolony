@@ -35,7 +35,16 @@ namespace Kukolony.Jobs.Steps
                     return StepStatus.Succeeded;
                 }
 
-                Log.Debug("[job] bound container unavailable, falling back to nearest match");
+                // "Not instantiated" is a routine state off-screen and must not be read as
+                // "destroyed" - doing so made a villager quietly deposit into a different
+                // chest whenever the bound one was outside its loaded area, which is
+                // correct while a player watches and wrong the moment they leave.
+                if (ZDOMan.instance.GetZDO(bound) != null)
+                {
+                    return StepStatus.Running;
+                }
+
+                Log.Debug("[job] bound container no longer exists, falling back to nearest match");
             }
 
             Container nearest = FindNearestContainerHolding(context);

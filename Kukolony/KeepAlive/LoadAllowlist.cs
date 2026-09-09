@@ -72,6 +72,17 @@ namespace Kukolony.KeepAlive
                 return true;
             }
 
+            // Terrain modifications. Heightmap.Regenerate applies them only from a live
+            // TerrainComp, which has its own registry and no Piece component - so without
+            // this a kept zone silently reverts to raw world-gen: a levelled base becomes
+            // a hillside with the buildings still floating in it, and villagers path
+            // against ground that is not there. It snaps back the moment a player arrives,
+            // which makes it near-impossible to reproduce under observation.
+            if (prefab.GetComponent<TerrainComp>() != null)
+            {
+                return true;
+            }
+
             // Loose items are the raw material of every gathering job.
             if (prefab.GetComponent<ItemDrop>() != null)
             {
