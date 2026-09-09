@@ -15,6 +15,15 @@ namespace Kukolony
         /// <summary>How far a villager may drift from home before walking back.</summary>
         internal static ConfigEntry<float> GoHomeRadius { get; private set; }
 
+        /// <summary>How far villagers range from their work post.</summary>
+        internal static ConfigEntry<float> WorkPostRadius { get; private set; }
+
+        /// <summary>What a freshly placed post hauls until it is configured otherwise.</summary>
+        internal static ConfigEntry<string> WorkPostDefaultItem { get; private set; }
+
+        /// <summary>How far a villager will look for a post to work at.</summary>
+        internal static ConfigEntry<float> PostBindRadius { get; private set; }
+
         /// <summary>Development aid. Off by default so it never fires for a normal install.</summary>
         internal static ConfigEntry<bool> DebugSpawnEnabled { get; private set; }
 
@@ -29,6 +38,9 @@ namespace Kukolony
 
         /// <summary>Save and exit once the test has reported. Makes runs self-terminating.</summary>
         internal static ConfigEntry<bool> AutoTestQuitWhenDone { get; private set; }
+
+        /// <summary>Haul job acceptance test. Replaces the villager test for that run.</summary>
+        internal static ConfigEntry<bool> HaulTestEnabled { get; private set; }
 
         /// <summary>One-shot prefab diagnostic. Replaces the acceptance test for that run.</summary>
         internal static ConfigEntry<bool> DebugProbeEnabled { get; private set; }
@@ -45,6 +57,28 @@ namespace Kukolony
                 new ConfigDescription(
                     "How far a villager may wander from its home before it walks back, in metres.",
                     new AcceptableValueRange<float>(2f, 64f)));
+
+            WorkPostRadius = config.Bind(
+                "2 - Work posts",
+                nameof(WorkPostRadius),
+                24f,
+                new ConfigDescription(
+                    "How far villagers range from their work post when looking for work, in metres.",
+                    new AcceptableValueRange<float>(4f, 128f)));
+
+            WorkPostDefaultItem = config.Bind(
+                "2 - Work posts",
+                nameof(WorkPostDefaultItem),
+                "Wood",
+                "Item prefab a newly placed work post hauls until configured otherwise.");
+
+            PostBindRadius = config.Bind(
+                "2 - Work posts",
+                nameof(PostBindRadius),
+                32f,
+                new ConfigDescription(
+                    "How far a villager will look for a work post to bind itself to, in metres.",
+                    new AcceptableValueRange<float>(4f, 128f)));
 
             DebugSpawnEnabled = config.Bind(
                 "9 - Development",
@@ -77,6 +111,12 @@ namespace Kukolony
                 nameof(AutoTestQuitWhenDone),
                 true,
                 "Save and exit the game once the test has reported.");
+
+            HaulTestEnabled = config.Bind(
+                "9 - Development",
+                nameof(HaulTestEnabled),
+                false,
+                "Build a work post, a chest and a villager, drop wood, and verify the haul job runs.");
 
             DebugProbeEnabled = config.Bind(
                 "9 - Development",

@@ -31,12 +31,14 @@ namespace Kukolony
             AddLocalization();
 
             VillagerPrefab.Register();
+            WorkPosts.WorkPostPrefab.Register();
             _harmony.PatchAll(Assembly.GetExecutingAssembly());
 
             gameObject.AddComponent<Debug.DebugHotkeys>();
             gameObject.AddComponent<Debug.AutoBoot>();
             gameObject.AddComponent<Debug.VillagerSelfTest>();
             gameObject.AddComponent<Debug.PrefabProbe>();
+            gameObject.AddComponent<Debug.HaulJobSelfTest>();
 
             Log.Info($"{ModInfo.Name} {ModInfo.Version} loaded");
         }
@@ -44,6 +46,10 @@ namespace Kukolony
         private static void AddLocalization()
         {
             Localization.AddTranslation("English", "kukolony_villager", "Villager");
+            Localization.AddTranslation("English", "kukolony_villager_bag", "Villager's bag");
+            Localization.AddTranslation("English", "kukolony_workpost", "Work Post");
+            Localization.AddTranslation("English", "kukolony_workpost_desc",
+                "Villagers nearby will work this post.");
         }
     }
 }

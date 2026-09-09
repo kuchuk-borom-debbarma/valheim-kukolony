@@ -1,4 +1,6 @@
 using Kukolony.Core;
+using Kukolony.Jobs;
+using Kukolony.WorkPosts;
 using UnityEngine;
 
 namespace Kukolony.Villagers
@@ -25,6 +27,7 @@ namespace Kukolony.Villagers
         private Container _bag;
 
         private bool _pathFailureReported;
+        private readonly JobRunner _jobRunner = new JobRunner();
 
         /// <summary>Short description of what this villager is doing, for hover text.</summary>
         internal string Activity { get; private set; } = "idle";
@@ -96,7 +99,14 @@ namespace Kukolony.Villagers
             EnsureIdentity();
             EnsureAppearance();
             EnsureTamed();
-            StayNearHome(deltaTime);
+
+            // Work takes priority over idling. A villager only wanders home when it has
+            // nothing else to do.
+            if (!TryWork(deltaTime))
+            {
+                StayNearHome(deltaTime);
+            }
+
             return true;
         }
 
@@ -206,7 +216,71 @@ namespace Kukolony.Villagers
         }
 
         /// <summary>
-        ///     The only behaviour for now: stay within reach of home, otherwise walk back.
+        ///     Binds to a work post if unemployed, then runs one step of its job.
+        /// </summary>
+        /// <returns>True if the villager is working, so idling should be skipped.</returns>
+        private bool TryWork(float deltaTime)
+        {
+            WorkPost post = ResolvePost();
+            if (post == null)
+            {
+                return false;
+            }
+
+            post.EnsureDefaults();
+
+            Job job = JobLibrary.Find(post.State.JobId);
+            if (job == null)
+            {
+                return false;
+            }
+
+            _jobRunner.Tick(job, new JobContext(this, _ai, _bag, post, deltaTime));
+            SetActivity("working");
+            return true;
+        }
+
+        /// <summary>
+        ///     The bound post, claiming the nearest one if unemployed. Binding is by
+        ///     ZDOID so it survives the post unloading and reloading.
+        /// </summary>
+        private WorkPost ResolvePost()
+        {
+            VillagerState state = State;
+            ZDOID bound = state.Post;
+
+            if (!bound.IsNone())
+            {
+                GameObject postObject = ZNetScene.instance.FindInstance(bound);
+                if (postObject != null && postObject.TryGetComponent(out WorkPost existing))
+                {
+                    return existing;
+                }
+
+                // Out of range or destroyed. Stay bound rather than stealing another
+                // post - a villager whose post is merely unloaded should not resign.
+                return null;
+            }
+
+            WorkPost nearest = WorkPost.FindNearest(transform.position, ModConfig.PostBindRadius.Value);
+            if (nearest == null)
+            {
+                return null;
+            }
+
+            ZDOID id = nearest.Id;
+            if (id.IsNone())
+            {
+                return null;
+            }
+
+            state.SetPost(id);
+            Log.Info($"Villager '{state.Name}' took up work at a post");
+            return nearest;
+        }
+
+        /// <summary>
+        ///     Idle behaviour: stay within reach of home, otherwise walk back.
         ///
         ///     Deliberately concrete rather than hidden behind a behaviour interface.
         ///     One example is not enough to know the right abstraction, and the

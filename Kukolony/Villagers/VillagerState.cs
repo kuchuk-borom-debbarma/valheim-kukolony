@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Kukolony.Villagers
@@ -22,6 +23,11 @@ namespace Kukolony.Villagers
         private static readonly int HomeKey = "kukolony.home".GetStableHashCode();
         private static readonly int NameKey = "kukolony.name".GetStableHashCode();
         private static readonly int AppearanceKey = "kukolony.appearance".GetStableHashCode();
+        // A ZDOID occupies two ZDO slots (user id + object id), so its cached key is a
+        // hash pair rather than a single hash.
+        private static readonly KeyValuePair<int, int> PostKey = ZDO.GetHashZDOID("kukolony.post");
+        private static readonly int StepKey = "kukolony.step".GetStableHashCode();
+        private static readonly KeyValuePair<int, int> StepTargetKey = ZDO.GetHashZDOID("kukolony.step.target");
 
         private readonly ZDO _zdo;
 
@@ -49,7 +55,24 @@ namespace Kukolony.Villagers
         /// </summary>
         internal bool HasAppearance => _zdo?.GetBool(AppearanceKey, false) ?? false;
 
+        /// <summary>The work post this villager is bound to. None means unemployed.</summary>
+        internal ZDOID Post => _zdo?.GetZDOID(PostKey) ?? ZDOID.None;
+
+        internal bool HasPost => !Post.IsNone();
+
+        /// <summary>How far through the current job's step list this villager is.</summary>
+        internal int StepIndex => _zdo?.GetInt(StepKey, 0) ?? 0;
+
+        /// <summary>What the current step is acting on.</summary>
+        internal ZDOID StepTarget => _zdo?.GetZDOID(StepTargetKey) ?? ZDOID.None;
+
         internal void SetHome(Vector3 position) => _zdo.Set(HomeKey, position);
+
+        internal void SetPost(ZDOID post) => _zdo.Set(PostKey, post);
+
+        internal void SetStepIndex(int index) => _zdo.Set(StepKey, index);
+
+        internal void SetStepTarget(ZDOID target) => _zdo.Set(StepTargetKey, target);
 
         internal void MarkAppearanceRolled() => _zdo.Set(AppearanceKey, true);
 
