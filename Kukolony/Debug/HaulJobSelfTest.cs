@@ -75,7 +75,8 @@ namespace Kukolony.Debug
 
         private void Update()
         {
-            if (!ModConfig.HaulTestEnabled.Value || _phase == Phase.Done)
+            if (!ModConfig.HaulTestEnabled.Value || ModConfig.DebugScreenshotEnabled.Value
+                || _phase == Phase.Done)
             {
                 return;
             }
@@ -629,6 +630,44 @@ namespace Kukolony.Debug
 
             _report.Note($"allowlist covers {KeepAlive.LoadAllowlist.Count} prefab(s); " +
                          $"filtering {(ModConfig.KeepAliveFilterObjects.Value ? "on" : "off")}");
+
+            ReportCorridor();
+        }
+
+        /// <summary>
+        ///     Whether the ground between the colony and the far chest is actually held.
+        ///     A villager cannot path across a zone that is not loaded, so a stalled haul
+        ///     is either a held-zone gap or something else entirely - and guessing which
+        ///     is what wasted the last two runs.
+        /// </summary>
+        private void ReportCorridor()
+        {
+            ZDO chest = ZDOMan.instance?.GetZDO(_chestId);
+            if (chest == null)
+            {
+                _report.Note("bound chest ZDO is gone, so the corridor cannot be sampled");
+                return;
+            }
+
+            Vector3 chestPosition = chest.GetPosition();
+            _report.Check(KeepAlive.KeepAliveZones.Contains(ZoneSystem.GetZone(chestPosition)),
+                "the destination chest's own zone is held open");
+
+            int held = 0;
+            int total = 0;
+            for (float t = 0f; t <= 1f; t += 0.1f)
+            {
+                Vector3 point = Vector3.Lerp(_colonyCentre, chestPosition, t);
+                total++;
+                if (KeepAlive.KeepAliveZones.Contains(ZoneSystem.GetZone(point)))
+                {
+                    held++;
+                }
+            }
+
+            _report.Check(held == total,
+                "every zone between the colony and the chest is held (a gap breaks pathing)",
+                $"{held}/{total} sample points held");
         }
 
         /// <summary>

@@ -25,6 +25,15 @@ namespace Kukolony.Gui
         private const int VillagerRows = 4;
         private const int PickerRows = 5;
 
+        // Two heights, because the picker is only sometimes there. A panel sized for the
+        // picker leaves a tall empty band below the rows whenever it is closed, which
+        // reads as though something failed to draw.
+        private const float PanelWidth = 580f;
+        private const float HeightWithPicker = 676f;
+        private const float HeightCollapsed = 452f;
+        private const float PickerHintHeight = 46f;
+        private const float PickerRowStride = 30f;
+
         /// <summary>What the shared picker strip is currently offering.</summary>
         private enum PickerMode
         {
@@ -41,7 +50,10 @@ namespace Kukolony.Gui
         private Text _counts;
         private Text _cost;
         private Text _hint;
-        private readonly List<Text> _villagerLabels = new List<Text>();
+        private readonly List<Text> _nameLabels = new List<Text>();
+        private readonly List<Text> _homeLabels = new List<Text>();
+        private readonly List<Text> _workLabels = new List<Text>();
+        private Text _pageLabel;
         private readonly List<Button> _homeButtons = new List<Button>();
         private readonly List<Button> _workButtons = new List<Button>();
         private readonly List<Button> _pickerButtons = new List<Button>();
@@ -156,7 +168,7 @@ namespace Kukolony.Gui
         {
             _root = GUIManager.Instance.CreateWoodpanel(
                 transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                new Vector2(0f, 0f), 580f, 740f, draggable: true);
+                new Vector2(0f, 0f), PanelWidth, HeightWithPicker, draggable: true);
             _root.SetActive(false);
 
             Title("Colony", -26f);
@@ -170,12 +182,15 @@ namespace Kukolony.Gui
             _counts = Label(string.Empty, -96f, 15, Color.white);
             _cost = Label(string.Empty, -118f, 13, Color.grey);
 
-            AddNearbyButton("+ storage", ColonyMemberKind.Container, -200f);
-            AddNearbyButton("+ stations", ColonyMemberKind.Station, -100f);
-            AddNearbyButton("+ homes", ColonyMemberKind.Home, 0f);
+            // Four buttons across the panel: the stride has to exceed the width or the
+            // borders overlap and it reads as one smeared control.
+            AddNearbyButton("+ storage", ColonyMemberKind.Container, -AddStride * 1.5f);
+            AddNearbyButton("+ stations", ColonyMemberKind.Station, -AddStride * 0.5f);
+            AddNearbyButton("+ homes", ColonyMemberKind.Home, AddStride * 0.5f);
 
             GameObject spawn = GUIManager.Instance.CreateButton("+ villager", _root.transform,
-                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(100f, -150f), 130f, 28f);
+                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                new Vector2(AddStride * 1.5f, -150f), AddWidth, 28f);
             spawn.GetComponent<Button>().onClick.AddListener(SpawnVillager);
 
             BuildVillagerRows();
@@ -186,10 +201,13 @@ namespace Kukolony.Gui
             close.GetComponent<Button>().onClick.AddListener(Close);
         }
 
+        private const float AddWidth = 124f;
+        private const float AddStride = 132f;
+
         private void AddNearbyButton(string text, ColonyMemberKind kind, float x)
         {
             GameObject button = GUIManager.Instance.CreateButton(text, _root.transform,
-                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(x, -150f), 130f, 28f);
+                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(x, -150f), AddWidth, 28f);
             button.GetComponent<Button>().onClick.AddListener(() => ShowAddNearby(kind));
         }
 
@@ -202,10 +220,9 @@ namespace Kukolony.Gui
                 float y = -226f - i * 34f;
                 int row = i;
 
-                _villagerLabels.Add(GUIManager.Instance.CreateText(string.Empty, _root.transform,
-                    new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(190f, y),
-                    GUIManager.Instance.AveriaSerifBold, 15, Color.white,
-                    true, Color.black, 340f, 26f, false).GetComponent<Text>());
+                _nameLabels.Add(Column(112f, 18f, y));
+                _homeLabels.Add(Column(136f, 138f, y));
+                _workLabels.Add(Column(124f, 282f, y));
 
                 GameObject home = GUIManager.Instance.CreateButton("home", _root.transform,
                     new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-146f, y), 84f, 26f);
@@ -225,6 +242,29 @@ namespace Kukolony.Gui
             GameObject next = GUIManager.Instance.CreateButton("next >", _root.transform,
                 new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(80f, -374f), 100f, 26f);
             next.GetComponent<Button>().onClick.AddListener(() => ChangePage(1));
+
+            // Without this, a colony of five villagers hides one behind a next button
+            // that gives no sign there is anything behind it.
+            _pageLabel = Label(string.Empty, -374f, 14, Color.grey);
+
+            // Label() boxes are left-aligned like the counts above; the page indicator
+            // belongs between the two pager buttons instead.
+            _pageLabel.alignment = TextAnchor.MiddleCenter;
+        }
+
+        /// <summary>
+        ///     A left-aligned column of fixed width. Positions are offsets of the box
+        ///     centre from the panel's top-left corner, hence the half-width.
+        /// </summary>
+        private Text Column(float width, float left, float y)
+        {
+            Text text = GUIManager.Instance.CreateText(string.Empty, _root.transform,
+                new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(left + width * 0.5f, y),
+                GUIManager.Instance.AveriaSerifBold, 15, Color.white,
+                true, Color.black, width, 26f, false).GetComponent<Text>();
+            text.alignment = TextAnchor.MiddleLeft;
+            text.horizontalOverflow = HorizontalWrapMode.Overflow;
+            return text;
         }
 
         private void BuildPicker()
@@ -235,7 +275,7 @@ namespace Kukolony.Gui
             {
                 GameObject row = GUIManager.Instance.CreateButton(string.Empty, _root.transform,
                     new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                    new Vector2(0f, -448f - i * 30f), 500f, 28f);
+                    new Vector2(0f, -448f - i * PickerRowStride), 500f, 28f);
                 row.SetActive(false);
                 _pickerButtons.Add(row.GetComponent<Button>());
             }
@@ -282,6 +322,9 @@ namespace Kukolony.Gui
             _mode = mode;
             RefreshPicker();
         }
+
+        /// <summary>Opens the home picker for a row, for the screenshot harness.</summary>
+        internal void ShowHomePickerForTest(int row) => BeginAssign(row, PickerMode.AssignHome);
 
         private void ShowAddNearby(ColonyMemberKind kind)
         {
@@ -373,13 +416,20 @@ namespace Kukolony.Gui
                 int index = _page * VillagerRows + i;
                 bool used = index < villagers.Count;
 
-                _villagerLabels[i].text = used
+                ColonyAssignments.VillagerRow row = used
                     ? ColonyAssignments.DescribeVillager(state, villagers[index])
-                    : string.Empty;
+                    : default;
+
+                _nameLabels[i].text = used ? row.Name : string.Empty;
+                _homeLabels[i].text = used ? $"home: {row.Home}" : string.Empty;
+                _workLabels[i].text = used ? $"work: {row.Work}" : string.Empty;
 
                 _homeButtons[i].gameObject.SetActive(used);
                 _workButtons[i].gameObject.SetActive(used);
             }
+
+            int pages = Mathf.Max(1, Mathf.CeilToInt(villagers.Count / (float)VillagerRows));
+            _pageLabel.text = pages > 1 ? $"{_page + 1} / {pages}" : string.Empty;
         }
 
         private void RefreshPicker()
@@ -394,17 +444,38 @@ namespace Kukolony.Gui
             {
                 case PickerMode.AddNearby:
                     ShowNearbyCandidates();
-                    return;
+                    break;
                 case PickerMode.AssignHome:
                     ShowMemberChoices(state, ColonyMemberKind.Home);
-                    return;
+                    break;
                 case PickerMode.AssignStation:
                     ShowMemberChoices(state, ColonyMemberKind.Station);
-                    return;
+                    break;
                 default:
                     HidePicker();
                     return;
             }
+
+            FitToPicker();
+        }
+
+        /// <summary>
+        ///     Grows the panel to just fit however many choices the picker is offering, so
+        ///     a two-bed colony does not get the same tall empty box as a five-bed one.
+        /// </summary>
+        private void FitToPicker()
+        {
+            int shown = 0;
+            foreach (Button button in _pickerButtons)
+            {
+                if (button.gameObject.activeSelf)
+                {
+                    shown++;
+                }
+            }
+
+            float needed = HeightCollapsed + PickerHintHeight + shown * PickerRowStride;
+            Resize(Mathf.Min(needed, HeightWithPicker));
         }
 
         private void HidePicker()
@@ -413,6 +484,21 @@ namespace Kukolony.Gui
             foreach (Button button in _pickerButtons)
             {
                 button.gameObject.SetActive(false);
+            }
+
+            Resize(HeightCollapsed);
+        }
+
+        /// <summary>
+        ///     Close is anchored to the bottom edge, so changing the height moves it with
+        ///     the panel and nothing else shifts.
+        /// </summary>
+        private void Resize(float height)
+        {
+            RectTransform rect = _root.transform as RectTransform;
+            if (rect != null)
+            {
+                rect.sizeDelta = new Vector2(PanelWidth, height);
             }
         }
 
@@ -485,7 +571,7 @@ namespace Kukolony.Gui
             for (int i = 0; i < members.Count && row < _pickerButtons.Count; i++, row++)
             {
                 ZDOID member = members[i];
-                Bind(_pickerButtons[row], ColonyAssignments.DescribeChoice(state, kind, member, i), () =>
+                Bind(_pickerButtons[row], ColonyAssignments.DescribeChoice(state, kind, member, i, _subject), () =>
                 {
                     if (kind == ColonyMemberKind.Home)
                     {

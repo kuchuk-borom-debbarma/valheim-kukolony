@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Kukolony.Colonies;
 using Kukolony.Core;
 using Kukolony.Villagers;
 using Kukolony.WorkPosts;
@@ -20,8 +21,14 @@ namespace Kukolony.Debug
     /// </summary>
     internal static class TestWorld
     {
-        /// <summary>Generous enough to catch anything a previous run scattered around.</summary>
-        private const float PurgeRadius = 80f;
+        /// <summary>
+        ///     Has to reach past the far destination chest the haul test places at 140m.
+        ///     At 80m it did not, so chests piled up at the destination run after run.
+        /// </summary>
+        private const float PurgeRadius = 220f;
+
+        /// <summary>Rounds of the ZDO sweep before giving up, so a bug cannot hang a run.</summary>
+        private const int MaxScanRounds = 500;
 
         internal static void Purge(Vector3 around)
         {
@@ -29,7 +36,56 @@ namespace Kukolony.Debug
             int posts = DestroyAll(CollectPosts());
             int props = DestroyAll(CollectProps(around));
 
-            Log.Info($"[TestWorld] purged {villagers} villager(s), {posts} post(s), {props} prop(s)");
+            // The lists above only see what is loaded. Anything the last run left in a
+            // zone that is not loaded right now survives a purge - and then our own
+            // keep-alive loads its zone and resurrects it mid-test. That is not a
+            // hypothetical: a screenshot run left five villagers behind, they came back
+            // during the next haul run, and their halos ate the zone budget.
+            int stale = DestroyZdosWideWorld(VillagerPrefab.PrefabName)
+                        + DestroyZdosWideWorld(WorkPostPrefab.PrefabName)
+                        + DestroyZdosWideWorld(ColonyPrefab.PrefabName);
+
+            ColonyRegistry.Clear();
+
+            Log.Info($"[TestWorld] purged {villagers} villager(s), {posts} post(s), "
+                     + $"{props} prop(s), {stale} unloaded ZDO(s)");
+        }
+
+        /// <summary>
+        ///     Destroys every ZDO of a prefab anywhere in the world, loaded or not.
+        ///     Ownership first, because only the owner may destroy a ZDO.
+        /// </summary>
+        private static int DestroyZdosWideWorld(string prefabName)
+        {
+            if (ZDOMan.instance == null)
+            {
+                return 0;
+            }
+
+            List<ZDO> found = new List<ZDO>();
+            int index = 0;
+            for (int round = 0; round < MaxScanRounds; round++)
+            {
+                if (ZDOMan.instance.GetAllZDOsWithPrefabIterative(prefabName, found, ref index))
+                {
+                    break;
+                }
+            }
+
+            int destroyed = 0;
+            foreach (ZDO zdo in found)
+            {
+                if (zdo == null || !zdo.IsValid())
+                {
+                    continue;
+                }
+
+                zdo.SetOwner(ZDOMan.GetSessionID());
+                ZDOMan.instance.DestroyZDO(zdo);
+                destroyed++;
+            }
+
+            return destroyed;
         }
 
         private static List<GameObject> CollectVillagers()

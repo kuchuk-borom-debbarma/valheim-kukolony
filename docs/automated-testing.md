@@ -202,3 +202,52 @@ Automation proves correctness, not feel. Whether a villager *looks* right, wheth
 text reads well, whether the pacing is satisfying — those still need a person. Use the
 harness to make the correctness questions cheap, so human attention goes to the questions
 only a human can answer.
+
+## Seeing the UI: screenshots from inside the game
+
+The harness can prove every rule behind a button, but not whether a panel *reads* well -
+whether columns line up, whether buttons overlap, whether a band of empty space looks
+like something failed to draw. Those are the defects that only show up when looked at.
+
+`DebugScreenshotEnabled` builds a populated colony (hearth, post, chest, three beds, five
+villagers), assigns everyone, opens the panel and photographs it, then quits:
+
+```
+DebugScreenshotEnabled = true
+DebugScreenshotPath = /tmp/kukolony-shots
+```
+
+It writes two frames - the panel at rest and the panel mid-assignment, which is the busiest
+it ever gets. The game captures itself rather than going through the OS: `screencapture`
+needs Screen Recording permission that a shell session does not have, and
+`ScreenCapture.CaptureScreenshotAsTexture` needs no permission at all and captures exactly
+what a player sees. The capture has to happen after `WaitForEndOfFrame`, and the PNG is
+written with `File.WriteAllBytes` rather than `ScreenCapture.CaptureScreenshot`, whose path
+is relative to whatever the working directory happens to be.
+
+Four layout defects and one naming defect were found this way, none of which any assertion
+would have caught: overlapping add-buttons, ragged row columns (one label per row means a
+short name drags the following text left), a tall empty band below the rows whenever the
+picker was closed, a pager with no page indicator, and two villagers in one colony both
+named "Leif" - which matters because the panel identifies a villager by name and nothing
+else.
+
+## The reusable world accumulates, and a green run can be the reason
+
+Reusing one world is much faster than generating one per run, but `TestWorld.Purge` was
+only destroying what was *loaded*. Anything a previous run left in a zone that was not
+loaded at that moment survived - and then the keep-alive loaded its zone and resurrected it
+mid-test. The prop sweep also only reached 80m, while the haul test places its destination
+chest at 140m, so chests piled up at the destination run after run.
+
+This is worth stating plainly because the failure was not "the test broke": it was **the
+test passing for the wrong reason**. Eight stale villagers held 39 of the 48 available
+zones open, and the far-chest delivery may have been riding on zones that had nothing to do
+with the colony under test. With the world genuinely clean the same test holds 21 zones and
+still passes (2/2 in 62s, corridor 10/10) - but that is now a fact about the mod rather
+than a fact about the litter.
+
+`Purge` therefore sweeps ZDOs world-wide by prefab (villagers, posts, hearths), loaded or
+not, and props out to 220m. `ReportCorridor` asserts that the chest's own zone and every
+zone between it and the colony are held, so a stalled haul distinguishes a held-zone gap
+from anything else instead of being diagnosed by guesswork.

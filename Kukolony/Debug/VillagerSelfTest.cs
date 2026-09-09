@@ -54,7 +54,8 @@ namespace Kukolony.Debug
             // The probe takes over the run when enabled; two things quitting the game
             // at once would truncate whichever log block came second.
             if (!ModConfig.AutoTestEnabled.Value || ModConfig.DebugProbeEnabled.Value
-                || ModConfig.HaulTestEnabled.Value || _phase == Phase.Done)
+                || ModConfig.HaulTestEnabled.Value || ModConfig.DebugScreenshotEnabled.Value
+                || _phase == Phase.Done)
             {
                 return;
             }

@@ -67,6 +67,12 @@ namespace Kukolony
         /// <summary>Haul job acceptance test. Replaces the villager test for that run.</summary>
         internal static ConfigEntry<bool> HaulTestEnabled { get; private set; }
 
+        /// <summary>Build a populated colony, open the panel, and photograph it.</summary>
+        internal static ConfigEntry<bool> DebugScreenshotEnabled { get; private set; }
+
+        /// <summary>Where panel screenshots are written.</summary>
+        internal static ConfigEntry<string> DebugScreenshotPath { get; private set; }
+
         /// <summary>One-shot prefab diagnostic. Replaces the acceptance test for that run.</summary>
         internal static ConfigEntry<bool> DebugProbeEnabled { get; private set; }
 
@@ -199,6 +205,19 @@ namespace Kukolony
                 nameof(HaulTestEnabled),
                 false,
                 "Build a work post, a chest and a villager, drop wood, and verify the haul job runs.");
+
+            DebugScreenshotEnabled = config.Bind(
+                "9 - Development",
+                nameof(DebugScreenshotEnabled),
+                false,
+                "Build a populated colony, open the panel and screenshot it. The harness can "
+                + "verify every rule behind a button but not whether the panel reads well.");
+
+            DebugScreenshotPath = config.Bind(
+                "9 - Development",
+                nameof(DebugScreenshotPath),
+                "/tmp/kukolony-shots",
+                "Directory for panel screenshots.");
 
             DebugProbeEnabled = config.Bind(
                 "9 - Development",

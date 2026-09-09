@@ -222,7 +222,7 @@ namespace Kukolony.Villagers
 
             if (!state.HasName)
             {
-                string chosen = VillagerNames.Random();
+                string chosen = VillagerNames.Pick(NamesInUse());
                 state.SetName(chosen);
                 Log.Info($"Villager named '{chosen}'");
             }
@@ -233,6 +233,48 @@ namespace Kukolony.Villagers
                 state.SetHome(home);
                 Log.Info($"Villager '{state.Name}' made home at ({home.x:F1}, {home.y:F1}, {home.z:F1})");
             }
+        }
+
+        /// <summary>
+        ///     Names already spoken for. Loaded villagers always count; if this one is
+        ///     already in a colony, its fellow members count too - read from their ZDOs,
+        ///     so members nowhere near a player are still included.
+        /// </summary>
+        private HashSet<string> NamesInUse()
+        {
+            HashSet<string> taken = new HashSet<string>();
+
+            foreach (Villager other in Instances)
+            {
+                if (other != this && other.State.HasName)
+                {
+                    taken.Add(other.State.Name);
+                }
+            }
+
+            ZDO zdo = _nview != null ? _nview.GetZDO() : null;
+            if (zdo == null)
+            {
+                return taken;
+            }
+
+            ZDO colonyZdo = ZDOMan.instance?.GetZDO(Colonies.ColonyMembership.GetColony(zdo));
+            if (colonyZdo == null)
+            {
+                return taken;
+            }
+
+            foreach (ZDOID member in new Colonies.ColonyState(colonyZdo)
+                         .GetMembers(Colonies.ColonyMemberKind.Villager))
+            {
+                ZDO memberZdo = ZDOMan.instance?.GetZDO(member);
+                if (memberZdo != null && memberZdo != zdo)
+                {
+                    taken.Add(new VillagerState(memberZdo).Name);
+                }
+            }
+
+            return taken;
         }
 
         /// <summary>

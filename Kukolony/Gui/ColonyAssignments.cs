@@ -143,12 +143,31 @@ namespace Kukolony.Gui
         }
 
         /// <summary>One line describing a villager's current assignments.</summary>
-        internal static string DescribeVillager(ColonyState colony, ZDOID villager)
+        /// <summary>
+        ///     One villager's row, split into columns. Returned in parts rather than as a
+        ///     joined string so the panel can align them - a single label makes every row
+        ///     start its "home:" at a different place, depending on the length of the name.
+        /// </summary>
+        internal readonly struct VillagerRow
+        {
+            internal VillagerRow(string name, string home, string work)
+            {
+                Name = name;
+                Home = home;
+                Work = work;
+            }
+
+            internal string Name { get; }
+            internal string Home { get; }
+            internal string Work { get; }
+        }
+
+        internal static VillagerRow DescribeVillager(ColonyState colony, ZDOID villager)
         {
             ZDO zdo = ZDOMan.instance?.GetZDO(villager);
             if (zdo == null)
             {
-                return "(missing)";
+                return new VillagerRow("(missing)", "-", "-");
             }
 
             VillagerState state = new VillagerState(zdo);
@@ -159,7 +178,7 @@ namespace Kukolony.Gui
                 ? LabelFor(colony, ColonyMemberKind.Station, state.Post)
                 : "-";
 
-            return $"{NameOf(villager)}   home: {home}   work: {work}";
+            return new VillagerRow(NameOf(villager), home, work);
         }
 
         /// <summary>
@@ -181,7 +200,8 @@ namespace Kukolony.Gui
         }
 
         /// <summary>Picker label: what it is, and who already has it.</summary>
-        internal static string DescribeChoice(ColonyState colony, ColonyMemberKind kind, ZDOID member, int index)
+        internal static string DescribeChoice(ColonyState colony, ColonyMemberKind kind, ZDOID member,
+            int index, ZDOID subject)
         {
             string prefix = kind == ColonyMemberKind.Home ? "Bed" : "Post";
             string distance = DistanceLabel(colony, member);
@@ -189,7 +209,12 @@ namespace Kukolony.Gui
             if (kind == ColonyMemberKind.Home)
             {
                 ZDOID owner = HomeOwner(colony, member);
-                string held = owner.IsNone() ? "free" : NameOf(owner);
+
+                // Naming the subject as the owner of its own bed says nothing; what the
+                // player needs to see is which row is the one already chosen.
+                string held = owner.IsNone() ? "free"
+                    : owner == subject ? "current"
+                    : NameOf(owner);
                 return $"{prefix} {index + 1}{distance} ({held})";
             }
 
