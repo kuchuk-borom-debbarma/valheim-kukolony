@@ -17,6 +17,7 @@ Read in this order:
 | [Off-screen simulation](docs/off-screen-simulation.md) | How zone and instance lifetime work, and how we extend them |
 | [Multiplayer](docs/multiplayer.md) | ZDO ownership arbitration and what it forces on job code |
 | [Jobs](docs/jobs.md) | The job engine, target claims, JSON definitions, and the work post panel |
+| [Colonies](docs/colonies.md) | What a colony owns, why it has no radius, and how that makes far members reachable |
 | [API notes](docs/api-notes.md) | The game and Jötunn calls we actually use |
 | [NPC design research](docs/npc-design.md) | Player-model villagers, appearance, and the job architecture |
 | [Modding basics](docs/modding-basics.md) | BepInEx/Harmony/Jötunn conventions and traps |

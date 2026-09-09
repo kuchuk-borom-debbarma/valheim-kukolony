@@ -30,6 +30,10 @@ namespace Kukolony.Villagers
         private static readonly KeyValuePair<int, int> StepTargetKey = ZDO.GetHashZDOID("kukolony.step.target");
         private static readonly int ClaimedSinceKey = "kukolony.step.since".GetStableHashCode();
 
+        // Distinct from HomeKey, which is the spawn-position fallback for a villager with
+        // no bed assigned.
+        private static readonly KeyValuePair<int, int> HomeBedKey = ZDO.GetHashZDOID("kukolony.home.bed");
+
         private readonly ZDO _zdo;
 
         internal VillagerState(ZDO zdo)
@@ -67,7 +71,14 @@ namespace Kukolony.Villagers
         /// <summary>What the current step is acting on.</summary>
         internal ZDOID StepTarget => _zdo?.GetZDOID(StepTargetKey) ?? ZDOID.None;
 
+        /// <summary>The bed this villager calls home, or None if it has not been given one.</summary>
+        internal ZDOID HomeBed => _zdo?.GetZDOID(HomeBedKey) ?? ZDOID.None;
+
+        internal bool HasHomeBed => !HomeBed.IsNone();
+
         internal void SetHome(Vector3 position) => _zdo.Set(HomeKey, position);
+
+        internal void SetHomeBed(ZDOID bed) => _zdo.Set(HomeBedKey, bed);
 
         internal void SetPost(ZDOID post) => _zdo.Set(PostKey, post);
 

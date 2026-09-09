@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using Kukolony.Colonies;
 using Kukolony.Core;
 using Kukolony.Villagers;
 using UnityEngine;
@@ -24,6 +25,8 @@ namespace Kukolony.KeepAlive
     {
         /// <summary>Cheap enough to run often; the expensive part is the ZDO scan.</summary>
         private const float RefreshIntervalSeconds = 1f;
+
+        private static readonly int VillagerPrefabHash = VillagerPrefab.PrefabName.GetStableHashCode();
 
         private readonly List<ZDO> _villagerZdos = new List<ZDO>();
         private readonly List<Vector3> _positions = new List<Vector3>();
@@ -67,7 +70,7 @@ namespace Kukolony.KeepAlive
             if (!_scanning && _scanTimer >= ModConfig.KeepAliveScanSeconds.Value)
             {
                 _scanTimer = 0f;
-                StartCoroutine(ScanForVillagerZdos());
+                StartCoroutine(ScanWorld());
             }
 
             _refreshTimer += Time.deltaTime;
@@ -110,6 +113,7 @@ namespace Kukolony.KeepAlive
             _scanTimer = 0f;
             _refreshTimer = 0f;
             _villagerZdos.Clear();
+            ColonyRegistry.Clear();
             KeepAliveZones.Clear();
             LoadAllowlist.Clear();
             StopAllCoroutines();
@@ -133,11 +137,19 @@ namespace Kukolony.KeepAlive
             // force the zone that will bring them back.
             foreach (ZDO zdo in _villagerZdos)
             {
-                if (zdo != null && zdo.IsValid())
+                // A recycled ZDO reports valid again as an unrelated object - ZDOMan pools
+                // and reuses them - so confirm it is still a villager before holding a
+                // halo open around wherever it now is.
+                if (zdo != null && zdo.IsValid() && zdo.GetPrefab() == VillagerPrefabHash)
                 {
                     _positions.Add(zdo.GetPosition());
                 }
             }
+
+            // Everything the colonies own: chests, workstations, homes. This is what makes
+            // a far-away container reachable - its zone is held open because the colony
+            // knows about it, not because a villager happens to be standing near it.
+            ColonyRegistry.CollectMemberPositions(_positions);
 
             KeepAliveZones.Rebuild(_positions);
         }
@@ -146,12 +158,14 @@ namespace Kukolony.KeepAlive
         ///     Walks every villager ZDO in the world without instantiating anything.
         ///     Iterative so the cost is spread over frames rather than spiking.
         /// </summary>
-        private IEnumerator ScanForVillagerZdos()
+        private IEnumerator ScanWorld()
         {
             _scanning = true;
 
             try
             {
+                yield return ColonyRegistry.Scan();
+
                 List<ZDO> found = new List<ZDO>();
                 int index = 0;
 

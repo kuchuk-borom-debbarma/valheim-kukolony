@@ -48,6 +48,13 @@ namespace Kukolony.Debug
         private readonly List<Villager> _villagers = new List<Villager>();
         private readonly HashSet<string> _seenActivities = new HashSet<string>();
         private readonly HashSet<string> _seenHoverLines = new HashSet<string>();
+        /// <summary>
+        ///     Well outside a villager's 1-ring halo (3x3 zones of 64m), so the chest is
+        ///     only reachable because the colony holds its zone open.
+        /// </summary>
+        private const float FarChestDistance = 140f;
+
+        private Colonies.Colony _colony;
         private Vector3 _colonyCentre;
         private int _rawCollisions;
         private string _rawSample;
@@ -55,7 +62,15 @@ namespace Kukolony.Debug
         private int _sharedTargetSamples;
         private string _worstCollision;
         private WorkPost _post;
-        private Container _chest;
+        private Colonies.Colony _hearth;
+
+        /// <summary>
+        ///     The chest is tracked by ZDOID, not by reference. Off-screen its GameObject
+        ///     is destroyed and recreated as zones cycle, so a held reference goes null
+        ///     and reads as "the chest is gone" - which is how an earlier version of this
+        ///     test reported a working haul as a failure.
+        /// </summary>
+        private ZDOID _chestId = ZDOID.None;
         private float _timer;
 
         private void Update()
@@ -107,8 +122,18 @@ namespace Kukolony.Debug
             _post = Spawn<WorkPost>(WorkPostPrefab.PrefabName, origin + Vector3.forward * 4f);
             _report.Check(_post != null, "work post piece placed");
 
-            _chest = Spawn<Container>("piece_chest_wood", origin + Vector3.right * 6f);
-            _report.Check(_chest != null, "destination chest placed");
+            _hearth = Spawn<Colonies.Colony>(Colonies.ColonyPrefab.PrefabName, origin + Vector3.back * 4f);
+            _report.Check(_hearth != null, "colony hearth placed");
+
+            // Deliberately far: beyond any villager halo, so only colony membership can
+            // make it reachable. This is the question that prompted colonies, as a test.
+            Container chest = Spawn<Container>("piece_chest_wood", origin + Vector3.right * FarChestDistance);
+            if (chest != null && chest.TryGetComponent(out ZNetView chestView) && chestView.IsValid())
+            {
+                _chestId = chestView.GetZDO().m_uid;
+            }
+
+            _report.Check(!_chestId.IsNone(), $"destination chest placed {FarChestDistance:F0}m away");
 
             for (int i = 0; i < VillagerCount; i++)
             {
@@ -123,7 +148,7 @@ namespace Kukolony.Debug
             _report.Check(_villagers.Count == VillagerCount, "villagers spawned",
                 $"{_villagers.Count}/{VillagerCount}");
 
-            if (_post == null || _chest == null || _villagers.Count == 0)
+            if (_post == null || _chestId.IsNone() || _villagers.Count == 0)
             {
                 Finish();
                 return;
@@ -138,9 +163,11 @@ namespace Kukolony.Debug
                 return;
             }
 
+            RegisterColony();
+
             state.SetJob(JobLibrary.Haul);
             state.SetItemFilter(HauledItem);
-            state.SetDestination(_chest.GetComponent<ZNetView>().GetZDO().m_uid);
+            state.SetDestination(_chestId);
             _report.Check(true, "post configured", $"job=haul item={HauledItem} destination=bound chest");
 
             GameObject woodPrefab = ZNetScene.instance.GetPrefab(HauledItem);
@@ -193,12 +220,43 @@ namespace Kukolony.Debug
                 ReportVisibleState();
                 ReportClaims();
 
+                // Where did the wood actually go? The deposit step succeeded, so it went
+                // somewhere - the bag, the bound chest, or a chest we did not expect.
                 foreach (Villager villager in _villagers)
                 {
-                    if (villager != null)
+                    if (villager == null)
                     {
-                        _report.Note($"'{villager.State.Name}' step={villager.State.StepIndex} " +
-                                     $"activity={villager.Activity}");
+                        continue;
+                    }
+
+                    int carried = 0;
+                    Transform bagHolder = villager.transform.Find("KukolonyBag");
+                    if (bagHolder != null && bagHolder.TryGetComponent(out Container bag))
+                    {
+                        Inventory bagInventory = bag.GetInventory();
+                        carried = bagInventory?.CountItems("$item_wood") ?? -1;
+                    }
+
+                    _report.Note($"'{villager.State.Name}' step={villager.State.StepIndex} " +
+                                 $"activity={villager.Activity} carrying={carried} wood " +
+                                 $"target={villager.State.StepTarget}");
+                }
+
+                Container boundChest = ResolveChest();
+                _report.Note($"bound chest {_chestId} instantiated={boundChest != null} " +
+                             $"contents={boundChest?.GetInventory()?.NrOfItems() ?? -1} stack(s)");
+
+                // Any other container that might have received it.
+                System.Collections.Generic.List<Piece> pieces = new System.Collections.Generic.List<Piece>();
+                Piece.GetAllPiecesInRadius(_colonyCentre, 200f, pieces);
+                foreach (Piece piece in pieces)
+                {
+                    if (piece != null && piece.TryGetComponent(out Container other)
+                        && (other.GetInventory()?.NrOfItems() ?? 0) > 0)
+                    {
+                        _report.Note($"container '{piece.gameObject.name}' at " +
+                                     $"{Utils.DistanceXZ(piece.transform.position, _colonyCentre):F0}m holds " +
+                                     $"{other.GetInventory().NrOfItems()} stack(s)");
                     }
                 }
 
@@ -242,10 +300,14 @@ namespace Kukolony.Debug
             _report.Check(foundWood, "item search finds Wood for 'wood'",
                 $"{Gui.ItemCatalogue.Count} items indexed, {matches.Count} matches");
 
+            // Searched around the chest, not the post: the chest is deliberately far
+            // outside the post's work radius now, which is the whole point of the colony.
+            Container chest = ResolveChest();
+            Vector3 searchAround = chest != null ? chest.transform.position : _colonyCentre;
             System.Collections.Generic.List<Gui.NearbyContainers.Entry> containers =
-                Gui.NearbyContainers.Find(_post.transform.position, _post.EffectiveRadius);
-            _report.Check(containers.Count > 0, "destination picker sees the nearby chest",
-                $"{containers.Count} container(s) in radius");
+                Gui.NearbyContainers.Find(searchAround, 32f);
+            _report.Check(containers.Count > 0, "destination picker finds containers",
+                $"{containers.Count} container(s) near the chest");
         }
 
         /// <summary>
@@ -371,6 +433,56 @@ namespace Kukolony.Debug
         }
 
         /// <summary>
+        ///     Puts everything into one colony. Without this the far chest's zone is never
+        ///     held open and the villager cannot reach it.
+        /// </summary>
+        private void RegisterColony()
+        {
+            if (_hearth == null)
+            {
+                return;
+            }
+
+            _hearth.EnsureNamed();
+
+            bool registered = true;
+            Container chest = ResolveChest();
+            if (chest != null && chest.TryGetComponent(out ZNetView chestView))
+            {
+                registered &= _hearth.Register(Colonies.ColonyMemberKind.Container, chestView);
+            }
+
+            if (_post != null && _post.TryGetComponent(out ZNetView postView))
+            {
+                registered &= _hearth.Register(Colonies.ColonyMemberKind.Station, postView);
+            }
+
+            foreach (Villager villager in _villagers)
+            {
+                if (villager != null && villager.TryGetComponent(out ZNetView villagerView))
+                {
+                    _hearth.Register(Colonies.ColonyMemberKind.Villager, villagerView);
+                }
+            }
+
+            Colonies.ColonyState colonyState = _hearth.State;
+            _report.Check(registered, "chest and post registered to the colony");
+            _report.Check(colonyState.CountMembers(Colonies.ColonyMemberKind.Villager) == _villagers.Count,
+                "villagers registered to the colony",
+                $"{colonyState.CountMembers(Colonies.ColonyMemberKind.Villager)}/{_villagers.Count}");
+            _report.Note($"colony '{colonyState.Name}' owns " +
+                         $"{colonyState.CountMembers(Colonies.ColonyMemberKind.Container)} storage, " +
+                         $"{colonyState.CountMembers(Colonies.ColonyMemberKind.Station)} station(s)");
+
+            // Membership must round-trip through the ZPackage encoding, not just exist in
+            // memory - it is the thing that has to survive a reload.
+            System.Collections.Generic.List<ZDOID> containers =
+                colonyState.GetMembers(Colonies.ColonyMemberKind.Container);
+            _report.Check(containers.Count == 1 && !containers[0].IsNone(),
+                "membership round-trips through the ZDO encoding");
+        }
+
+        /// <summary>
         ///     Teleports the player far from the colony. Everything after this point is
         ///     only possible because the villagers hold their own zones open - which is
         ///     the entire feature under test.
@@ -423,7 +535,7 @@ namespace Kukolony.Debug
             }
 
             _report.Check(KeepAlive.KeepAliveZones.Count > 0,
-                "zones are being held open for the colony",
+                "zones are being held open for the colony (villagers AND colony members)",
                 $"{KeepAlive.KeepAliveZones.Count} zone(s), cap {ModConfig.KeepAliveMaxZones.Value}");
 
             _report.Check(KeepAlive.KeepAliveZones.Count <= ModConfig.KeepAliveMaxZones.Value,
@@ -521,14 +633,27 @@ namespace Kukolony.Debug
                          $"(registry leak check), active claims = {Jobs.TargetClaims.ActiveClaimCount()}");
         }
 
+        /// <summary>Re-resolves the chest every time rather than trusting a reference.</summary>
+        private Container ResolveChest()
+        {
+            if (_chestId.IsNone() || ZNetScene.instance == null)
+            {
+                return null;
+            }
+
+            GameObject instance = ZNetScene.instance.FindInstance(_chestId);
+            return instance != null ? instance.GetComponent<Container>() : null;
+        }
+
         private int CountInChest()
         {
-            if (_chest == null)
+            Container chest = ResolveChest();
+            if (chest == null)
             {
                 return 0;
             }
 
-            Inventory inventory = _chest.GetInventory();
+            Inventory inventory = chest.GetInventory();
             return inventory?.CountItems("$item_wood") ?? 0;
         }
 

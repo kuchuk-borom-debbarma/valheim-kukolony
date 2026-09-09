@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Kukolony.Colonies;
 using Kukolony.Core;
 using Kukolony.Jobs;
 using Kukolony.WorkPosts;
@@ -235,6 +236,29 @@ namespace Kukolony.Villagers
         }
 
         /// <summary>
+        ///     Where this villager belongs. An assigned bed wins; otherwise it falls back
+        ///     to the position it was first created at, so an unassigned villager behaves
+        ///     exactly as it did before homes existed.
+        ///
+        ///     The bed's ZDO is read directly, so an unloaded bed still gives a position
+        ///     to walk towards rather than reading as "no home".
+        /// </summary>
+        private Vector3 ResolveHome(VillagerState state)
+        {
+            ZDOID bed = state.HomeBed;
+            if (!bed.IsNone() && ZDOMan.instance != null)
+            {
+                ZDO bedZdo = ZDOMan.instance.GetZDO(bed);
+                if (bedZdo != null && bedZdo.IsValid())
+                {
+                    return bedZdo.GetPosition();
+                }
+            }
+
+            return state.Home;
+        }
+
+        /// <summary>
         ///     Binds to a work post if unemployed, then runs one step of its job.
         /// </summary>
         /// <returns>True if the villager is working, so idling should be skipped.</returns>
@@ -282,7 +306,10 @@ namespace Kukolony.Villagers
                 return null;
             }
 
-            WorkPost nearest = WorkPost.FindNearest(transform.position, ModConfig.PostBindRadius.Value);
+            // Fall back to claiming a post, scoped by colony membership where there is a
+            // colony. Membership is a more predictable rule than a radius: a villager
+            // never wanders off to a post that belongs to someone else's settlement.
+            WorkPost nearest = FindClaimablePost();
             if (nearest == null)
             {
                 return null;
@@ -300,6 +327,49 @@ namespace Kukolony.Villagers
         }
 
         /// <summary>
+        ///     A post this villager may claim: one belonging to its colony if it has one,
+        ///     otherwise the nearest within range, as before colonies existed.
+        /// </summary>
+        private WorkPost FindClaimablePost()
+        {
+            ZDOID colonyId = _nview != null && _nview.IsValid()
+                ? ColonyMembership.GetColony(_nview.GetZDO())
+                : ZDOID.None;
+
+            if (colonyId.IsNone())
+            {
+                return WorkPost.FindNearest(transform.position, ModConfig.PostBindRadius.Value);
+            }
+
+            WorkPost closest = null;
+            float closestDistance = float.MaxValue;
+
+            foreach (WorkPost post in WorkPost.Instances)
+            {
+                if (post == null || !post.TryGetComponent(out ZNetView postView) || !postView.IsValid())
+                {
+                    continue;
+                }
+
+                if (!ColonyMembership.BelongsTo(postView.GetZDO(), colonyId))
+                {
+                    continue;
+                }
+
+                float distance = Utils.DistanceXZ(post.transform.position, transform.position);
+                if (distance >= closestDistance)
+                {
+                    continue;
+                }
+
+                closest = post;
+                closestDistance = distance;
+            }
+
+            return closest;
+        }
+
+        /// <summary>
         ///     Idle behaviour: stay within reach of home, otherwise walk back.
         ///
         ///     Deliberately concrete rather than hidden behind a behaviour interface.
@@ -310,7 +380,7 @@ namespace Kukolony.Villagers
         private void StayNearHome(float deltaTime)
         {
             VillagerState state = State;
-            Vector3 home = state.Home;
+            Vector3 home = ResolveHome(state);
             float distance = Utils.DistanceXZ(home, transform.position);
 
             if (distance <= ModConfig.GoHomeRadius.Value)

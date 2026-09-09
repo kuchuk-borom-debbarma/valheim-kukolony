@@ -32,8 +32,10 @@ namespace Kukolony
 
             Jobs.JobLibrary.Load();
             Gui.WorkPostPanel.Register();
+            Gui.ColonyPanel.Register();
             VillagerPrefab.Register();
             WorkPosts.WorkPostPrefab.Register();
+            Colonies.ColonyPrefab.Register();
             _harmony.PatchAll(Assembly.GetExecutingAssembly());
 
             gameObject.AddComponent<KeepAlive.KeepAliveDriver>();
@@ -54,6 +56,10 @@ namespace Kukolony
             Localization.AddTranslation("English", "kukolony_workpost", "Work Post");
             Localization.AddTranslation("English", "kukolony_workpost_desc",
                 "Villagers nearby will work this post.");
+            Localization.AddTranslation("English", "kukolony_colony", "Colony Hearth");
+            Localization.AddTranslation("English", "kukolony_colony_desc",
+                "Records a colony: its people, storage, workstations and homes. "
+                + "Members can be anywhere - the hearth is a ledger, not a boundary.");
         }
     }
 }
