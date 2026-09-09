@@ -36,6 +36,7 @@ namespace Kukolony
             WorkPosts.WorkPostPrefab.Register();
             _harmony.PatchAll(Assembly.GetExecutingAssembly());
 
+            gameObject.AddComponent<KeepAlive.KeepAliveDriver>();
             gameObject.AddComponent<Debug.DebugHotkeys>();
             gameObject.AddComponent<Debug.AutoBoot>();
             gameObject.AddComponent<Debug.VillagerSelfTest>();

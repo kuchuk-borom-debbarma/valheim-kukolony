@@ -34,6 +34,21 @@ namespace Kukolony
         /// <summary>How long a villager may hold a target before others may take it.</summary>
         internal static ConfigEntry<float> ClaimTtlSeconds { get; private set; }
 
+        /// <summary>Whether colonies keep working when no player is nearby.</summary>
+        internal static ConfigEntry<bool> KeepAliveEnabled { get; private set; }
+
+        /// <summary>Rings of zones held open around each villager. 1 means a 3x3 block.</summary>
+        internal static ConfigEntry<int> KeepAliveHaloRings { get; private set; }
+
+        /// <summary>Hard ceiling on zones held open at once, across all colonies.</summary>
+        internal static ConfigEntry<int> KeepAliveMaxZones { get; private set; }
+
+        /// <summary>How often to sweep the world for villagers that are not loaded.</summary>
+        internal static ConfigEntry<float> KeepAliveScanSeconds { get; private set; }
+
+        /// <summary>Load only colony-relevant objects in zones kept open for a villager.</summary>
+        internal static ConfigEntry<bool> KeepAliveFilterObjects { get; private set; }
+
         /// <summary>Development aid. Off by default so it never fires for a normal install.</summary>
         internal static ConfigEntry<bool> DebugSpawnEnabled { get; private set; }
 
@@ -89,6 +104,47 @@ namespace Kukolony
                 new ConfigDescription(
                     "How far a villager will look for a work post to bind itself to, in metres.",
                     new AcceptableValueRange<float>(4f, 128f)));
+
+            KeepAliveEnabled = config.Bind(
+                "3 - Off-screen simulation",
+                nameof(KeepAliveEnabled),
+                true,
+                "Villagers keep a small area around themselves loaded, so colonies carry on "
+                + "working when no player is nearby. Disable to compare against vanilla behaviour.");
+
+            KeepAliveHaloRings = config.Bind(
+                "3 - Off-screen simulation",
+                nameof(KeepAliveHaloRings),
+                1,
+                new ConfigDescription(
+                    "Rings of zones held open around each villager. 1 is a 3x3 block of 64m zones. "
+                    + "Villagers cannot path into unloaded ground, so this needs to be at least 1.",
+                    new AcceptableValueRange<int>(1, 3)));
+
+            KeepAliveMaxZones = config.Bind(
+                "3 - Off-screen simulation",
+                nameof(KeepAliveMaxZones),
+                48,
+                new ConfigDescription(
+                    "Hard ceiling on zones held open at once. Reaching it is logged rather than "
+                    + "silently dropping villagers.",
+                    new AcceptableValueRange<int>(9, 256)));
+
+            KeepAliveScanSeconds = config.Bind(
+                "3 - Off-screen simulation",
+                nameof(KeepAliveScanSeconds),
+                4f,
+                new ConfigDescription(
+                    "How often to sweep the world for villagers that are not currently loaded.",
+                    new AcceptableValueRange<float>(1f, 30f)));
+
+            KeepAliveFilterObjects = config.Bind(
+                "3 - Off-screen simulation",
+                nameof(KeepAliveFilterObjects),
+                true,
+                "In zones kept loaded only for a villager, load just what the colony needs - "
+                + "villagers, posts, buildings, chests, items and stations - and skip trees, "
+                + "rocks and wildlife. Disable to load everything, as chunk loader mods do.");
 
             ClaimsEnabled = config.Bind(
                 "2 - Work posts",

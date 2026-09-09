@@ -69,45 +69,86 @@ if (zone2.Value.m_ttl > m_zoneTTL && !ZNetScene.instance.HaveInstanceInSector(zo
 A zone containing a live non-distant instance is never unloaded. So once we force our
 villagers to exist, the zones under them hold themselves open.
 
-## The approach
+## The approach: the villager is the loader
 
-A "colony zone keep-alive", scoped to registered work posts rather than global:
+Implemented and verified. Rather than a fixed radius around a work post, **each villager
+keeps a small halo of zones alive around itself**. The loaded region follows the work
+instead of being a static square, there is no extra item to build or fuel, and the cost is
+proportional to what the colony actually occupies.
 
-1. **Postfix `ZoneSystem.Update`** — call `PokeLocalZone` for each zone within a small
-   radius of every registered work post, so the zone roots stay loaded.
-2. **Postfix `ZNetScene.CreateDestroyObjects`** is too late (the destroy pass already ran).
-   Instead **prefix** it, or patch `FindSectorObjects`' result, to append
-   `FindSectorObjects(colonyZone, radius, 0, near)` for each work post before
-   `CreateObjects`/`RemoveObjects` see the lists.
-3. Villager AI then ticks normally through `BaseAI`, because the GameObject genuinely
-   exists. **We do not simulate anything ourselves** — we widen what the game considers
-   live and let vanilla do the work.
+Three facts make it work, all read from the game:
 
-This is the key insight: "off-screen simulation" here is not writing a headless simulator.
-It is extending the active area to include the colony.
+**A live instance holds its own zone open.** `ZoneSystem.UpdateTTL` only unloads a zone when
+`!ZNetScene.instance.HaveInstanceInSector(zone)`. Once a villager exists somewhere, that
+zone will not unload underneath it — the villager anchors itself.
 
-## Costs and constraints, stated plainly
+**Unloaded villagers can still be found.**
+`ZDOMan.GetAllZDOsWithPrefabIterative(prefab, list, ref index)` walks every ZDO of a prefab
+across the whole world, spread over frames, instantiating nothing. That closes the
+bootstrap loop: find the ZDO → force its zone → the villager instantiates → it holds itself
+open → it moves → the region follows.
 
-**This is expensive and it is the main risk in the whole project.** Every kept-alive zone
-is real terrain, real physics, real colliders, and every creature in it ticks AI. A
-careless radius multiplies the player's load by the number of colonies. Mitigations to
-design in from the start: the smallest radius that covers a work post, a hard cap on
-simultaneously-loaded colonies, and a config to disable it.
+**A villager cannot path into unloaded ground.** `Pathfinding.GetPath` snaps to a navmesh
+built by `NavMeshBuilder.CollectSources(bounds, layers, PhysicsColliders, …)` — from
+colliders actually present. No loaded geometry, no navmesh, no path. Hence the *halo*
+rather than just the villager's own zone: it needs somewhere to walk into.
 
-**Ownership.** AI runs only on the ZDO owner. Villagers must be owned by the machine doing
-the keep-alive, and every write to a shared object (container, smelter) must go through
-its owner. See the ownership note in `docs/README.md`.
+### The patches
 
-**Multiplayer is in scope.** Ownership arbitration decides who simulates an idle colony,
-and the answer is "the server, until a player walks over". See `docs/multiplayer.md` for
-how `ZDOMan.ReleaseNearbyZDOS` behaves and what it forces on job code.
+Borrowed from [ChunkLoader](https://github.com/JFHeim/ChunkLoader), which is the proven
+reference for forcing zones active, and verified against our own decompile. All are
+postfixes that only widen behaviour, so with an empty zone set the game is exactly stock.
 
-**Dedicated server behaviour is unverified** and blocks this design. The client assembly
-hardcodes `ZNet.IsDedicated() => false`, so it cannot tell us whether a dedicated server
-instantiates GameObjects at all. If it does not, `BaseAI` never ticks there and idle
-colonies need a different mechanism. Answer this before building the keep-alive.
+| Patch | Why |
+|---|---|
+| `ZoneSystem.CreateLocalZones` | `PokeLocalZone` our zones — loads terrain, resets the unload timer |
+| `ZoneSystem.IsActiveAreaLoaded` | Do not create objects against terrain that has not arrived |
+| `ZNetScene.InActiveArea` ×2 | Our zones count as active |
+| `ZNetScene.OutsideActiveArea` ×2 | …and are not outside it |
+| `ZDOMan.FindSectorObjects` | **Append our zones' ZDOs to the create list** |
+| `ZDOMan.FindDistantObjects` | Skip our zones so nothing is added twice |
 
-## Verified facts
+`FindSectorObjects` is the load-bearing one: `RemoveObjects` destroys any instance *not* in
+the lists it is handed, so appending is simultaneously what creates our objects and what
+stops them being destroyed.
+
+The `InActiveArea` patches also fix ownership. `ZDOMan.ReleaseNearbyZDOS` uses those same
+checks when arbitrating who owns what, and AI only runs on the owner — without them a
+kept-alive colony would lose ownership of its villagers and quietly stop.
+
+### Where this improves on a chunk loader
+
+Chunk-loader mods append **every** ZDO in a forced zone, paying for hundreds of trees and
+rocks nobody is looking at. We append only ZDOs whose prefab is on an allowlist, built once
+by scanning `ZNetScene.m_prefabs` **by component** rather than by name, so modded chests and
+stations are covered too. 1267 prefabs qualify; everything else is skipped.
+
+`Piece` is on the list deliberately: walking through a tree that was not loaded is
+cosmetic, walking through your wall is not.
+
+This only applies to zones held open *solely* by us. Near a player, the vanilla lists
+already contain everything, so nothing is filtered and nothing is destroyed.
+
+### What we get for free
+
+**Keep-alive zones do not breed monsters.** All three spawner types bail without a player
+present — `SpawnSystem.UpdateSpawning` returns early when `GetPlayersInZone` is empty, and
+`SpawnArea`/`CreatureSpawner` both gate on `Player.IsPlayerInRange`. An unattended colony
+costs nothing in spawning and does not quietly lose villagers to wildlife.
+
+### Measured
+
+Three villagers, one post, a bound chest, and the player teleported 500m away — well
+outside any active area. `KeepAliveEnabled` exists so the control can be run:
+
+| | wood delivered | zones held open |
+|---|---|---|
+| Keep-alive on | 2/2 in 26s | 9 |
+| Keep-alive off | 0/2 after 180s | 0 |
+
+Nine zones is one 3×3 halo, shared by all three villagers because their halos overlap.
+
+## Verified facts## Verified facts
 
 Field defaults below are the C# initializers; the real values come from the scene prefab,
 so read them at runtime rather than assuming.
