@@ -16,6 +16,7 @@ Read in this order:
 | [What the mod is](docs/README.md) | Scope, milestones, design principles |
 | [Off-screen simulation](docs/off-screen-simulation.md) | How zone and instance lifetime work, and how we extend them |
 | [Multiplayer](docs/multiplayer.md) | ZDO ownership arbitration and what it forces on job code |
+| [Jobs](docs/jobs.md) | The job engine, target claims, JSON definitions, and the work post panel |
 | [API notes](docs/api-notes.md) | The game and Jötunn calls we actually use |
 | [NPC design research](docs/npc-design.md) | Player-model villagers, appearance, and the job architecture |
 | [Modding basics](docs/modding-basics.md) | BepInEx/Harmony/Jötunn conventions and traps |
@@ -42,11 +43,15 @@ Build the **solution**, not the project — Jötunn's `Paths.props` imports
 
 ## Status
 
-Environment is set up and the plugin loads in-game. No gameplay yet.
+Villagers exist, look like people, carry a persistent inventory, bind themselves to work
+posts and haul items into a chosen container. Jobs are composable fragments defined in
+JSON, and a post is configured from an in-game panel.
 
-The next open question is a blocking one: whether a dedicated server instantiates
-GameObjects at all. It decides whether server-owned idle colonies are viable. See the
-unverified section in [docs/multiplayer.md](docs/multiplayer.md).
+All of it is verified by the mod testing itself — see
+[docs/automated-testing.md](docs/automated-testing.md).
+
+Next up is the off-screen keep-alive, so a colony keeps working when no player is nearby.
+The groundwork is in [docs/off-screen-simulation.md](docs/off-screen-simulation.md).
 
 ## Credits
 
