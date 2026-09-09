@@ -30,6 +30,7 @@ namespace Kukolony
             ModConfig.Bind(Config);
             AddLocalization();
 
+            Jobs.JobLibrary.Load();
             VillagerPrefab.Register();
             WorkPosts.WorkPostPrefab.Register();
             _harmony.PatchAll(Assembly.GetExecutingAssembly());

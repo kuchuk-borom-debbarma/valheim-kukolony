@@ -64,9 +64,49 @@ A ZDOID occupies **two** ZDO slots (user id and object id), so its cached key is
 ## Customisation
 
 Everything a player can change lives on the post's ZDO, so the job engine reads
-configuration from one place no matter what sets it — a GUI, an interaction, or a config
-file. Adding a job today means composing steps in `JobLibrary`; the next stage moves those
-definitions to JSON so new jobs need no recompile.
+configuration from one place no matter what sets it.
+
+**Jobs themselves are data.** Definitions live in `BepInEx/config/Kukolony/jobs/*.json`,
+and `haul.json` is written on first run so the folder documents its own schema:
+
+```json
+{
+  "id": "haul",
+  "steps": [
+    { "type": "find_ground_item" },
+    { "type": "move_to_target", "stopDistance": 2.0 },
+    { "type": "pick_up_item" },
+    { "type": "resolve_destination" },
+    { "type": "move_to_target", "stopDistance": 2.0 },
+    { "type": "deposit_item" }
+  ]
+}
+```
+
+Note what is *not* in there: no item, no radius. Those are configuration and belong to the
+post. A definition describes the **shape** of the work, which is what lets one definition
+serve every post that uses it.
+
+### Step types are public API
+
+`find_ground_item`, `move_to_target`, `pick_up_item`, `resolve_destination`,
+`deposit_item`. These names appear in every file a player writes, so renaming one breaks
+their content. Small and deliberate.
+
+### Failure handling
+
+A definition is accepted whole or rejected whole — half-loading would give a villager work
+that silently skips a step. Errors name the file and the step index, and list what was
+valid:
+
+```
+[kukolony_test_bad.json] step 0 has unknown type 'no_such_step'.
+Known types: find_ground_item, move_to_target, pick_up_item, resolve_destination, deposit_item
+```
+
+The bad file is dropped, the good ones still load, and a built-in haul job remains as a
+last-resort fallback so a broken folder never leaves a world with no jobs at all. The test
+deliberately writes a malformed file to prove this.
 
 ## Registration order matters
 
