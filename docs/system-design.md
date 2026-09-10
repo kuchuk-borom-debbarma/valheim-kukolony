@@ -140,6 +140,34 @@ not need a list of smelters; it asks which registered smelters want feeding.
 This is the simplification the whole design rests on. Configuration lives on the physical
 thing the player is already looking at, and a job carries almost nothing.
 
+### Work areas
+
+A settlement is a place, and a place has an edge. But the work does not: trees, ore and
+everything else worth gathering are wherever the world put them, which is usually not next to
+the house.
+
+Resolving this by making the colony radius enormous would be the wrong fix. The radius is
+what makes the settlement *a place*; inflate it and it stops meaning anything, and "in the
+village" stops being a phrase that means something.
+
+Instead: **a work area is a placed structure with its own radius, belonging to a colony.**
+
+- Put one down in a forest 300 metres away and that forest is where the settlement gets wood.
+- It is registered like anything else, and carries the settings for what happens inside it.
+- Villagers walk there and back. That takes time, which is correct: they are people.
+
+This keeps the settlement small and the reach large, and it makes reach something a player
+*places* rather than a number they raise. A colony's territory becomes a shape they drew
+rather than a circle they inflated.
+
+**Travel is already paid for.** Zones are kept alive around villagers as they move, so one
+walking to a distant work area keeps its own corridor loaded and works when it arrives. The
+cost is real — a villager crossing open country forces zones along the way — and is the price
+of the work being genuine rather than pretend.
+
+*Open:* whether a work area names the kind of work, or is a neutral place that jobs point at;
+what happens when areas overlap; whether a villager assigned far away should sleep out there.
+
 ### Villagers
 
 Spawned from the screen, into the selected colony. Not by a hotkey — spawning a person is a
@@ -242,6 +270,9 @@ Settled, with the reason.
   drops on the ground only as a last resort. Nothing is destroyed, nothing is held silently.
 - **A bed is an upgrade, not a requirement.** No bed means slow recovery idling by the colony
   piece, so a settlement cannot deadlock for want of furniture.
+- **Reach is placed, not raised.** The colony radius stays modest so the settlement remains a
+  place; a **work area** is a separate placed structure with its own radius, anywhere, that
+  says where a kind of work happens. Territory is a shape a player draws.
 - **Never infer destruction from absence.** A record is removed only on positive evidence:
   the object was seen destroyed, or the player said so. Anything else is dormant and visible.
   A ZDO that cannot be resolved may be destroyed *or* merely not in memory, and the two are
@@ -262,8 +293,3 @@ A village of people who stand still while a boar kills them is not a village. Bu
 previous mod's own notes record that working villagers mostly failed to defend themselves,
 because the work loop starved the combat AI. Options: no defence; flee indoors; defend
 themselves but never seek a fight.
-
-### 5. How far does the settlement extend?
-
-Chopping sends villagers beyond the hearth. Is the radius the edge of *everything*, or the
-edge of what can be *registered*, with gathering allowed to range further?

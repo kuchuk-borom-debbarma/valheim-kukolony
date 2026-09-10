@@ -167,6 +167,7 @@ namespace Kukolony.Debug
             yield return CheckDeclaredSettings(report, colony);
             yield return CheckOutfit(report, colony);
             CheckRegisterableContainers(report, colony);
+            yield return CheckZdoLifetime(report, colony);
             yield return CheckChopping(report, colony);
             yield return CheckChopReservation(report, colony);
             yield return CheckStationJob(report, colony);
@@ -952,6 +953,62 @@ namespace Kukolony.Debug
             Release(cart);
             Release(loose);
         }
+
+        /// <summary>
+        ///     Can a destroyed object be told apart from one that is merely not in memory?
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         This decides whether a colony may ever delete a registration on its own. If
+        ///         the two are indistinguishable then walking away from an outpost and deleting
+        ///         its configuration are the same act, which would be unforgivable.
+        ///     </para>
+        ///     <para>
+        ///         The game keeps a list of ZDOs it knows to be dead, so destruction can be
+        ///         positive evidence rather than an inference from absence. What this measures
+        ///         is whether that list actually distinguishes the three cases: alive,
+        ///         destroyed, and never-heard-of - the last standing in for "not in memory",
+        ///         since to this peer they are the same situation.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckZdoLifetime(TestReport report, Colony colony)
+        {
+            GameObject chest = Spawn("piece_chest_wood", colony.transform.position + Vector3.right * 8f);
+            if (chest == null || !chest.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "a destroyed object can be told from one that is not loaded", "no fixture");
+                yield break;
+            }
+
+            ZDOID id = view.GetZDO().m_uid;
+            bool aliveResolves = ZDOMan.instance.GetZDO(id) != null;
+            bool aliveNotDead = !KnownDead(id);
+
+            // A ZDOID nothing ever issued. To this peer an object it has never been told
+            // about and one whose zone is not loaded are the same situation, so this is the
+            // stand-in for "unloaded" that needs no teleporting to produce.
+            ZDOID unheard = new ZDOID(4242424242u, 987654321u);
+            bool unheardResolves = ZDOMan.instance.GetZDO(unheard) != null;
+            bool unheardDead = KnownDead(unheard);
+
+            Release(chest);
+            yield return null;
+            yield return new WaitForSecondsRealtime(.5f);
+            bool destroyedResolves = ZDOMan.instance.GetZDO(id) != null;
+            bool destroyedListed = KnownDead(id);
+
+            report.Check(aliveResolves && aliveNotDead && !unheardResolves && !unheardDead &&
+                         destroyedListed,
+                "a destroyed object can be told from one that is merely not in memory",
+                $"alive[resolves={aliveResolves} dead={!aliveNotDead}] " +
+                $"destroyed[resolves={destroyedResolves} dead={destroyedListed}] " +
+                $"unheard[resolves={unheardResolves} dead={unheardDead}]");
+        }
+
+        /// <summary>Whether the game has recorded this object as destroyed.</summary>
+        private static bool KnownDead(ZDOID id) =>
+            ZDOMan.instance != null && ZDOMan.instance.m_deadZDOs != null &&
+            ZDOMan.instance.m_deadZDOs.ContainsKey(id);
 
         /// <summary>
         ///     Chopping, and the three ways it can silently do nothing.
