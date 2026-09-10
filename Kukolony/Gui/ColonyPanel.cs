@@ -32,6 +32,12 @@ namespace Kukolony.Gui
         private ColonyJobConfig _selectedJob;
         private bool _showPresets;
         private bool _showTargetPicker;
+        /// <summary>Sub-screens for editing a job's pipeline; cleared on every navigation.</summary>
+        private bool _showPieceEditor;
+        private bool _showPiecePicker;
+        private int _selectedPiece = -1;
+        /// <summary>True while the structure picker is choosing a container for one piece.</summary>
+        private bool _pickingPieceContainer;
         private bool _blocked;
 
         internal bool IsOpen => _root != null && _root.activeSelf;
@@ -124,6 +130,41 @@ namespace Kukolony.Gui
             Refresh();
         }
 
+        /// <summary>Opens a job's pipeline editor for UI evidence.</summary>
+        internal void ShowPieceEditorForTest()
+        {
+            if (_selectedJob == null) return;
+            ClosePieceScreens();
+            _showPieceEditor = true;
+            _page = 0;
+            Refresh();
+        }
+
+        /// <summary>Opens the add-a-piece list. Adds nothing; the capture is the subject.</summary>
+        internal void ShowPiecePickerForTest()
+        {
+            if (_selectedJob == null) return;
+            _showPieceEditor = true;
+            _showPiecePicker = true;
+            _page = 0;
+            Refresh();
+        }
+
+        /// <summary>Opens one piece's settings, choosing the first configurable piece.</summary>
+        internal void ShowPieceSettingsForTest()
+        {
+            if (_selectedJob == null) return;
+            ClosePieceScreens();
+            _showPieceEditor = true;
+            for (int i = 0; i < _selectedJob.Pieces.Count; i++)
+            {
+                if (PieceCustomisation.Uses(_selectedJob.Pieces[i].Kind) == JobCustomisation.None) continue;
+                _selectedPiece = i;
+                break;
+            }
+            Refresh();
+        }
+
         internal void ShowJobForTest(int index)
         {
             List<ColonyJobConfig> jobs = _colony?.State.GetEffectiveJobs();
@@ -144,7 +185,7 @@ namespace Kukolony.Gui
         private void Block(bool value) { if (_blocked == value) return; _blocked = value; GUIManager.BlockInput(value); }
         private void SetTab(Tab tab)
         {
-            _tab = tab; _page = 0; _pendingRemoval = ZDOID.None;
+            _tab = tab; _page = 0; _pendingRemoval = ZDOID.None; ClosePieceScreens();
             if (tab != Tab.Members) _selectedMember = ZDOID.None;
             if (tab != Tab.Jobs) { _selectedJob = null; _showPresets = false; _showTargetPicker = false; }
             Refresh();
@@ -328,15 +369,21 @@ namespace Kukolony.Gui
         private void BuildJobCard(List<ColonyJobConfig> jobs)
         {
             if (_showTargetPicker) { BuildTargetPicker(jobs); return; }
-            AddButton(_content.transform, "← Jobs", -330, -160, 110, () => { _selectedJob=null; Refresh(); });
+            if (_showPiecePicker) { BuildPiecePicker(jobs); return; }
+            if (_selectedPiece >= 0) { BuildPieceSettings(jobs); return; }
+            if (_showPieceEditor) { BuildPieceEditor(jobs); return; }
+            AddButton(_content.transform, "← Jobs", -330, -160, 110,
+                () => { _selectedJob=null; ClosePieceScreens(); Refresh(); });
             InputField jobName = InputAt(_content.transform, _selectedJob.Name, -110, -160, 330);
             jobName.onEndEdit.AddListener(value => { if (!string.IsNullOrWhiteSpace(value)) _selectedJob.Name=value.Trim(); SaveJobs(jobs); });
             bool valid = JobPipeline.IsValid(_selectedJob, out string validation);
             LeftTextAt(_content.transform, valid ? "Pipeline valid — compatible customisation auto-connects." : validation,
-                -215, 14, 590, valid ? Color.green : Color.red);
+                -215, 14, 560, valid ? Color.green : Color.red);
             LeftTextAt(_content.transform, "Pieces: " + string.Join(" → ",
                 _selectedJob.Pieces.ConvertAll(piece => PieceLabel(piece.Kind)).ToArray()),
-                -242, 12, 650, Color.gray);
+                -242, 12, 430, Color.gray);
+            AddButton(_content.transform, $"Edit pieces ({_selectedJob.Pieces.Count})", 300, -215, 180,
+                () => { _showPieceEditor=true; _page=0; Refresh(); });
             AddButton(_content.transform, "Duplicate", 310, -160, 110, () => { ColonyJobConfig copy=_selectedJob.Clone(true); copy.Id=System.Guid.NewGuid().ToString("N"); copy.Name += " copy"; jobs.Add(copy); SaveJobs(jobs); });
             LeftTextAt(_content.transform, "Targets: " + _selectedJob.Targets, -275, 16, 420);
             AddButton(_content.transform, "Target mode", 270, -255, 150, () =>
@@ -383,7 +430,8 @@ namespace Kukolony.Gui
         private void BuildTargetPicker(List<ColonyJobConfig> jobs)
         {
             StructureCapability required = ColonyJobCatalog.RequiredCapability(_selectedJob.Type);
-            AddButton(_content.transform, "← Job", -330, -160, 110, () => { _showTargetPicker=false; Refresh(); });
+            AddButton(_content.transform, "← " + (_pickingPieceContainer ? "Piece" : "Job"), -330, -160, 110,
+                () => { _showTargetPicker=false; _pickingPieceContainer=false; Refresh(); });
             TextAt(_content.transform, "Choose " + CapabilityName(required) + " targets", -60, -160, 20, 420, TextAnchor.MiddleLeft);
             InputField search = InputAt(_content.transform, _search, -110, -205, 420);
             search.onEndEdit.AddListener(value => { _search=value; _page=0; Refresh(); });
@@ -395,10 +443,17 @@ namespace Kukolony.Gui
             {
                 StructureRecord record = choices[start + row];
                 bool selected = _selectedJob.SelectedStructures.Contains(record.Id);
-                AddButton(_content.transform, selected ? "✓ " + Short(record.Name, 22) : "○ " + Short(record.Name, 22),
+                bool forPiece = _pickingPieceContainer && _selectedPiece >= 0 && _selectedPiece < _selectedJob.Pieces.Count;
+                AddButton(_content.transform, selected && !forPiece ? "✓ " + Short(record.Name, 22) : "○ " + Short(record.Name, 22),
                     -190, -260-row*48, 360, () =>
                     {
-                        if (!_selectedJob.SelectedStructures.Remove(record.Id)) _selectedJob.SelectedStructures.Add(record.Id);
+                        if (forPiece)
+                        {
+                            _selectedJob.Pieces[_selectedPiece].Container = record.Id;
+                            _pickingPieceContainer = false;
+                            _showTargetPicker = false;
+                        }
+                        else if (!_selectedJob.SelectedStructures.Remove(record.Id)) _selectedJob.SelectedStructures.Add(record.Id);
                         SaveJobs(jobs);
                     });
                 TextAt(_content.transform, record.IsLiveIn(_colony) ? "ready" : "unavailable",
@@ -406,8 +461,216 @@ namespace Kukolony.Gui
                     record.IsLiveIn(_colony) ? Color.green : Color.gray);
             }
             Pager(choices.Count);
-            AddButton(_content.transform, "Done", 300, -555, 120, () => { _showTargetPicker=false; Refresh(); });
+            AddButton(_content.transform, "Done", 300, -555, 120,
+                () => { _showTargetPicker=false; _pickingPieceContainer=false; Refresh(); });
         }
+
+        /// <summary>Leaves every pipeline sub-screen, so navigation cannot strand the player.</summary>
+        private void ClosePieceScreens()
+        {
+            _showPieceEditor = false;
+            _showPiecePicker = false;
+            _selectedPiece = -1;
+            _pickingPieceContainer = false;
+        }
+
+        /// <summary>
+        ///     The pipeline itself: what the job does, in order. Start and End cannot be moved
+        ///     or removed, so the shape rule that a job runs between them cannot be broken from
+        ///     here.
+        /// </summary>
+        private void BuildPieceEditor(List<ColonyJobConfig> jobs)
+        {
+            List<JobPiece> pieces = _selectedJob.Pieces;
+            AddButton(_content.transform, "← Job", -330, -160, 110,
+                () => { ClosePieceScreens(); Refresh(); });
+            TextAt(_content.transform, "Pieces — " + Short(_selectedJob.Name, 24), -60, -160, 20, 420, TextAnchor.MiddleLeft);
+            bool valid = JobPipeline.IsValid(_selectedJob, out string validation);
+            LeftTextAt(_content.transform, valid ? "Pipeline valid — every piece has what it needs." : validation,
+                -205, 14, 560, valid ? Color.green : Color.red);
+            AddButton(_content.transform, "Add piece", 300, -205, 180,
+                () => { _showPiecePicker=true; _page=0; Refresh(); });
+
+            int start = _page * Rows;
+            for (int row = 0; row < Rows && start + row < pieces.Count; row++)
+            {
+                int index = start + row;
+                JobPiece piece = pieces[index];
+                bool fixedPiece = piece.Kind == JobPieceKind.Start || piece.Kind == JobPieceKind.End;
+                float y = -260 - row * 48;
+                TextAt(_content.transform, $"{index + 1}. {PieceLabel(piece.Kind)}", -330, y, 16, 130, TextAnchor.MiddleLeft);
+                TextAt(_content.transform, SettingsSummary(piece), -150, y, 13, 200, TextAnchor.MiddleLeft, Color.gray);
+                if (fixedPiece) continue;
+                AddButton(_content.transform, "↑", 15, y, 45, () => { Reorder(jobs, index, index - 1); });
+                AddButton(_content.transform, "↓", 70, y, 45, () => { Reorder(jobs, index, index + 1); });
+                AddButton(_content.transform, "Configure", 175, y, 130, () => { _selectedPiece=index; Refresh(); });
+                AddButton(_content.transform, "Remove", 320, y, 120,
+                    () => { pieces.RemoveAt(index); SaveJobs(jobs); });
+            }
+            Pager(pieces.Count);
+            AddButton(_content.transform, "Done", 300, -555, 120, () => { ClosePieceScreens(); Refresh(); });
+        }
+
+        /// <summary>Moves a piece, refusing to push it outside Start and End.</summary>
+        private void Reorder(List<ColonyJobConfig> jobs, int from, int to)
+        {
+            List<JobPiece> pieces = _selectedJob.Pieces;
+            if (to < 1 || to > pieces.Count - 2 || from < 1 || from > pieces.Count - 2) return;
+            JobPiece moved = pieces[from];
+            pieces.RemoveAt(from);
+            pieces.Insert(to, moved);
+            SaveJobs(jobs);
+        }
+
+        /// <summary>Pieces a player can add, inserted before End so the shape stays valid.</summary>
+        private void BuildPiecePicker(List<ColonyJobConfig> jobs)
+        {
+            AddButton(_content.transform, "← Pieces", -325, -160, 130,
+                () => { _showPiecePicker=false; _page=0; Refresh(); });
+            TextAt(_content.transform, "Add a piece", -50, -160, 20, 420, TextAnchor.MiddleLeft);
+            int start = _page * Rows;
+            for (int row = 0; row < Rows && start + row < Addable.Length; row++)
+            {
+                JobPieceKind kind = Addable[start + row];
+                AddButton(_content.transform, PieceLabel(kind), -215, -260 - row * 48, 290, () =>
+                {
+                    _selectedJob.Pieces.Insert(Mathf.Max(1, _selectedJob.Pieces.Count - 1), new JobPiece { Kind = kind });
+                    _showPiecePicker = false;
+                    SaveJobs(jobs);
+                });
+                TextAt(_content.transform, SettingNames(kind), 200, -260 - row * 48, 12, 180,
+                    TextAnchor.MiddleLeft, Color.gray);
+            }
+            Pager(Addable.Length);
+            AddButton(_content.transform, "Cancel", 300, -555, 120, () => { _showPiecePicker=false; Refresh(); });
+        }
+
+        /// <summary>
+        ///     One piece's settings. Only what this kind actually reads is shown, taken from
+        ///     the piece contract rather than a list kept in the UI, so a kind cannot end up
+        ///     offering a setting it ignores.
+        /// </summary>
+        private void BuildPieceSettings(List<ColonyJobConfig> jobs)
+        {
+            List<JobPiece> pieces = _selectedJob.Pieces;
+            if (_selectedPiece >= pieces.Count) { _selectedPiece = -1; return; }
+            JobPiece piece = pieces[_selectedPiece];
+            AddButton(_content.transform, "← Pieces", -325, -160, 130, () => { _selectedPiece=-1; Refresh(); });
+            TextAt(_content.transform, PieceLabel(piece.Kind), -50, -160, 20, 420, TextAnchor.MiddleLeft);
+            LeftTextAt(_content.transform, "Blank settings follow the job.", -205, 13, 420, Color.gray);
+
+            JobCustomisation uses = PieceCustomisation.Uses(piece.Kind);
+            float y = -250;
+            if ((uses & JobCustomisation.ItemFilter) != 0)
+            {
+                LeftTextAt(_content.transform, "Items: " + (piece.ItemFilters.Count == 0 ? "job" : string.Join(", ", piece.ItemFilters)), y, 14, 300, Color.gray);
+                InputField items = InputAt(_content.transform, string.Join(",", piece.ItemFilters), 190, y, 300);
+                items.onEndEdit.AddListener(value =>
+                {
+                    piece.ItemFilters.Clear();
+                    foreach (string item in value.Split(',')) if (!string.IsNullOrWhiteSpace(item)) piece.ItemFilters.Add(item.Trim());
+                    SaveJobs(jobs);
+                });
+                y -= 45;
+            }
+            if ((uses & JobCustomisation.Container) != 0)
+            {
+                LeftTextAt(_content.transform, "Container: " + (piece.Container.IsNone() ? "job" : Short(StructureName(piece.Container), 18)), y, 14, 300);
+                AddButton(_content.transform, "Pick", 210, y, 100, () =>
+                { _pickingPieceContainer = true; _showTargetPicker = true; _page = 0; Refresh(); });
+                AddButton(_content.transform, "Clear", 315, y, 100, () =>
+                { piece.Container = ZDOID.None; SaveJobs(jobs); });
+                y -= 45;
+            }
+            if ((uses & JobCustomisation.Amount) != 0) y = Stepper(jobs, "Amount", piece.Amount, y, v => piece.Amount = v, -1);
+            if ((uses & JobCustomisation.StockLimit) != 0) y = Stepper(jobs, "Stock limit", piece.StockLimit, y, v => piece.StockLimit = v, -1);
+            if ((uses & JobCustomisation.SearchRadius) != 0)
+                y = Stepper(jobs, "Search radius", Mathf.RoundToInt(piece.SearchRadius), y, v => piece.SearchRadius = v, -1, 4);
+            if ((uses & JobCustomisation.StopDistance) != 0)
+                y = Stepper(jobs, "Stop distance", Mathf.RoundToInt(piece.StopDistance), y, v => piece.StopDistance = v, -1);
+            if ((uses & JobCustomisation.TargetScope) != 0)
+            {
+                LeftTextAt(_content.transform, "Targets: " + (piece.Targets < 0 ? "job" : ((TargetMode)piece.Targets).ToString()), y, 14, 300);
+                AddButton(_content.transform, "Change", 250, y, 130, () =>
+                { piece.Targets = piece.Targets >= 2 ? -1 : piece.Targets + 1; SaveJobs(jobs); });
+                y -= 45;
+            }
+            if ((uses & JobCustomisation.Reservation) != 0)
+            {
+                LeftTextAt(_content.transform, "Reserves target: " + (piece.Reservations < 0 ? "job" : piece.Reservations != 0 ? "yes" : "no"), y, 14, 300);
+                AddButton(_content.transform, "Change", 250, y, 130, () =>
+                { piece.Reservations = piece.Reservations >= 1 ? -1 : piece.Reservations + 1; SaveJobs(jobs); });
+                y -= 45;
+            }
+            if (uses == JobCustomisation.None)
+                LeftTextAt(_content.transform, "This piece has nothing to configure.", y, 14, 420, Color.gray);
+
+            AddButton(_content.transform, "Clear overrides", 290, -555, 200, () =>
+            {
+                piece.ItemFilters.Clear(); piece.SelectedStructures.Clear();
+                piece.Container = ZDOID.None; piece.StockLimit = -1; piece.Amount = -1;
+                piece.SearchRadius = -1f; piece.StopDistance = -1f; piece.Targets = -1; piece.Reservations = -1;
+                SaveJobs(jobs);
+            });
+        }
+
+        /// <summary>A labelled number with decrement and increment, returning the next row's y.</summary>
+        private float Stepper(List<ColonyJobConfig> jobs, string label, int value, float y,
+            System.Action<int> set, int inherit, int step = 1)
+        {
+            LeftTextAt(_content.transform, label + ": " + (value < 0 ? "job" : value.ToString()), y, 14, 300);
+            AddButton(_content.transform, "−", 205, y, 45, () => { set(value - step < 0 ? inherit : value - step); SaveJobs(jobs); });
+            AddButton(_content.transform, "+", 260, y, 45, () => { set(value < 0 ? step : value + step); SaveJobs(jobs); });
+            return y - 45;
+        }
+
+        /// <summary>Short note of which settings a piece has had changed from the job's.</summary>
+        private static string SettingsSummary(JobPiece piece)
+        {
+            List<string> parts = new List<string>();
+            if (piece.ItemFilters.Count > 0) parts.Add(string.Join("/", piece.ItemFilters.ToArray()));
+            if (piece.Amount > 0) parts.Add("x" + piece.Amount);
+            if (piece.StockLimit >= 0) parts.Add("limit " + piece.StockLimit);
+            if (piece.SearchRadius >= 0f) parts.Add("r" + Mathf.RoundToInt(piece.SearchRadius));
+            if (piece.StopDistance >= 0f) parts.Add("d" + Mathf.RoundToInt(piece.StopDistance));
+            if (piece.Targets >= 0) parts.Add(((TargetMode)piece.Targets).ToString());
+            if (piece.Reservations >= 0) parts.Add(piece.Reservations != 0 ? "reserves" : "shares");
+            return parts.Count == 0 ? "follows the job" : Short(string.Join(" · ", parts.ToArray()), 26);
+        }
+
+        /// <summary>What a kind can be configured by, for the add list.</summary>
+        private static string SettingNames(JobPieceKind kind)
+        {
+            List<JobCustomisation> settings = PieceCustomisation.Settings(kind);
+            if (settings.Count == 0) return "no settings";
+            List<string> names = new List<string>();
+            foreach (JobCustomisation setting in settings) names.Add(SettingLabel(setting));
+            return Short(string.Join(", ", names.ToArray()), 22);
+        }
+
+        private static string SettingLabel(JobCustomisation setting)
+        {
+            switch (setting)
+            {
+                case JobCustomisation.ItemFilter: return "items";
+                case JobCustomisation.Container: return "container";
+                case JobCustomisation.StockLimit: return "limit";
+                case JobCustomisation.Amount: return "amount";
+                case JobCustomisation.SearchRadius: return "radius";
+                case JobCustomisation.StopDistance: return "distance";
+                case JobCustomisation.TargetScope: return "targets";
+                case JobCustomisation.Reservation: return "reserving";
+                default: return "setting";
+            }
+        }
+
+        /// <summary>Kinds a player may add. Start and End are structural and never listed.</summary>
+        private static readonly JobPieceKind[] Addable =
+        {
+            JobPieceKind.StopAtStockLimit, JobPieceKind.FindLooseItem, JobPieceKind.SelectSource,
+            JobPieceKind.SelectTarget, JobPieceKind.MoveToTarget, JobPieceKind.PickUp,
+            JobPieceKind.TakeItem, JobPieceKind.PutItem, JobPieceKind.OperateStation
+        };
 
         private void SaveJobs(List<ColonyJobConfig> jobs) { _colony.State.SetJobs(jobs); Refresh(); }
         private void Pager(int count)

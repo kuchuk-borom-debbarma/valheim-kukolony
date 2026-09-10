@@ -80,7 +80,7 @@ wait_for_run create
 wait_for_run reload
 
 if [ "${BENCHMARK_SCREENSHOTS:-true}" = "true" ]; then
-  expected='colony-panel.png colony-structures.png colony-members.png colony-members-page-2.png colony-member-detail.png colony-member-remove-confirm.png colony-jobs.png colony-job-config.png colony-structure-picker.png colony-preset-application.png colony-picker.png'
+  expected='colony-panel.png colony-structures.png colony-members.png colony-members-page-2.png colony-member-detail.png colony-member-remove-confirm.png colony-jobs.png colony-job-config.png colony-piece-editor.png colony-piece-settings.png colony-piece-picker.png colony-structure-picker.png colony-preset-application.png colony-picker.png'
   for image in $expected; do [ -s "$OUTPUT/$image" ] || { echo "missing screenshot: $image"; exit 1; }; done
 fi
 mkdir -p /Users/kuku/Desktop/kukolony
