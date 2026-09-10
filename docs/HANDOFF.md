@@ -25,15 +25,14 @@ sources were deleted. This is intentionally a breaking pre-release schema.
 - operate fermenters;
 - collect beehives.
 
-A job's pieces are what execute. The engine walks the piece list and performs each step,
-reusing one executor per kind; it no longer switches on the job's type, which survives only
-as a display name and a catalogue seed. Which station protocol runs is decided by probing
-the target, so supporting a new station is a new file rather than another case.
+Each job is one file implementing `IColonyWork`, found by type in `WorkRegistry`, so adding
+work is a new file and a registry entry rather than another case in a switch. Which station
+protocol runs is decided by probing the target, on the same principle.
 
-Sequencing is a pure function over the piece list, a cursor persisted on the villager ZDO,
-and four facts about the world. Facts win over the cursor, which is what lets a villager
-resume mid-cycle after a reload. Every piece carries its own settings, each inheriting from
-the job when unset.
+Sequencing is a pure function over a state persisted on the villager ZDO and six facts about
+the world, so whole work cycles are verified without Unity. Facts win over the recorded
+state, which is what lets a villager resume mid-cycle after a reload. Every setting lives on
+the job, once.
 
 Jobs use typed settings and a synchronous fixed-tick dispatcher. Station changes invoke
 probe-verified vanilla RPCs. Container operations claim ownership, use Inventory APIs, and
@@ -85,7 +84,7 @@ member pagination/detail, jobs/configuration, target picker, and preset applicat
 - Only the current owner writes; shared station mutation uses vanilla RPCs.
 - AI has no async/tasks and no behavior coroutines.
 - World queries use game registries, not broad physics scans.
-- Keep dependencies inward; shared job pieces earn helpers from demonstrated concrete jobs.
+- Keep dependencies inward; shared job helpers earn their place from demonstrated concrete jobs.
 - Test/debug features remain off by default and operate only in the dedicated test world.
 - Build and launch exactly through the documented solution/Steam path.
 

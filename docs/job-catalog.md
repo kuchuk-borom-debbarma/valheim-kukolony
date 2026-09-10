@@ -1,14 +1,12 @@
-# Job catalog and job pieces
+# Job catalog
 
-The player-facing editor composes linear pipelines from these pieces: Start, End,
-Stop at stock limit, Find loose item, Select source container, Select target structure,
-Move to target, Pick up loose item, Take matching item, Put carried item, and Operate
-verified station. Each is configured through guided customisation fields and only accepts
-compatible earlier outputs. This catalog intentionally excludes generic scripting,
-branches, and loops.
+The seven jobs a colony can be given. Each is named work with its own settings screen; a
+player chooses which work a job does and configures it, and the sequence follows from that.
+See [jobs.md](jobs.md) for how a job runs.
 
-Every card below is implemented as a concrete executor. Common controls include name,
-count, reservations, movement distance, item filters, and eligible-target mode.
+Common controls on every job: name, count, reservations, search radius, movement stop
+distance, item filters, eligible-target mode and exact structures, source and destination
+containers, stock threshold, and whether the result goes into a container or on the ground.
 
 ## Haul loose items to storage
 

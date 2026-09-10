@@ -58,26 +58,20 @@ make a partly broken queue look correct.
 
 ## Jobs tab
 
-**Edit pieces** opens the pipeline itself: the ordered list of steps, with reorder, remove
-and configure. Start and End have no controls, so the rule that a job runs between them
-cannot be broken from the panel. Configuring a piece shows only the settings that kind
-actually reads, taken from its declared contract rather than a list kept in the UI, so a
-piece can never offer a setting the engine ignores. Every value reads "job" until it is
-changed, which makes inheriting visible, and Clear overrides puts a piece back.
+Lists configured jobs with which work each does, execution count, and target mode. New job
+creates one; Configure opens the job card; Saved presets toggles to the preset list, where
+Apply materialises a preset as a new job.
 
-Lists configured jobs with piece count, execution count, and target mode. New pipeline
-creates a blank `Start → End` job; Configure opens the job card; Saved presets toggles to
-the preset list, where Apply materialises a preset as a new job.
+The job card edits everything a job reads: which work it does, name, item filters, target
+mode and exact target selection, source and destination containers, execution count, stock
+limit, reservations, search radius, stop distance, and whether the result goes into a
+container or on the ground. It says in a sentence what the chosen work actually does and
+which structures it needs, because a player can no longer read the steps off the screen.
+Choose targets opens a picker filtered to the capability the job requires, showing each
+candidate's live status.
 
-The job card edits everything a pipeline reads: name, item filters, target mode and exact
-target selection, source and destination containers, execution count, stock limit,
-reservations, search radius, and stop distance. It shows live pipeline validity and the
-ordered piece summary, and blocks saving or assignment when a piece is missing compatible
-customisation. Choose targets opens a picker filtered to the capability the job requires,
-showing each candidate's live status.
-
-Piece and job labels come from explicit mappings. Raw enum values must never reach the UI —
-`OperateStation` is not a player-facing string.
+Job labels come from explicit mappings. Raw enum values must never reach the UI —
+`OperateSmelters` is not a player-facing string.
 
 ## Layout rules
 

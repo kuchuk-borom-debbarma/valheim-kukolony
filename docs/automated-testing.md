@@ -1,10 +1,12 @@
 # Automated testing policy
 
 The required full verification command is `./scripts/in-game-test.sh`. It runs fast
-Unity-free pipeline checks, builds the solution, then launches the real benchmark twice
+Unity-free sequencing checks, builds the solution, then launches the real benchmark twice
 through Steam. A direct build or manual clicking is not equivalent.
 
-The deterministic project proves pure pipeline ordering and invalid customisation rejection.
+The deterministic project proves each job's sequencing: a full work cycle per shape, and
+resuming from the middle after a reload, which is where a state machine most easily goes
+wrong.
 The in-game benchmark proves ZDO persistence, ownership, inventories, station RPCs, real
 villagers, structures, queues, presets, paired controls, and rendered UI. Persistence only
 passes after save, process exit, and fresh reload.

@@ -44,7 +44,7 @@ namespace Kukolony.Jobs
         internal static JobResult TestDeposit(GameObject target, Inventory bag, ColonyJobConfig job, VillagerState state, out string activity) =>
             Deposit(target, bag, job.ItemFilters, state, out activity);
         internal static JobResult TestOperate(GameObject target, Inventory bag, ColonyJobConfig job, VillagerState state, out string activity) =>
-            Operate(target, bag, job, DeclaredCapability(job), state, out activity);
+            Operate(target, bag, job, ColonyJobCatalog.RequiredCapability(job.Type), state, out activity);
         internal static bool TestLimitReached(Colony colony, ColonyJobConfig job) => LimitReached(colony, job);
         /// <summary>Which station protocol a target resolves to, or empty for none.</summary>
         internal static string TestResolveProtocol(GameObject target, Colonies.StructureCapability declared)
@@ -67,224 +67,13 @@ namespace Kukolony.Jobs
             if (inventory == null) return JobResult.Failed;
 
             Work.IColonyWork work = Work.WorkRegistry.For(job.Type);
-            return work != null
-                ? TickWork(work, villager, ai, inventory, colony, job, out activity)
-                : TickWalker(villager, ai, inventory, colony, job, out activity);
+            if (work == null) return JobOutcomes.Skipped(villager.State, "unknown job", out activity);
+            return TickWork(work, villager, ai, inventory, colony, job, out activity);
         }
 
-
-        /// <summary>
-        ///     Runs a job by walking its pieces rather than by switching on its type.
-        /// </summary>
-        /// <remarks>
-        ///     The decision of which step to take is made by <see cref="JobWalker"/>, which is
-        ///     pure and tested without a world. This method only performs the chosen step,
-        ///     reusing the same selectors and executors the type-driven path uses, and records
-        ///     where the villager got to.
-        /// </remarks>
-        private static JobResult TickWalker(Villager villager, MonsterAI ai, Inventory bag,
-            Colony colony, ColonyJobConfig job, out string activity)
-        {
-            VillagerState state = villager.State;
-            List<JobPieceKind> kinds = job.Pieces.ConvertAll(piece => piece.Kind);
-            GameObject target = ResolveTarget(state, out bool targetLost);
-            if (targetLost)
-            {
-                state.ResetJob();
-                activity = "target missing";
-                return JobResult.Failed;
-            }
-
-            JobStep step = JobWalker.Next(kinds, state.StepCursor, new JobFacts(
-                hasTarget: !state.StepTarget.IsNone(),
-                arrivedAtTarget: false,
-                // Carrying is a question about the job, not one step: any item any piece
-                // wants counts, or the fetch pieces would look unsatisfied forever.
-                carrying: FirstMatching(bag, PieceSettings.AllFilters(job)) != null,
-                stockLimitReached: LimitReached(colony, job)));
-
-            int next = step.Cursor + 1;
-            switch (step.Action)
-            {
-                case StepAction.StopAtLimit:
-                    return JobOutcomes.Skipped(state, "stock limit reached", out activity);
-
-                case StepAction.CompleteCycle:
-                    return JobOutcomes.Completed(state, "job cycle complete", out activity);
-
-                // The world stopped matching the pipeline, usually a target taken by someone
-                // else. Begin again rather than fail: the work itself is still valid.
-                case StepAction.Restart:
-                    return JobOutcomes.Skipped(state, "restarting", out activity);
-
-                case StepAction.Invalid:
-                    return JobOutcomes.Skipped(state, "pipeline cannot run", out activity);
-
-                case StepAction.FindLooseItem:
-                    return Advance(state, next, SelectLooseItem(villager, colony, job, PieceAt(job, step.Cursor), "pickup", out activity));
-
-                case StepAction.SelectSource:
-                    return Advance(state, next, SelectSource(villager, colony, job, PieceAt(job, step.Cursor), out activity));
-
-                case StepAction.SelectTarget:
-                    return Advance(state, next, SelectDestination(villager, colony, job, step.Cursor, out activity));
-
-                case StepAction.SelectSpaciousTarget:
-                    return Advance(state, next, SelectSpacious(villager, colony, job, bag, step.Cursor, out activity));
-
-                case StepAction.StopHere:
-                    return JobOutcomes.Skipped(state, "nothing to carry", out activity);
-
-                case StepAction.DropCarried:
-                    return Advance(state, next, DropCarried(villager, job, bag, step.Cursor, out activity));
-
-                case StepAction.Move:
-                    return Walk(villager, ai, state, PieceSettings.StopDistance(job, PieceAt(job, step.Cursor)),
-                        target, next, out activity);
-
-                case StepAction.Wait:
-                    return AwaitDrop(colony, job, state, step.Cursor, next, out activity);
-            }
-
-            // Everything below acts on the target, so a target that has not loaded yet is a
-            // wait rather than a failure: its zone may still be streaming in.
-            if (target == null)
-            {
-                activity = "waiting for target to load";
-                return JobResult.Running;
-            }
-            switch (step.Action)
-            {
-                case StepAction.PickUp: return Advance(state, next, PickupLoose(target, bag, state, out activity));
-                case StepAction.TakeItem:
-                    return Advance(state, next, Acquire(target, bag, StepFilters(job, step.Cursor), state, out activity));
-                case StepAction.PutItem:
-                    return Advance(state, next, Deposit(target, bag, StepFilters(job, step.Cursor), state, out activity));
-                case StepAction.OperateStation:
-                    // The piece says which kind of station this step operates, so the job's
-                    // type has no say in it. This is the last thing execution asked it.
-                    return Advance(state, next, Operate(target, bag, job,
-                        PieceAt(job, step.Cursor) is JobPiece operated ? operated.Capability : StructureCapability.None,
-                        state, out activity));
-                default: return JobOutcomes.Skipped(state, "pipeline cannot run", out activity);
-            }
-        }
-
-        /// <summary>
-        ///     Records the next piece when a step made progress.
-        /// </summary>
-        /// <remarks>
-        ///     A leaf executor reports Completed to mean its own step finished, which is not
-        ///     the same as the job being done. Reported upwards unchanged it would end the
-        ///     cycle wherever the last executor happened to sit, so anything after that piece
-        ///     could never run - a deposit would end a pipeline and leave End unreached. The
-        ///     step becomes Running and only the End piece completes the cycle, which also
-        ///     makes one cycle cost exactly one queue attempt.
-        ///
-        ///     The cursor is written after the call because the executors clear the whole
-        ///     cycle on their way out.
-        /// </remarks>
-        private static JobResult Advance(VillagerState state, int next, JobResult result)
-        {
-            if (result != JobResult.Running && result != JobResult.Completed) return result;
-            state.SetStepCursor(next);
-            return JobResult.Running;
-        }
-
-        /// <summary>
-        ///     Chooses a container that can actually take what the villager is carrying.
-        /// </summary>
-        /// <remarks>
-        ///     Ordinary target selection picks the first eligible container and only discovers
-        ///     it is full on arrival, which fails the job after a walk. This checks capacity
-        ///     while choosing, so a full chest is never walked to in the first place.
-        /// </remarks>
-        private static JobResult SelectSpacious(Villager villager, Colony colony, ColonyJobConfig job,
-            Inventory bag, int cursor, out string activity)
-        {
-            JobPiece piece = PieceAt(job, cursor);
-            ItemDrop.ItemData carried = FirstMatching(bag, PieceSettings.Filters(job, piece));
-            if (carried == null) return JobOutcomes.Skipped(villager.State, "nothing to place", out activity);
-
-            List<ZDOID> scope = PieceSettings.Structures(job, piece);
-            TargetMode mode = PieceSettings.Targets(job, piece);
-            bool reserve = PieceSettings.Reservations(job, piece);
-            foreach (StructureRecord record in colony.State.GetStructures())
-            {
-                if ((record.Capabilities & StructureCapability.Container) == 0 || !record.IsLiveIn(colony)) continue;
-                bool selected = scope.Contains(record.Id);
-                if (mode == TargetMode.Selected && !selected) continue;
-                if (mode == TargetMode.Ignore && selected) continue;
-                GameObject instance = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(record.Id) : null;
-                if (instance == null || !instance.TryGetComponent(out Container container)) continue;
-                if (!container.GetInventory().CanAddItem(carried, 1)) continue;
-                if (reserve && TargetClaims.IsClaimedByOther(record.Id, villager)) continue;
-                SetTarget(villager.State, record.Id, "depositing");
-                activity = "depositing " + record.Name;
-                return JobResult.Running;
-            }
-            activity = "skipping: no container with room";
-            return JobResult.Skipped;
-        }
-
-        /// <summary>
-        ///     Puts down what is carried, where the villager stands. Lets a pipeline gather to
-        ///     a pile rather than requiring a container for every outcome.
-        /// </summary>
-        private static JobResult DropCarried(Villager villager, ColonyJobConfig job, Inventory bag,
-            int cursor, out string activity)
-        {
-            ItemDrop.ItemData carried = FirstMatching(bag, PieceSettings.Filters(job, PieceAt(job, cursor)));
-            if (carried == null) return JobOutcomes.Skipped(villager.State, "nothing to put down", out activity);
-            if (carried.m_dropPrefab == null)
-                return JobOutcomes.Failed(villager.State, "carried item cannot be dropped", out activity);
-
-            Vector3 at = villager.transform.position + Vector3.up * .5f + UnityEngine.Random.insideUnitSphere * .3f;
-            ItemDrop.DropItem(carried, 0, at, Quaternion.Euler(0f, UnityEngine.Random.Range(0, 360), 0f));
-            bag.RemoveItem(carried);
-            villager.State.ClearTarget();
-            activity = "put down " + Utils.GetPrefabName(carried.m_dropPrefab);
-            return JobResult.Running;
-        }
-
-        /// <summary>
-        ///     The kind of station a job's pipeline says it operates. Used by the harness,
-        ///     which drives an executor without a cursor; the walker reads the capability off
-        ///     the piece it is standing on. None means any protocol may claim the target,
-        ///     which is what a job with no pipeline gets.
-        /// </summary>
-        private static StructureCapability DeclaredCapability(ColonyJobConfig job)
-        {
-            foreach (JobPiece piece in job.Pieces)
-                if (piece.Kind == JobPieceKind.OperateStation) return piece.Capability;
-            return StructureCapability.None;
-        }
 
         /// <summary>Ticks a villager will wait for work to produce something before giving up.</summary>
         private const int WaitTicks = 40;
-
-        /// <summary>
-        ///     Holds position until the thing this step is waiting for exists, then moves on.
-        ///     Bounded, so a tap that produces nothing gives the villager back to its queue
-        ///     rather than leaving it standing there.
-        /// </summary>
-        private static JobResult AwaitDrop(Colony colony, ColonyJobConfig job, VillagerState state,
-            int cursor, int next, out string activity)
-        {
-            JobPiece piece = PieceAt(job, cursor);
-            if (FindLoose(colony, PieceSettings.Filters(job, piece), PieceSettings.SearchRadius(job, piece)) != null)
-            {
-                state.SetQueueProgress(0);
-                state.SetStepCursor(next);
-                activity = "collecting what appeared";
-                return JobResult.Running;
-            }
-            int waited = state.QueueProgress + 1;
-            if (waited > WaitTicks) return JobOutcomes.Skipped(state, "nothing appeared to collect", out activity);
-            state.SetQueueProgress(waited);
-            activity = "waiting for the work to finish";
-            return JobResult.Running;
-        }
 
         /// <summary>Nearest matching loose item in range, ignoring claims. Read-only.</summary>
         private static ItemDrop FindLoose(Colony colony, List<string> filters, float radius)
@@ -304,16 +93,22 @@ namespace Kukolony.Jobs
         // moving a job onto the new path changes how it is sequenced and not what it does.
 
         internal static JobResult ChooseLooseItem(Work.WorkContext c, out string activity) =>
-            SelectLooseItem(c.Villager, c.Colony, c.Job, null, "pickup", out activity);
+            SelectLooseItem(c.Villager, c.Colony, c.Job, "pickup", out activity);
 
         internal static JobResult ChooseStockedContainer(Work.WorkContext c, out string activity) =>
-            SelectSource(c.Villager, c.Colony, c.Job, null, out activity);
+            SelectSource(c.Villager, c.Colony, c.Job, out activity);
 
+        /// <summary>
+        ///     Chooses where the load goes. Among the colony's containers it will only pick one
+        ///     that can take what is carried: choosing a full chest and finding out on arrival
+        ///     fails the job after a walk, which is a worse answer than choosing another.
+        /// </summary>
         internal static JobResult ChooseContainer(Work.WorkContext c, StructureCapability capability,
             out string activity) =>
             !c.Job.Destination.IsNone()
                 ? SelectExplicitContainer(c.Villager, c.Colony, c.Job.Destination, "depositing", out activity)
-                : SelectStructure(c.Villager, c.Colony, c.Job, null, capability, "depositing", out activity);
+                : SelectStructure(c.Villager, c.Colony, c.Job, capability, "depositing", out activity,
+                    FirstMatching(c.Bag, c.Job.ItemFilters));
 
         internal static JobResult PickUpTarget(Work.WorkContext c, out string activity) =>
             PickupLoose(c.Target, c.Bag, c.State, out activity);
@@ -321,12 +116,38 @@ namespace Kukolony.Jobs
         internal static JobResult TakeFromTarget(Work.WorkContext c, out string activity) =>
             Acquire(c.Target, c.Bag, c.Job.ItemFilters, c.State, out activity);
 
+        /// <summary>
+        ///     Stores the carried item, or puts it down where the villager stands when the job
+        ///     asks for a pile rather than a container.
+        /// </summary>
         internal static JobResult DepositCarried(Work.WorkContext c, out string activity) =>
-            Deposit(c.Target, c.Bag, c.Job.ItemFilters, c.State, out activity);
+            c.Job.DropOnGround
+                ? DropCarried(c.Villager, c.Bag, c.Job.ItemFilters, out activity)
+                : Deposit(c.Target, c.Bag, c.Job.ItemFilters, c.State, out activity);
+
+        /// <summary>
+        ///     Puts down what is carried, where the villager stands. Lets a job gather to a
+        ///     pile rather than requiring a container for every outcome.
+        /// </summary>
+        private static JobResult DropCarried(Villager villager, Inventory bag, List<string> filters,
+            out string activity)
+        {
+            ItemDrop.ItemData carried = FirstMatching(bag, filters);
+            if (carried == null) return JobOutcomes.Skipped(villager.State, "nothing to put down", out activity);
+            if (carried.m_dropPrefab == null)
+                return JobOutcomes.Failed(villager.State, "carried item cannot be dropped", out activity);
+
+            Vector3 at = villager.transform.position + Vector3.up * .5f + UnityEngine.Random.insideUnitSphere * .3f;
+            ItemDrop.DropItem(carried, 0, at, Quaternion.Euler(0f, UnityEngine.Random.Range(0, 360), 0f));
+            bag.RemoveItem(carried);
+            villager.State.ClearTarget();
+            activity = "put down " + Utils.GetPrefabName(carried.m_dropPrefab);
+            return JobResult.Completed;
+        }
 
         internal static JobResult ChooseStation(Work.WorkContext c, StructureCapability capability,
             out string activity) =>
-            SelectStructure(c.Villager, c.Colony, c.Job, null, capability, "operating", out activity);
+            SelectStructure(c.Villager, c.Colony, c.Job, capability, "operating", out activity);
 
         internal static JobResult OperateTarget(Work.WorkContext c, StructureCapability capability,
             out string activity) =>
@@ -355,16 +176,6 @@ namespace Kukolony.Jobs
         }
 
         /// <summary>
-        ///     Harness hook that runs a job through the piece walker whatever its type. The
-        ///     checks that cover pieces themselves need this now that haul and transfer are
-        ///     sequenced by their own jobs instead, and it goes when the pieces do.
-        /// </summary>
-        internal static JobResult TestTickWalker(Villager villager, MonsterAI ai, Container inventory,
-            Colony colony, ColonyJobConfig job, out string activity) =>
-            TickWalker(villager, ai, inventory != null ? inventory.GetInventory() : null,
-                colony, job, out activity);
-
-        /// <summary>
         ///     Runs a job that owns its own sequence. The job decides what to do; this performs
         ///     it and records where the villager got to.
         /// </summary>
@@ -389,12 +200,14 @@ namespace Kukolony.Jobs
                           <= Mathf.Max(.5f, job.StopDistance);
             }
 
+            bool inPlace = job.DropOnGround && work.TargetCapability == StructureCapability.Container;
             Work.WorkStep step = work.Next(state.Work, new Work.WorkFacts(
                 hasTarget: !state.StepTarget.IsNone(),
                 arrived: arrived,
                 carrying: FirstMatching(bag, job.ItemFilters) != null,
                 stockLimitReached: LimitReached(colony, job),
-                hasTool: HasRequiredTool(bag, work.RequiredTool)));
+                hasTool: HasRequiredTool(bag, work.RequiredTool),
+                deliversInPlace: inPlace));
 
             // The phase is where the decision landed, not where the villager set out from:
             // transitions skip through states whose outcome already holds, and a job that
@@ -427,8 +240,10 @@ namespace Kukolony.Jobs
             }
 
             // The rest act on the target, so one that has not loaded is worth waiting for
-            // rather than failing: its zone may still be streaming in.
-            if (target == null)
+            // rather than failing: its zone may still be streaming in. Putting the load down
+            // where the villager stands is the exception - there is no target to wait for,
+            // and waiting for one would leave the villager holding it forever.
+            if (target == null && !(inPlace && step.Action == Work.WorkAction.Deliver))
             {
                 activity = "waiting for target to load";
                 return JobResult.Running;
@@ -477,26 +292,6 @@ namespace Kukolony.Jobs
                 ? "nothing to do"
                 : "needs " + (work.RequiredTool == Work.ToolRequirement.Axe ? "an axe" : "a pickaxe");
 
-        /// <summary>Items the piece at this cursor works with, falling back to the job's.</summary>
-        private static List<string> StepFilters(ColonyJobConfig job, int cursor) =>
-            PieceSettings.Filters(job, PieceAt(job, cursor));
-
-        /// <summary>The piece at this cursor, or null when the job has none there.</summary>
-        private static JobPiece PieceAt(ColonyJobConfig job, int cursor) =>
-            cursor >= 0 && cursor < job.Pieces.Count ? job.Pieces[cursor] : null;
-
-        /// <summary>Walks to the chosen target, advancing only once the villager arrives.</summary>
-        private static JobResult Walk(Villager villager, MonsterAI ai, VillagerState state,
-            float stopDistance, GameObject target, int next, out string activity)
-        {
-            JobResult result = Walk(villager, ai, state, stopDistance, target, out bool arrived,
-                out activity);
-            // The cursor moves on arrival only. Walking is progress, but it is not a step the
-            // pipeline has finished, and advancing early would step over the piece that acts.
-            if (arrived) state.SetStepCursor(next);
-            return result;
-        }
-
         /// <summary>
         ///     Walking itself, with nowhere to record progress. Jobs that own their sequencing
         ///     keep that record in their own terms rather than in a pipeline cursor.
@@ -529,23 +324,6 @@ namespace Kukolony.Jobs
         }
 
         /// <summary>
-        ///     Chooses where to put things. An explicit destination wins; otherwise the piece's
-        ///     own declared capability picks among the colony's registered structures. This is
-        ///     the first time a piece's capability decides anything at runtime.
-        /// </summary>
-        private static JobResult SelectDestination(Villager villager, Colony colony, ColonyJobConfig job,
-            int cursor, out string activity)
-        {
-            JobPiece piece = cursor >= 0 && cursor < job.Pieces.Count ? job.Pieces[cursor] : null;
-            ZDOID destination = PieceSettings.Container(job, piece, job.Destination);
-            if (!destination.IsNone())
-                return SelectExplicitContainer(villager, colony, destination, "depositing", out activity);
-            StructureCapability capability = piece != null ? piece.Capability : StructureCapability.None;
-            if (capability == StructureCapability.None) capability = StructureCapability.Container;
-            return SelectStructure(villager, colony, job, piece, capability, "depositing", out activity);
-        }
-
-        /// <summary>
         ///     The villager's current target, and whether it is gone for good. A target whose
         ///     ZDO no longer exists is lost; one that is merely unloaded returns null and is
         ///     worth waiting for.
@@ -560,11 +338,11 @@ namespace Kukolony.Jobs
         }
 
         private static JobResult SelectLooseItem(Villager villager, Colony colony,
-            ColonyJobConfig job, JobPiece piece, string phase, out string activity)
+            ColonyJobConfig job, string phase, out string activity)
         {
-            List<string> filters = PieceSettings.Filters(job, piece);
-            float radius = PieceSettings.SearchRadius(job, piece);
-            bool reserve = PieceSettings.Reservations(job, piece);
+            List<string> filters = job.ItemFilters;
+            float radius = job.SearchRadius;
+            bool reserve = job.Reservations;
             ItemDrop closest = null;
             float best = float.MaxValue;
             foreach (ItemDrop drop in ItemDrop.s_instances)
@@ -583,15 +361,14 @@ namespace Kukolony.Jobs
         }
 
         private static JobResult SelectSource(Villager villager, Colony colony,
-            ColonyJobConfig job, JobPiece piece, out string activity)
+            ColonyJobConfig job, out string activity)
         {
-            ZDOID explicitSource = PieceSettings.Container(job, piece, job.Source);
-            if (!explicitSource.IsNone())
-                return SelectExplicitContainer(villager, colony, explicitSource, "acquiring", out activity);
-            List<string> filters = PieceSettings.Filters(job, piece);
-            List<ZDOID> scope = PieceSettings.Structures(job, piece);
-            TargetMode mode = PieceSettings.Targets(job, piece);
-            bool reserve = PieceSettings.Reservations(job, piece);
+            if (!job.Source.IsNone())
+                return SelectExplicitContainer(villager, colony, job.Source, "acquiring", out activity);
+            List<string> filters = job.ItemFilters;
+            List<ZDOID> scope = job.SelectedStructures;
+            TargetMode mode = job.Targets;
+            bool reserve = job.Reservations;
             foreach (StructureRecord record in colony.State.GetStructures())
             {
                 if ((record.Capabilities & StructureCapability.Container) == 0 || !record.IsLiveIn(colony)) continue;
@@ -625,25 +402,43 @@ namespace Kukolony.Jobs
             return JobResult.Running;
         }
 
-        private static JobResult SelectStructure(Villager villager, Colony colony, ColonyJobConfig job, JobPiece piece,
-            StructureCapability capability, string phase, out string activity)
+        /// <param name="mustFit">
+        ///     When given, only a container with room for this item is eligible. Null means
+        ///     capacity is not this selection's concern - a smelter is not a container.
+        /// </param>
+        private static JobResult SelectStructure(Villager villager, Colony colony, ColonyJobConfig job,
+            StructureCapability capability, string phase, out string activity,
+            ItemDrop.ItemData mustFit = null)
         {
-            List<ZDOID> scope = PieceSettings.Structures(job, piece);
-            TargetMode mode = PieceSettings.Targets(job, piece);
-            bool reserve = PieceSettings.Reservations(job, piece);
+            List<ZDOID> scope = job.SelectedStructures;
+            TargetMode mode = job.Targets;
+            bool reserve = job.Reservations;
             foreach (StructureRecord record in colony.State.GetStructures())
             {
                 if ((record.Capabilities & capability) == 0 || !record.IsLiveIn(colony)) continue;
                 bool selected = scope.Contains(record.Id);
                 if (mode == TargetMode.Selected && !selected) continue;
                 if (mode == TargetMode.Ignore && selected) continue;
+                if (mustFit != null && !HasRoomFor(record, mustFit)) continue;
                 if (reserve && TargetClaims.IsClaimedByOther(record.Id, villager)) continue;
                 SetTarget(villager.State, record.Id, phase);
                 activity = phase + " " + record.Name;
                 return JobResult.Running;
             }
-            activity = "skipping: no eligible target";
+            activity = mustFit != null ? "skipping: no container with room" : "skipping: no eligible target";
             return JobResult.Skipped;
+        }
+
+        /// <summary>
+        ///     Whether a registered container can take one of this item. A structure that is
+        ///     not loaded cannot be asked, and is treated as unusable rather than assumed
+        ///     roomy: walking to it is the cost this check exists to avoid.
+        /// </summary>
+        private static bool HasRoomFor(StructureRecord record, ItemDrop.ItemData item)
+        {
+            GameObject instance = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(record.Id) : null;
+            return instance != null && instance.TryGetComponent(out Container container) &&
+                   container.GetInventory().CanAddItem(item, 1);
         }
 
         private static JobResult PickupLoose(GameObject target, Inventory bag,

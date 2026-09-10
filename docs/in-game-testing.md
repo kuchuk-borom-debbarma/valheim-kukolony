@@ -16,7 +16,7 @@ and cleanup, then disable benchmark mode for normal play.
 ## Agent and CI use
 
 Run `./scripts/in-game-test.sh`. It verifies the pinned Doorstop runtime, runs deterministic
-pipeline preflight, builds the solution, backs up config, enables benchmark auto-boot into
+sequencing preflight, builds the solution, backs up config, enables benchmark auto-boot into
 `KukolonyBenchmark`, and launches through Steam. It waits for create and reload reports and
 process exit, restores config on every exit, and copies evidence to `~/Desktop/kukolony`.
 `run-colony-acceptance.sh` is only a compatibility alias.
@@ -52,8 +52,9 @@ The run directory contains `benchmark-create.log`, `benchmark-reload.log`,
 logs, and `failure.txt` on errors. The terminal marker is
 `BENCHMARK TERMINAL <create|reload> <PASS|FAIL> run=<id>`.
 
-Fourteen screenshots are required, including the three pipeline screens: the piece editor,
-one piece's settings, and the add-a-piece list.
+Eleven screenshots are required, covering the panel, structures, members and their detail
+and removal screens, jobs and one job's settings, the structure picker, preset application,
+and the colony picker.
 
 The UI phase arms the remove confirmation but never executes it: that phase registers chest
 fixtures as colony members, so an executing seam would destroy them mid-run. Removal itself
@@ -61,7 +62,7 @@ is proven in the functional phase against real villagers.
 
 The screenshot manifest records filename, dimensions, and capture time. Passing requires
 both reports, every required PNG, and visual inspection for clipping, overlap, stale
-content, readability, pipeline order, validation feedback, and pagination.
+content, readability, and pagination.
 
 Terminal PASS does not cover layout: the shell only proves each PNG exists and is
 non-empty. Overflow, overlap, and misleading fixture content are found by reading the

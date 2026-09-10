@@ -105,14 +105,8 @@ namespace Kukolony.Debug
             jobs[0].StockLimit = 10;
             colony.State.SetJobs(jobs);
             report.Check(colony.State.GetJobs().Count == 7, "all seven concrete job configurations persist");
-            report.Check(jobs.All(job => JobPipeline.IsValid(job, out _) && job.Pieces.Count >= 3),
-                "starter jobs are valid typed piece pipelines");
-            ColonyJobConfig invalidPipeline = new ColonyJobConfig { Name = "invalid" };
-            invalidPipeline.Pieces.Add(new JobPiece { Kind = JobPieceKind.Start });
-            invalidPipeline.Pieces.Add(new JobPiece { Kind = JobPieceKind.PutItem });
-            invalidPipeline.Pieces.Add(new JobPiece { Kind = JobPieceKind.End });
-            report.Check(!JobPipeline.IsValid(invalidPipeline, out _),
-                "pipeline validation blocks missing compatible customisation");
+            report.Check(jobs.All(job => Jobs.Work.WorkRegistry.For(job.Type) != null),
+                "every starter job is work the colony knows how to do");
 
             ColonyOperations.SavePreset(colony, "portable", jobs[0], false);
             ColonyOperations.SavePreset(colony, "local", jobs[0], true);
@@ -169,8 +163,7 @@ namespace Kukolony.Debug
             yield return CheckLifecycle(report, colony, origin);
             yield return CheckHaulPipeline(report, colony);
             yield return CheckTransferPipeline(report, colony);
-            yield return CheckPieceSettings(report, colony);
-            yield return CheckNewPieces(report, colony);
+            yield return CheckDestinationChoice(report, colony);
             yield return CheckStationJob(report, colony);
             yield return CheckHiveJob(report, colony);
             CheckStationContracts(report);
@@ -208,8 +201,8 @@ namespace Kukolony.Debug
             report.Check(state.GetStructures().Any(r => r.Name == "Renamed storage"),
                 "registered structure and name survived save and relaunch");
             report.Check(state.GetJobs().Count == 7, "job configurations survived save and relaunch");
-            report.Check(state.GetJobs().All(job => JobPipeline.IsValid(job, out _) && job.Pieces.Count >= 3),
-                "typed pipeline definitions survived save and relaunch");
+            report.Check(state.GetJobs().All(job => Jobs.Work.WorkRegistry.For(job.Type) != null),
+                "job types survived save and relaunch");
             report.Check(state.GetPresets().Count == 2, "portable and local presets survived save and relaunch");
             List<ZDOID> members = state.GetMembers(ColonyMemberKind.Villager);
             report.Check(members.Count > 0, "member list survived save and relaunch");
@@ -487,7 +480,6 @@ namespace Kukolony.Debug
             yield return new WaitForSecondsRealtime(.3f);
 
             ColonyJobConfig job = Job(ColonyJobType.HaulLoose, "Flint");
-            job.Pieces.AddRange(JobPipeline.For(ColonyJobType.HaulLoose));
             job.Destination = chest.GetComponent<ZNetView>().GetZDO().m_uid;
             job.StopDistance = 12f;
 
@@ -562,7 +554,6 @@ namespace Kukolony.Debug
             yield return new WaitForSecondsRealtime(.3f);
 
             ColonyJobConfig job = Job(ColonyJobType.Transfer, "Flint");
-            job.Pieces.AddRange(JobPipeline.For(ColonyJobType.Transfer));
             job.Source = from.GetComponent<ZNetView>().GetZDO().m_uid;
             job.Destination = into.GetComponent<ZNetView>().GetZDO().m_uid;
             job.StopDistance = 12f;
@@ -606,99 +597,14 @@ namespace Kukolony.Debug
             yield return new WaitForSecondsRealtime(.2f);
         }
 
-        /// <summary>
-        ///     Proves a piece's own settings beat the job's, which is the whole reason pieces
-        ///     carry settings at all.
-        /// </summary>
-        /// <remarks>
-        ///     The source holds two kinds of item and the job asks for one of them, while the
-        ///     take and put pieces ask for the other. If overrides were ignored the villager
-        ///     would move the job's item, so the two outcomes are distinguishable rather than
-        ///     merely "something moved". The control runs the same pipeline with no overrides
-        ///     and must move the job's item instead.
-        /// </remarks>
-        private static IEnumerator CheckPieceSettings(TestReport report, Colony colony)
-        {
-            Villager worker = VillagerLifecycle.Spawn(colony);
-            if (worker == null || !worker.TryGetComponent(out ZNetView view) || !view.IsValid() ||
-                !worker.TryGetComponent(out MonsterAI ai))
-            {
-                report.Check(false, "a piece setting overrides the job setting", "no worker");
-                yield break;
-            }
-
-            Vector3 at = worker.transform.position;
-            GameObject from = Spawn("piece_chest_wood", at + Vector3.forward * 3f);
-            GameObject into = Spawn("piece_chest_wood", at + Vector3.back * 3f);
-            Register(colony, from, "Override source");
-            Register(colony, into, "Override sink");
-            Inventory source = from.GetComponent<Container>().GetInventory();
-            Inventory sink = into.GetComponent<Container>().GetInventory();
-            Container bag = VillagerInventory.Attach(worker.gameObject, view);
-
-            ZDOID fromId = from.GetComponent<ZNetView>().GetZDO().m_uid;
-            ZDOID intoId = into.GetComponent<ZNetView>().GetZDO().m_uid;
-
-            // Overridden: the job says Wood, the pieces say Flint.
-            Clear(source); Clear(sink); Clear(bag.GetInventory());
-            Add(source, "Wood");
-            Add(source, "Flint");
-            ColonyJobConfig overridden = Job(ColonyJobType.Transfer, "Wood");
-            overridden.Pieces.AddRange(JobPipeline.For(ColonyJobType.Transfer));
-            overridden.Source = fromId;
-            overridden.Destination = intoId;
-            overridden.StopDistance = 12f;
-            foreach (JobPiece piece in overridden.Pieces)
-                if (piece.Kind == JobPieceKind.TakeItem || piece.Kind == JobPieceKind.PutItem)
-                    piece.ItemFilters.Add("Flint");
-            yield return new WaitForSecondsRealtime(.3f);
-            yield return RunWalker(worker, ai, bag, colony, overridden);
-            bool movedOverride = Count(sink, "Flint") == 1 && Count(sink, "Wood") == 0;
-
-            // Control: same pipeline, no overrides. It must move the job's item instead.
-            Clear(source); Clear(sink); Clear(bag.GetInventory());
-            Add(source, "Wood");
-            Add(source, "Flint");
-            ColonyJobConfig plain = Job(ColonyJobType.Transfer, "Wood");
-            plain.Pieces.AddRange(JobPipeline.For(ColonyJobType.Transfer));
-            plain.Source = fromId;
-            plain.Destination = intoId;
-            plain.StopDistance = 12f;
-            yield return new WaitForSecondsRealtime(.2f);
-            yield return RunWalker(worker, ai, bag, colony, plain);
-            bool movedJob = Count(sink, "Wood") == 1 && Count(sink, "Flint") == 0;
-
-            report.Check(movedOverride && movedJob,
-                "a piece setting overrides the job setting, and without one the job's applies",
-                $"withOverride={(movedOverride ? "Flint" : "wrong")} without={(movedJob ? "Wood" : "wrong")}");
-
-            VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
-            yield return new WaitForSecondsRealtime(.2f);
-        }
-
         /// <summary>Runs a job through the engine tick until it completes or gives up.</summary>
         private static IEnumerator Run(Villager worker, MonsterAI ai, Container bag, Colony colony,
-            ColonyJobConfig job) =>
-            Drive(worker, ai, bag, colony, job, false);
-
-        /// <summary>
-        ///     The same, forced down the piece walker. Only the checks that exist to cover
-        ///     pieces use this; everything else goes through whichever path the job's type
-        ///     selects, which is the thing worth testing.
-        /// </summary>
-        private static IEnumerator RunWalker(Villager worker, MonsterAI ai, Container bag, Colony colony,
-            ColonyJobConfig job) =>
-            Drive(worker, ai, bag, colony, job, true);
-
-        private static IEnumerator Drive(Villager worker, MonsterAI ai, Container bag, Colony colony,
-            ColonyJobConfig job, bool walker)
+            ColonyJobConfig job)
         {
             JobResult result = JobResult.Running;
             for (int tick = 0; tick < 80 && result != JobResult.Completed; tick++)
             {
-                result = walker
-                    ? ColonyJobEngine.TestTickWalker(worker, ai, bag, colony, job, out _)
-                    : ColonyJobEngine.Tick(worker, ai, bag, colony, job, out _);
+                result = ColonyJobEngine.Tick(worker, ai, bag, colony, job, out _);
                 if (result == JobResult.Failed || result == JobResult.Skipped) break;
                 yield return null;
             }
@@ -706,41 +612,38 @@ namespace Kukolony.Debug
         }
 
         /// <summary>
-        ///     Covers the pieces that added new behaviour rather than new sequencing: putting
-        ///     down what is carried, and choosing a container that can actually take it.
+        ///     Covers the two settings that decide where a load ends up: a pile on the ground,
+        ///     or a container that can actually take it.
         /// </summary>
         /// <remarks>
-        ///     Ordinary target selection picks the first eligible container and only finds out
-        ///     it is full after walking there, which fails the job. The roomy variant checks
-        ///     capacity while choosing, so the test puts a full chest and an empty one in front
-        ///     of a villager and asserts which one the item reaches. The control fills both:
-        ///     with nowhere to put anything it must come to rest rather than pick one anyway.
+        ///     Choosing a container is where a haul most easily wastes a journey. Ordinary
+        ///     selection would pick the first eligible one and only discover it is full on
+        ///     arrival, so the check puts a full chest and an empty one in front of a villager
+        ///     and asserts which one the item reaches. The control fills both: with nowhere to
+        ///     put anything it must come to rest still carrying, rather than pick one anyway.
         /// </remarks>
-        private static IEnumerator CheckNewPieces(TestReport report, Colony colony)
+        private static IEnumerator CheckDestinationChoice(TestReport report, Colony colony)
         {
             Villager worker = VillagerLifecycle.Spawn(colony);
             if (worker == null || !worker.TryGetComponent(out ZNetView view) || !view.IsValid() ||
                 !worker.TryGetComponent(out MonsterAI ai))
             {
-                report.Check(false, "put down and roomy-target pieces work", "no worker");
+                report.Check(false, "a job puts its load down or in a container with room", "no worker");
                 yield break;
             }
             Container bag = VillagerInventory.Attach(worker.gameObject, view);
             Vector3 at = worker.transform.position;
 
-            // Put down: carry something, run a pipeline that only drops it.
+            // A pile: carry something and ask for it on the ground rather than in a chest.
             Clear(bag.GetInventory());
             Add(bag.GetInventory(), "Flint");
             ColonyJobConfig pile = Job(ColonyJobType.HaulLoose, "Flint");
-            pile.Pieces.Add(new JobPiece { Kind = JobPieceKind.Start });
-            pile.Pieces.Add(new JobPiece { Kind = JobPieceKind.StopUnlessCarrying });
-            pile.Pieces.Add(new JobPiece { Kind = JobPieceKind.DropCarried });
-            pile.Pieces.Add(new JobPiece { Kind = JobPieceKind.End });
+            pile.DropOnGround = true;
             pile.StopDistance = 12f;
-            yield return RunWalker(worker, ai, bag, colony, pile);
+            yield return Run(worker, ai, bag, colony, pile);
             bool droppedIt = Count(bag.GetInventory(), "Flint") == 0 && LooseCount("Flint", at) > 0;
 
-            // Roomy target: one full chest, one with space.
+            // Room: one full chest, one with space.
             GameObject full = Spawn("piece_chest_wood", at + Vector3.right * 3f);
             GameObject roomy = Spawn("piece_chest_wood", at + Vector3.left * 3f);
             StructureRecord fullRecord = Register(colony, full, "Full chest");
@@ -753,31 +656,19 @@ namespace Kukolony.Debug
             Add(bag.GetInventory(), "Flint");
 
             ColonyJobConfig choose = Job(ColonyJobType.HaulLoose, "Flint");
-            choose.Pieces.Add(new JobPiece { Kind = JobPieceKind.Start });
-            choose.Pieces.Add(new JobPiece { Kind = JobPieceKind.StopUnlessCarrying });
-            // Scope the choice to this test's two chests. The colony already holds
-            // containers registered by earlier checks, and one of those has room - the piece
-            // was correctly choosing it, which is a fixture problem rather than a fault.
-            // Scoping also exercises a piece's own target mode.
-            JobPiece spacious = new JobPiece
-            {
-                Kind = JobPieceKind.SelectSpaciousTarget,
-                Capability = StructureCapability.Container,
-                Targets = (int)TargetMode.Selected
-            };
-            if (fullRecord != null) spacious.SelectedStructures.Add(fullRecord.Id);
-            if (roomyRecord != null) spacious.SelectedStructures.Add(roomyRecord.Id);
-            choose.Pieces.Add(spacious);
-            choose.Pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget });
-            choose.Pieces.Add(new JobPiece { Kind = JobPieceKind.PutItem });
-            choose.Pieces.Add(new JobPiece { Kind = JobPieceKind.End });
+            // Scope the choice to this check's two chests. The colony already holds containers
+            // registered by earlier checks, and one of those has room - choosing it would be
+            // correct behaviour against a polluted fixture rather than a fault.
+            choose.Targets = TargetMode.Selected;
+            if (fullRecord != null) choose.SelectedStructures.Add(fullRecord.Id);
+            if (roomyRecord != null) choose.SelectedStructures.Add(roomyRecord.Id);
             choose.StopDistance = 12f;
             yield return new WaitForSecondsRealtime(.3f);
             var chooseSteps = new List<string>();
             JobResult chooseResult = JobResult.Running;
             for (int tick = 0; tick < 80 && chooseResult != JobResult.Completed; tick++)
             {
-                chooseResult = ColonyJobEngine.TestTickWalker(worker, ai, bag, colony, choose, out string step);
+                chooseResult = ColonyJobEngine.Tick(worker, ai, bag, colony, choose, out string step);
                 if (chooseSteps.Count == 0 || chooseSteps[chooseSteps.Count - 1] != step) chooseSteps.Add(step);
                 if (chooseResult == JobResult.Failed || chooseResult == JobResult.Skipped) break;
                 yield return null;
@@ -796,13 +687,13 @@ namespace Kukolony.Debug
             JobResult stuck = JobResult.Running;
             for (int tick = 0; tick < 40 && stuck == JobResult.Running; tick++)
             {
-                stuck = ColonyJobEngine.TestTickWalker(worker, ai, bag, colony, choose, out _);
+                stuck = ColonyJobEngine.Tick(worker, ai, bag, colony, choose, out _);
                 yield return null;
             }
             bool refused = stuck == JobResult.Skipped && Count(bag.GetInventory(), "Flint") == 1;
 
             report.Check(droppedIt && avoidedFull && refused,
-                "put down leaves items on the ground, and a roomy target skips a full container",
+                "a job puts its load down or in a container with room, and refuses a full one",
                 $"dropped={droppedIt} roomy={reachedRoomy} full={reachedFull} " +
                 $"choose={chooseResult} steps={string.Join(" | ", chooseSteps.ToArray())} " +
                 $"whenNoRoom={stuck} stillCarrying={Count(bag.GetInventory(), "Flint")}");

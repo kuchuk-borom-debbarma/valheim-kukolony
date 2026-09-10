@@ -116,15 +116,6 @@ namespace Kukolony.Debug
             panel.ShowJobForTest(0);
             yield return new WaitForSecondsRealtime(1f);
             yield return Capture("colony-job-config.png");
-            panel.ShowPieceEditorForTest();
-            yield return new WaitForSecondsRealtime(1f);
-            yield return Capture("colony-piece-editor.png");
-            panel.ShowPieceSettingsForTest();
-            yield return new WaitForSecondsRealtime(1f);
-            yield return Capture("colony-piece-settings.png");
-            panel.ShowPiecePickerForTest();
-            yield return new WaitForSecondsRealtime(1f);
-            yield return Capture("colony-piece-picker.png");
             panel.ShowTargetPickerForTest();
             yield return new WaitForSecondsRealtime(1f);
             yield return Capture("colony-structure-picker.png");

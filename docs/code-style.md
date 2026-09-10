@@ -150,13 +150,14 @@ because the shape was guessed before the second example existed.
 
 Concrete first. Extract when the duplication is visible.
 
-## Job pipelines
+## Jobs
 
-Pipeline validators are pure: they validate typed piece customisation and never query
-Unity. Piece executors use shared ownership, registry, movement, and inventory helpers;
-they do not duplicate container writes or station RPC contracts. Persisted pipeline pieces
-are versioned ZPackage records, never a generic JSON bag. Player-visible wording is
-"customisation"; code uses typed contracts so invalid flows cannot reach AI execution.
+A job's sequencing is a pure function over an enum and booleans, and never queries Unity;
+it lives in a file the deterministic project links. Performing an action is separate and
+uses the shared ownership, registry, movement and inventory helpers rather than duplicating
+container writes or station RPC contracts. Job records are versioned ZPackage records,
+never a generic JSON bag. Adding work is a new file and a registry entry, not another case
+in a switch.
 
 ## Benchmark code
 

@@ -58,6 +58,8 @@ namespace Kukolony.Jobs.Work
                         // Nothing in hand by this point means the fetch found nothing worth
                         // carrying, so the cycle is over rather than stuck.
                         if (!facts.Carrying) return new WorkStep(WorkAction.Complete, state, WorkState.Choosing);
+                        // Putting the load down needs no destination and no journey.
+                        if (facts.DeliversInPlace) return new WorkStep(WorkAction.Deliver, state, WorkState.Finished);
                         if (!facts.HasTarget) return new WorkStep(WorkAction.ChooseTarget, state, WorkState.Delivering);
                         state = WorkState.Delivering;
                         continue;

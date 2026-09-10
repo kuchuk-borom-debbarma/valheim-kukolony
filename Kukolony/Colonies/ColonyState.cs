@@ -124,10 +124,15 @@ namespace Kukolony.Colonies
         }
 
         /// <summary>
-        ///     Job record format. Bumped to 5 when pieces gained their own settings; version 4
-        ///     records still read, with every piece inheriting from its job.
+        ///     Job record format.
         /// </summary>
-        private const int JobRecordVersion = 5;
+        /// <remarks>
+        ///     Version 6 dropped the pipeline: a job is named work with its own settings rather
+        ///     than a list of pieces. Records from 3 to 5 still load - their settings mean the
+        ///     same things - and their piece lists are read past and discarded, because the
+        ///     fields after them cannot be found otherwise.
+        /// </remarks>
+        private const int JobRecordVersion = 6;
 
         private static ColonyJobConfig ReadJob(ZPackage p, int version)
         {
@@ -151,43 +156,40 @@ namespace Kukolony.Colonies
             int filters = p.ReadInt();
             if (filters < 0 || filters > 4096) throw new System.IO.InvalidDataException("invalid filter count");
             for (int i = 0; i < filters; i++) job.ItemFilters.Add(p.ReadString());
-            if (version >= 3)
-            {
-                int pieces = p.ReadInt();
-                if (pieces < 2 || pieces > 128) throw new System.IO.InvalidDataException("invalid pipeline piece count");
-                for (int i = 0; i < pieces; i++)
-                {
-                    JobPiece piece = new JobPiece { Kind = (JobPieceKind)p.ReadInt(), Capability = (StructureCapability)p.ReadInt() };
-                    // Version 4 pipelines have no per-piece settings, and a piece with none
-                    // inherits the job's - so an older record needs no conversion, only this
-                    // branch. It is deliberately unexercised: the deterministic project has no
-                    // ZPackage and there is no v4 fixture world to load.
-                    if (version >= 5)
-                    {
-                        int pieceFilters = p.ReadInt();
-                        if (pieceFilters < 0 || pieceFilters > 256) throw new System.IO.InvalidDataException("invalid piece filter count");
-                        for (int f = 0; f < pieceFilters; f++) piece.ItemFilters.Add(p.ReadString());
-                        piece.Container = ReadReference(p, version);
-                        int pieceStructures = p.ReadInt();
-                        if (pieceStructures < 0 || pieceStructures > 4096) throw new System.IO.InvalidDataException("invalid piece target count");
-                        for (int t = 0; t < pieceStructures; t++) piece.SelectedStructures.Add(ReadReference(p, version));
-                        piece.StockLimit = p.ReadInt();
-                        piece.Amount = p.ReadInt();
-                        piece.SearchRadius = p.ReadSingle();
-                        piece.StopDistance = p.ReadSingle();
-                        piece.Targets = p.ReadInt();
-                        piece.Reservations = p.ReadInt();
-                    }
-                    job.Pieces.Add(piece);
-                }
-            }
-            else job.Pieces.AddRange(JobPipeline.For(job.Type));
-            if (JobPipeline.IsRetiredStationShape(job.Pieces, job.Type))
-            {
-                job.Pieces.Clear();
-                job.Pieces.AddRange(JobPipeline.For(job.Type));
-            }
+            if (version >= 3 && version <= 5) SkipPipeline(p, version);
+            if (version >= 6) job.DropOnGround = p.ReadBool();
             return job;
+        }
+
+        /// <summary>
+        ///     Reads past a pipeline saved before jobs sequenced themselves. Nothing is kept:
+        ///     what the pieces were configured with duplicated the job's own settings, and what
+        ///     order they ran in is now the job's business. The read still has to happen, or
+        ///     everything after it in the record is misaligned.
+        /// </summary>
+        private static void SkipPipeline(ZPackage p, int version)
+        {
+            int pieces = p.ReadInt();
+            if (pieces < 0 || pieces > 128) throw new System.IO.InvalidDataException("invalid pipeline piece count");
+            for (int i = 0; i < pieces; i++)
+            {
+                p.ReadInt();   // kind
+                p.ReadInt();   // capability
+                if (version < 5) continue;
+                int pieceFilters = p.ReadInt();
+                if (pieceFilters < 0 || pieceFilters > 256) throw new System.IO.InvalidDataException("invalid piece filter count");
+                for (int f = 0; f < pieceFilters; f++) p.ReadString();
+                ReadReference(p, version);
+                int pieceStructures = p.ReadInt();
+                if (pieceStructures < 0 || pieceStructures > 4096) throw new System.IO.InvalidDataException("invalid piece target count");
+                for (int t = 0; t < pieceStructures; t++) ReadReference(p, version);
+                p.ReadInt();      // stock limit
+                p.ReadInt();      // amount
+                p.ReadSingle();   // search radius
+                p.ReadSingle();   // stop distance
+                p.ReadInt();      // targets
+                p.ReadInt();      // reservations
+            }
         }
 
         private static void WriteJob(ZPackage p, ColonyJobConfig job)
@@ -198,23 +200,7 @@ namespace Kukolony.Colonies
             p.Write(job.SearchRadius); p.Write(job.StopDistance);
             p.Write(job.SelectedStructures.Count); foreach (ZDOID id in job.SelectedStructures) WriteReference(p, id);
             p.Write(job.ItemFilters.Count); foreach (string item in job.ItemFilters) p.Write(item ?? string.Empty);
-            List<JobPiece> pieces = job.Pieces.Count == 0 ? JobPipeline.For(job.Type) : job.Pieces;
-            p.Write(pieces.Count);
-            foreach (JobPiece piece in pieces)
-            {
-                p.Write((int)piece.Kind); p.Write((int)piece.Capability);
-                p.Write(piece.ItemFilters.Count);
-                foreach (string item in piece.ItemFilters) p.Write(item ?? string.Empty);
-                WriteReference(p, piece.Container);
-                p.Write(piece.SelectedStructures.Count);
-                foreach (ZDOID id in piece.SelectedStructures) WriteReference(p, id);
-                p.Write(piece.StockLimit);
-                p.Write(piece.Amount);
-                p.Write(piece.SearchRadius);
-                p.Write(piece.StopDistance);
-                p.Write(piece.Targets);
-                p.Write(piece.Reservations);
-            }
+            p.Write(job.DropOnGround);
         }
 
         private static ZDOID ReadReference(ZPackage package, int version)

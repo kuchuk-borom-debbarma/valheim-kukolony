@@ -63,8 +63,10 @@ namespace Kukolony.Jobs.Work
     /// </summary>
     internal readonly struct WorkFacts
     {
-        internal WorkFacts(bool hasTarget, bool arrived, bool carrying, bool stockLimitReached, bool hasTool)
+        internal WorkFacts(bool hasTarget, bool arrived, bool carrying, bool stockLimitReached,
+            bool hasTool, bool deliversInPlace = false)
         {
+            DeliversInPlace = deliversInPlace;
             HasTarget = hasTarget;
             Arrived = arrived;
             Carrying = carrying;
@@ -86,6 +88,12 @@ namespace Kukolony.Jobs.Work
 
         /// <summary>The villager carries the tool this job needs, or the job needs none.</summary>
         internal bool HasTool { get; }
+
+        /// <summary>
+        ///     The load goes down where the villager stands rather than into a container, so
+        ///     there is nothing to choose and nowhere to walk.
+        /// </summary>
+        internal bool DeliversInPlace { get; }
     }
 
     /// <summary>An action to take, where it was decided, and the state to record once it succeeds.</summary>

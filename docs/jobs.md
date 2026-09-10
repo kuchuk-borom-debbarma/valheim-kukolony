@@ -1,47 +1,60 @@
 # Jobs and queues
 
-Jobs are editable, ordered **pipelines** owned by a colony. A pipeline is built from
-guided job pieces, not JSON and not an arbitrary graph editor. Players call a piece's
-typed inputs and outputs **customisation**: item filters, registered targets, source and
-destination containers, stock limits, movement, and reservations.
+A job is **named work** owned by a colony: haul loose items, transfer between containers,
+fuel fireplaces, operate smelters and kilns, operate cooking stations, operate fermenters,
+collect beehives. Each is one small state machine with one settings screen. A player picks
+which work a job does, configures it, and orders villagers' queues; there is no pipeline to
+assemble and no piece list to get wrong.
 
-**The pieces are what runs.** The engine walks a job's piece list and performs each step;
-it does not switch on the job's type, which now only supplies a display name. So a
-pipeline is a description of behaviour rather than a description of a description, and a
-job that is missing a step does not do that step.
+Jobs used to be pipelines built from pieces, and that is gone. It was genuinely modular, but
+composing nine steps and satisfying an ordering contract was the wrong way to ask for "put
+the wood in that chest", and every piece carried a duplicate of settings the job already
+had. Saved pipelines are read past on load; a job keeps its settings and gets the sequence
+its type implies.
 
-Each piece declares, in `PieceCustomisation`, which settings it reads, what it provides to
-later steps, and what must already have been provided. Ordering validity is derived from
-that declaration rather than written out case by case, so adding a piece kind means filling
-in its contract entry.
+## How a job runs
 
-Starter jobs are ordinary editable pipelines: haul loose items, transfer containers, fuel
-fireplaces, operate smelters/kilns, operate cooking stations, operate fermenters, and
-collect beehives. A player may create a blank Start → End pipeline or duplicate a starter,
-then add, reorder and configure pieces from the panel.
+Each job is one file implementing `IColonyWork`, registered in `WorkRegistry` by type. What
+the job does is split in two:
 
-The catalog is deliberately linear: Start, Stop-at-stock-limit, loose-item/source/target
-selection, movement, pick up/take/put inventory, verified station operation, wait-for-drop,
-and End. It has no player-authored loops, variables, async work, or branches; queue
-semantics remain the safe retry and scheduling mechanism.
+- **Deciding** — `Next(state, facts)` is pure: an enum and six booleans, no Unity and no
+  colony types. This is why a whole work cycle is verified in the Unity-free project in
+  about a second rather than only inside a four-minute game run.
+- **Doing** — the engine performs the chosen action against the world, and records where the
+  villager got to on its ZDO.
 
-Sequencing is decided by a pure function over the piece list, a cursor, and four facts
-about the world, which is why whole cycles are verified in the Unity-free project in about
-a second. Facts win over the cursor: the walker skips any piece whose outcome already
-holds, so a villager that reloads mid-cycle carrying something finishes the delivery
-rather than fetching a second load.
+Almost every job has the same shape, `FetchAndDeliver`: choose something, walk to it, take
+from it, choose where the result goes, walk there, hand it over. Hauling, transferring and
+feeding a station share it and differ only in what those steps mean. The four station jobs
+are one class configured four ways, because what a station does with what it is handed is
+still decided by probing the station, not by the job.
 
-Every piece carries its own item filters, container, structure scope, stock limit, amount,
-search radius, stop distance, target mode and reservation flag. Each has an inherit value —
-an empty list, no container, a negative number — so a piece holds only what was deliberately
-changed and everything else follows the job. Without this a transfer could only move one
-kind of item between two places, and a station could not tell its fuel from its input.
+Tapping a beehive is the exception, and it earns its own transitions: the honey is a
+separate object that does not exist when the villager acts, so one cycle is two journeys —
+out to the hive, then out to what fell from it. Both are "collecting", so a step carries the
+state it was decided from and the job reads that to tell them apart.
 
-The job-level settings remain the defaults every piece falls back to: target mode, exact
-structure IDs, item filters, source/destination containers, stock threshold, execution
-count, reservations, search radius, and movement stop distance. Each concrete executor
-interprets only the settings it
-needs.
+**Facts outrank the recorded state.** A villager that reloads holding something delivers it
+rather than fetching a second load; one whose target was taken by somebody else goes back to
+choosing. The state says where it got to; the world says what is still true, and the world
+wins. That property is what repairs an interrupted cycle, and each job's tests cover
+resuming from the middle as well as running from the start.
+
+## Settings
+
+Every setting lives on the job, once: item filters, target mode and exact structure IDs,
+source and destination containers, stock threshold, execution count, reservations, search
+radius, movement stop distance, and whether the result goes into a container or on the
+ground as a pile.
+
+Choosing a destination checks that it can take the load. Picking the first eligible chest
+and discovering it is full on arrival fails the job after a walk, which is a worse answer
+than choosing another one.
+
+A job that needs a tool says so, and refuses to start without it rather than working by
+fiat. Tools are classified by the damage they can do — an axe chops, a pickaxe mines —
+because axes and pickaxes are weapons in the game's own taxonomy and only hammers and hoes
+are "tools".
 
 ## Queue semantics
 
@@ -64,7 +77,7 @@ matching destination stock drops below the configured number.
 
 ## Presets
 
-A portable preset clones the full pipeline and its settings but clears all ZDO-specific targets,
+A portable preset clones a job's settings but clears all ZDO-specific targets,
 source/destination IDs, and selected/ignored IDs. A colony-local preset retains those exact
 IDs. Applying either creates a new job ID, so a preset never aliases an existing mutable
 configuration.
