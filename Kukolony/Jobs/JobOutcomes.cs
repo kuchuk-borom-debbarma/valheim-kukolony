@@ -35,17 +35,20 @@ namespace Kukolony.Jobs
         }
 
         /// <summary>
-        ///     The station wants materials the villager is not carrying. Releases the station
-        ///     but records that the job is mid-flow, so the next tick fetches rather than
-        ///     starting over. Stays Running: this is progress, not failure.
+        ///     The station wants materials the villager is not carrying.
         /// </summary>
+        /// <remarks>
+        ///     This yields and begins the pipeline again, so the fetch pieces run and the
+        ///     villager comes back carrying something. It must not report Running: a running
+        ///     step is a step that made progress, and the walker advances past it - which
+        ///     would step over the station itself and finish the cycle having done nothing.
+        ///     No attempt is consumed, because wanting materials is not a failure.
+        /// </remarks>
         internal static JobResult NeedInput(VillagerState state, string message, out string activity)
         {
-            state.SetStepTarget(ZDOID.None);
-            state.SetRuntimePhase(string.Empty);
-            state.SetQueueProgress(1);
-            activity = message;
-            return JobResult.Running;
+            state.ResetJob();
+            activity = "skipping: " + message;
+            return JobResult.Skipped;
         }
 
         /// <summary>The step did its work. Releases the target and consumes a queue attempt.</summary>

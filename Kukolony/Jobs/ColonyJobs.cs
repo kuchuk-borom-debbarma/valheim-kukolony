@@ -162,10 +162,20 @@ namespace Kukolony.Jobs
                 // Collecting takes nothing to the hive; everything else carries fuel or input
                 // to its station, which the old three-piece shape simply did not depict even
                 // though the engine has always done it.
+                // Collecting is the one flow whose work lands on the ground rather than in
+                // the station, so the pipeline says so: tap the hive, wait for the honey,
+                // then pick it up and store it like any other loose item.
                 case ColonyJobType.CollectBeehives:
                     pieces.Add(new JobPiece { Kind = JobPieceKind.SelectTarget, Capability = StructureCapability.BeeHive });
                     pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget });
                     pieces.Add(new JobPiece { Kind = JobPieceKind.OperateStation, Capability = StructureCapability.BeeHive });
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.WaitForDrop });
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.FindLooseItem });
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget });
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.PickUp });
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.SelectTarget, Capability = StructureCapability.Container });
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget });
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.PutItem });
                     break;
                 default:
                     pieces.Add(new JobPiece { Kind = JobPieceKind.SelectSource, Capability = StructureCapability.Container });

@@ -916,6 +916,13 @@ namespace Kukolony.Debug
             haul.StockLimit = 1;
             report.Check(ColonyJobEngine.TestLimitReached(colony, haul),
                 "target stock limit produces a skip condition until stock falls below threshold");
+            // A station that wants materials must yield, not report progress. Reporting
+            // progress makes the walker advance past the station and finish a cycle having
+            // operated nothing.
+            Clear(bag);
+            report.Check(ColonyJobEngine.TestOperate(cooking, bag, Job(ColonyJobType.OperateCookingStations, "RawMeat"), state, out _) == JobResult.Skipped,
+                "a station needing input yields instead of reporting progress");
+
             report.Check(ColonyJobEngine.TestOperate(null, bag, Job(ColonyJobType.FuelFireplaces, "Wood"), state, out _) == JobResult.Failed,
                 "deleted or invalid station target fails safely");
         }

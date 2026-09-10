@@ -26,6 +26,8 @@ namespace Kukolony.Jobs
         TakeItem = 7,
         PutItem = 8,
         OperateStation = 9,
-        End = 10
+        End = 10,
+        /// <summary>Waits for work to produce a world drop, such as honey from a hive.</summary>
+        WaitForDrop = 11
     }
 }

@@ -44,7 +44,7 @@ namespace Kukolony.Jobs
         internal static JobResult TestDeposit(GameObject target, Inventory bag, ColonyJobConfig job, VillagerState state, out string activity) =>
             Deposit(target, bag, job.ItemFilters, state, out activity);
         internal static JobResult TestOperate(GameObject target, Inventory bag, ColonyJobConfig job, VillagerState state, out string activity) =>
-            Operate(target, bag, job, state, out activity);
+            Operate(target, bag, job, ColonyJobCatalog.RequiredCapability(job.Type), state, out activity);
         internal static bool TestLimitReached(Colony colony, ColonyJobConfig job) => LimitReached(colony, job);
         /// <summary>Which station protocol a target resolves to, or empty for none.</summary>
         internal static string TestResolveProtocol(GameObject target, Colonies.StructureCapability declared)
@@ -67,81 +67,9 @@ namespace Kukolony.Jobs
             Inventory inventory = bag != null ? bag.GetInventory() : null;
             if (inventory == null) return JobResult.Failed;
 
-            if (WalksPieces(job)) return TickWalker(villager, ai, inventory, colony, job, out activity);
-
-            if (!state.StepTarget.IsNone())
-            {
-                return TickTarget(villager, ai, inventory, colony, job, out activity);
-            }
-
-            if (LimitReached(colony, job))
-            {
-                activity = "skipping: stock limit reached";
-                return JobResult.Skipped;
-            }
-
-            bool carrying = FirstMatching(inventory, job.ItemFilters) != null;
-            switch (job.Type)
-            {
-                case ColonyJobType.HaulLoose:
-                    return carrying
-                        ? (!job.Destination.IsNone()
-                            ? SelectExplicitContainer(villager, colony, job.Destination, "depositing", out activity)
-                            : SelectStructure(villager, colony, job, null, StructureCapability.Container, "depositing", out activity))
-                        : SelectLooseItem(villager, colony, job, null, "pickup", out activity);
-                case ColonyJobType.Transfer:
-                    return SelectExplicitContainer(villager, colony, carrying ? job.Destination : job.Source,
-                        carrying ? "depositing" : "acquiring", out activity);
-                case ColonyJobType.CollectBeehives:
-                    if (state.QueueProgress == 2)
-                        return !job.Destination.IsNone()
-                            ? SelectExplicitContainer(villager, colony, job.Destination, "depositing", out activity)
-                            : SelectStructure(villager, colony, job, null, StructureCapability.Container, "depositing", out activity);
-                    if (state.QueueProgress >= 100)
-                    {
-                        JobResult loose = SelectLooseItem(villager, colony, job, null, "pickup-collect", out activity);
-                        if (loose == JobResult.Skipped && state.QueueProgress < 140)
-                        {
-                            state.SetQueueProgress(state.QueueProgress + 1);
-                            activity = "waiting for extracted honey";
-                            return JobResult.Running;
-                        }
-                        return loose;
-                    }
-                    return SelectStructure(villager, colony, job, null, StructureCapability.BeeHive, "operating", out activity);
-                case ColonyJobType.OperateCookingStations:
-                case ColonyJobType.OperateFermenters:
-                    if (carrying || state.QueueProgress > 0)
-                    {
-                        if (!carrying)
-                            return SelectSource(villager, colony, job, null, out activity);
-                    }
-                    return SelectStructure(villager, colony, job, null,
-                        ColonyJobCatalog.RequiredCapability(job.Type), "operating", out activity);
-                default:
-                    if (!carrying)
-                    {
-                        JobResult source = SelectSource(villager, colony, job, null, out activity);
-                        if (source != JobResult.Skipped) return source;
-                    }
-                    return SelectStructure(villager, colony, job, null,
-                        ColonyJobCatalog.RequiredCapability(job.Type), "operating", out activity);
-            }
+            return TickWalker(villager, ai, inventory, colony, job, out activity);
         }
 
-        /// <summary>
-        ///     Executing mode: resolve the recorded target, walk to it, then dispatch on
-        ///     <c>RuntimePhase</c>. A target whose ZDO is gone fails the job, but one that is
-        ///     merely unloaded keeps the job running — the zone may still stream in, and
-        ///     discarding the target would lose committed progress.
-        /// </summary>
-        /// <summary>
-        ///     Job types whose execution has moved to the piece walker. They are migrated one
-        ///     at a time so each replacement is proven in-game before the executor it replaces
-        ///     is removed.
-        /// </summary>
-        private static bool WalksPieces(ColonyJobConfig job) =>
-            job.Type != ColonyJobType.CollectBeehives;
 
         /// <summary>
         ///     Runs a job by walking its pieces rather than by switching on its type.
@@ -202,6 +130,9 @@ namespace Kukolony.Jobs
                 case StepAction.Move:
                     return Walk(villager, ai, state, PieceSettings.StopDistance(job, PieceAt(job, step.Cursor)),
                         target, next, out activity);
+
+                case StepAction.Wait:
+                    return AwaitDrop(colony, job, state, step.Cursor, next, out activity);
             }
 
             // Everything below acts on the target, so a target that has not loaded yet is a
@@ -218,7 +149,12 @@ namespace Kukolony.Jobs
                     return Advance(state, next, Acquire(target, bag, StepFilters(job, step.Cursor), state, out activity));
                 case StepAction.PutItem:
                     return Advance(state, next, Deposit(target, bag, StepFilters(job, step.Cursor), state, out activity));
-                case StepAction.OperateStation: return Advance(state, next, Operate(target, bag, job, state, out activity));
+                case StepAction.OperateStation:
+                    // The piece says which kind of station this step operates, so the job's
+                    // type has no say in it. This is the last thing execution asked it.
+                    return Advance(state, next, Operate(target, bag, job,
+                        PieceAt(job, step.Cursor) is JobPiece operated ? operated.Capability : StructureCapability.None,
+                        state, out activity));
                 default: return JobOutcomes.Skipped(state, "pipeline cannot run", out activity);
             }
         }
@@ -242,6 +178,45 @@ namespace Kukolony.Jobs
             if (result != JobResult.Running && result != JobResult.Completed) return result;
             state.SetStepCursor(next);
             return JobResult.Running;
+        }
+
+        /// <summary>Ticks a villager will wait for work to produce something before giving up.</summary>
+        private const int WaitTicks = 40;
+
+        /// <summary>
+        ///     Holds position until the thing this step is waiting for exists, then moves on.
+        ///     Bounded, so a tap that produces nothing gives the villager back to its queue
+        ///     rather than leaving it standing there.
+        /// </summary>
+        private static JobResult AwaitDrop(Colony colony, ColonyJobConfig job, VillagerState state,
+            int cursor, int next, out string activity)
+        {
+            JobPiece piece = PieceAt(job, cursor);
+            if (FindLoose(colony, PieceSettings.Filters(job, piece), PieceSettings.SearchRadius(job, piece)) != null)
+            {
+                state.SetQueueProgress(0);
+                state.SetStepCursor(next);
+                activity = "collecting what appeared";
+                return JobResult.Running;
+            }
+            int waited = state.QueueProgress + 1;
+            if (waited > WaitTicks) return JobOutcomes.Skipped(state, "nothing appeared to collect", out activity);
+            state.SetQueueProgress(waited);
+            activity = "waiting for the work to finish";
+            return JobResult.Running;
+        }
+
+        /// <summary>Nearest matching loose item in range, ignoring claims. Read-only.</summary>
+        private static ItemDrop FindLoose(Colony colony, List<string> filters, float radius)
+        {
+            foreach (ItemDrop drop in ItemDrop.s_instances)
+            {
+                if (drop == null || !drop.TryGetComponent(out ZNetView view) || !view.IsValid()) continue;
+                if (!Matches(Utils.GetPrefabName(drop.gameObject), filters)) continue;
+                if (Utils.DistanceXZ(drop.transform.position, colony.transform.position) > radius) continue;
+                return drop;
+            }
+            return null;
         }
 
         /// <summary>Items the piece at this cursor works with, falling back to the job's.</summary>
@@ -308,48 +283,6 @@ namespace Kukolony.Jobs
             ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(state.StepTarget) : null;
             if (zdo == null || !zdo.IsValid()) { lost = true; return null; }
             return ZNetScene.instance != null ? ZNetScene.instance.FindInstance(state.StepTarget) : null;
-        }
-
-        private static JobResult TickTarget(Villager villager, MonsterAI ai, Inventory bag,
-            Colony colony, ColonyJobConfig job, out string activity)
-        {
-            VillagerState state = villager.State;
-            ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(state.StepTarget) : null;
-            if (zdo == null || !zdo.IsValid())
-            {
-                state.ResetRuntime();
-                activity = "target missing";
-                return JobResult.Failed;
-            }
-
-            GameObject target = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(state.StepTarget) : null;
-            if (target == null)
-            {
-                activity = "waiting for target to load";
-                return JobResult.Running;
-            }
-
-            MoveResult movement = VillagerMovement.MoveTowards(ai, target.transform.position,
-                Mathf.Max(.5f, job.StopDistance));
-            if (movement == MoveResult.Moving)
-            {
-                activity = "walking to " + TargetName(target);
-                return JobResult.Running;
-            }
-            if (movement == MoveResult.PathFailed)
-            {
-                state.ResetRuntime();
-                activity = "path failed";
-                return JobResult.Failed;
-            }
-
-            switch (state.RuntimePhase)
-            {
-                case "pickup": return PickupLoose(target, bag, state, out activity);
-                case "acquiring": return Acquire(target, bag, job.ItemFilters, state, out activity);
-                case "depositing": return Deposit(target, bag, job.ItemFilters, state, out activity);
-                default: return Operate(target, bag, job, state, out activity);
-            }
         }
 
         private static JobResult SelectLooseItem(Villager villager, Colony colony,
@@ -506,7 +439,7 @@ namespace Kukolony.Jobs
         ///     station is does, which is why supporting a new one needs no change here.
         /// </summary>
         private static JobResult Operate(GameObject target, Inventory bag, ColonyJobConfig job,
-            VillagerState state, out string activity)
+            StructureCapability declared, VillagerState state, out string activity)
         {
             if (target == null || !target.TryGetComponent(out ZNetView view) || !view.IsValid())
             {
@@ -514,8 +447,7 @@ namespace Kukolony.Jobs
             }
             if (!view.IsOwner()) { view.ClaimOwnership(); activity = "claiming station"; return JobResult.Running; }
 
-            Stations.IStationProtocol protocol =
-                Stations.StationProtocols.Resolve(target, ColonyJobCatalog.RequiredCapability(job.Type));
+            Stations.IStationProtocol protocol = Stations.StationProtocols.Resolve(target, declared);
             if (protocol == null) return JobOutcomes.Failed(state, "unsupported operation", out activity);
 
             return protocol.Operate(

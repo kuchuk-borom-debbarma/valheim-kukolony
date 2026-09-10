@@ -13,6 +13,8 @@ namespace Kukolony.Jobs
         TakeItem,
         PutItem,
         OperateStation,
+        /// <summary>Waiting for work to produce something to collect.</summary>
+        Wait,
         /// <summary>Destination already holds enough. Yields without consuming an attempt.</summary>
         StopAtLimit,
         /// <summary>Reached the end of the pipeline; the cycle is done.</summary>
@@ -151,6 +153,11 @@ namespace Kukolony.Jobs
                     case JobPieceKind.PutItem:
                         if (!facts.Carrying) break;
                         return new JobStep(facts.HasTarget ? StepAction.PutItem : StepAction.Restart, index);
+
+                    // Whether the thing being waited for has appeared is a question about the
+                    // world, so the engine answers it and advances the cursor when it has.
+                    case JobPieceKind.WaitForDrop:
+                        return new JobStep(StepAction.Wait, index);
 
                     // Only the station knows whether it wants fuel, input, or emptying.
                     case JobPieceKind.OperateStation:

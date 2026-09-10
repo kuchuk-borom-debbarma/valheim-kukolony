@@ -7,6 +7,9 @@ static class Program
         [Start, StopAtStockLimit, FindLooseItem, MoveToTarget, PickUp, SelectTarget, MoveToTarget, PutItem, End];
     static readonly JobPieceKind[] Transfer =
         [Start, StopAtStockLimit, SelectSource, MoveToTarget, TakeItem, SelectTarget, MoveToTarget, PutItem, End];
+    static readonly JobPieceKind[] Collect =
+        [Start, StopAtStockLimit, SelectTarget, MoveToTarget, OperateStation, WaitForDrop,
+         FindLooseItem, MoveToTarget, PickUp, SelectTarget, MoveToTarget, PutItem, End];
     static readonly JobPieceKind[] Station =
         [Start, StopAtStockLimit, SelectSource, MoveToTarget, TakeItem, SelectTarget, MoveToTarget, OperateStation, End];
 
@@ -79,6 +82,11 @@ static class Program
                 StepAction.SelectTarget, StepAction.Move, StepAction.PutItem, StepAction.CompleteCycle]),
             ("station", Station, false, [StepAction.SelectSource, StepAction.Move, StepAction.TakeItem,
                 StepAction.SelectTarget, StepAction.Move, StepAction.OperateStation, StepAction.CompleteCycle]),
+            // Collecting is the only flow whose work lands on the ground, so it taps, waits,
+            // then picks up and stores what appeared.
+            ("collect", Collect, false, [StepAction.SelectTarget, StepAction.Move, StepAction.OperateStation,
+                StepAction.Wait, StepAction.FindLooseItem, StepAction.Move, StepAction.PickUp,
+                StepAction.SelectTarget, StepAction.Move, StepAction.PutItem, StepAction.CompleteCycle]),
             // Resuming a haul mid-cycle must finish the delivery, never start a second one.
             ("haul resumed carrying", Haul, true,
                 [StepAction.SelectTarget, StepAction.Move, StepAction.PutItem, StepAction.CompleteCycle])
@@ -118,6 +126,7 @@ static class Program
                 case StepAction.TakeItem: carrying = true; hasTarget = false; arrived = false; break;
                 case StepAction.PutItem: carrying = false; hasTarget = false; arrived = false; break;
                 case StepAction.OperateStation: carrying = false; hasTarget = false; arrived = false; break;
+                case StepAction.Wait: break;   // the engine decides when the wait is over
                 default: return performed;   // StopAtLimit, CompleteCycle, Invalid all end the cycle
             }
         }

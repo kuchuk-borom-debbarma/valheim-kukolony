@@ -74,6 +74,8 @@ namespace Kukolony.Jobs
                     return JobCustomisation.ItemFilter | JobCustomisation.Amount;
                 case JobPieceKind.OperateStation:
                     return JobCustomisation.ItemFilter;
+                case JobPieceKind.WaitForDrop:
+                    return JobCustomisation.ItemFilter | JobCustomisation.SearchRadius;
                 default:
                     return JobCustomisation.None;
             }
