@@ -5,10 +5,21 @@ using Kukolony.Jobs;
 
 namespace Kukolony.Colonies
 {
+    /// <summary>Ordering offered by the Structures tab and the target picker.</summary>
     internal enum StructureSort { Name, Type, Capability, Status }
 
+    /// <summary>
+    ///     Colony-level operations shared by the panel and the benchmark scenarios, kept out
+    ///     of the UI so both drive the same code paths.
+    /// </summary>
     internal static class ColonyOperations
     {
+        /// <summary>
+        ///     Search, capability filter, and sort over a colony's structure records. Matches
+        ///     display name or prefab, so a renamed structure is still findable by what it is.
+        ///     <c>Status</c> sorts live records first; ineligible ones remain listed rather
+        ///     than hidden, because the player decides whether to remove them.
+        /// </summary>
         internal static List<StructureRecord> FilterStructures(Colony colony, string search,
             StructureCapability capability, StructureSort sort)
         {
@@ -29,6 +40,7 @@ namespace Kukolony.Colonies
             return records.ToList();
         }
 
+        /// <summary>Renames a registered structure. The record keeps its identity and targets.</summary>
         internal static bool RenameStructure(Colony colony, ZDOID id, string name)
         {
             if (colony == null || string.IsNullOrWhiteSpace(name)) return false;
@@ -40,6 +52,11 @@ namespace Kukolony.Colonies
             return true;
         }
 
+        /// <summary>
+        ///     Registers every eligible structure currently inside the colony radius and
+        ///     returns how many were added. Already-registered candidates are rejected by
+        ///     <see cref="Colony.RegisterStructure"/>, so this is safe to repeat.
+        /// </summary>
         internal static int RegisterDiscovered(Colony colony)
         {
             int added = 0;
@@ -48,6 +65,10 @@ namespace Kukolony.Colonies
             return added;
         }
 
+        /// <summary>
+        ///     Saves a preset, replacing any existing one with the same name. A colony-local
+        ///     preset keeps exact structure IDs; a portable one is cloned without them.
+        /// </summary>
         internal static void SavePreset(Colony colony, string name, ColonyJobConfig job, bool local)
         {
             List<JobPreset> presets = colony.State.GetPresets();
@@ -56,6 +77,10 @@ namespace Kukolony.Colonies
             colony.State.SetPresets(presets);
         }
 
+        /// <summary>
+        ///     Materialises a preset into a new job. The fresh ID is the point: applying a
+        ///     preset must never alias the configuration it was saved from.
+        /// </summary>
         internal static ColonyJobConfig ApplyPreset(JobPreset preset)
         {
             ColonyJobConfig job = preset.Settings.Clone(preset.ColonyLocal);

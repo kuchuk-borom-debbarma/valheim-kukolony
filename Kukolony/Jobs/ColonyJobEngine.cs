@@ -6,7 +6,32 @@ using UnityEngine;
 
 namespace Kukolony.Jobs
 {
-    /// <summary>Concrete, ownership-safe execution for the built-in colony job catalogue.</summary>
+    /// <summary>
+    ///     Concrete, ownership-safe execution for the built-in colony job catalogue.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The engine is a synchronous fixed-tick state machine with two modes, both driven
+    ///         entirely from persisted villager state so a reload resumes mid-job. With no
+    ///         <c>StepTarget</c> set it is <em>selecting</em>: it picks a loose item or a
+    ///         registered structure and records the choice. With a target set it is
+    ///         <em>executing</em>: move first, then act according to <c>RuntimePhase</c>
+    ///         (<c>pickup</c>, <c>acquiring</c>, <c>depositing</c>, or operate).
+    ///     </para>
+    ///     <para>
+    ///         <c>QueueProgress</c> is multiplexed as a per-job sub-state, not a percentage:
+    ///         <c>0</c> fresh; <c>1</c> the station wants input, so the next tick fetches from a
+    ///         source before returning; <c>2</c> beehive honey is in the bag and needs
+    ///         depositing; <c>100..140</c> beehive extraction fired and the engine is waiting
+    ///         for the honey drop to spawn, incrementing as a bounded retry so a failed
+    ///         extraction gives up instead of looping.
+    ///     </para>
+    ///     <para>
+    ///         No executor writes raw internal station ZDO keys. Station changes go through
+    ///         probe-verified vanilla RPCs; container changes claim ownership, mutate via
+    ///         Inventory, and persist via Container.
+    ///     </para>
+    /// </remarks>
     internal static class ColonyJobEngine
     {
         // Acceptance hooks exercise the same ownership-safe primitives without waiting
@@ -22,6 +47,12 @@ namespace Kukolony.Jobs
             Operate(target, bag, job, state, out activity);
         internal static bool TestLimitReached(Colony colony, ColonyJobConfig job) => LimitReached(colony, job);
 
+        /// <summary>
+        ///     Advances one job by one tick and reports the player-visible activity string.
+        ///     Returns <see cref="JobResult.Skipped"/> rather than blocking when the
+        ///     destination stock limit is already satisfied, so a saturated job yields the
+        ///     villager to the next queue entry instead of spinning.
+        /// </summary>
         internal static JobResult Tick(Villager villager, MonsterAI ai, Container bag, Colony colony,
             ColonyJobConfig job, out string activity)
         {
@@ -90,6 +121,12 @@ namespace Kukolony.Jobs
             }
         }
 
+        /// <summary>
+        ///     Executing mode: resolve the recorded target, walk to it, then dispatch on
+        ///     <c>RuntimePhase</c>. A target whose ZDO is gone fails the job, but one that is
+        ///     merely unloaded keeps the job running — the zone may still stream in, and
+        ///     discarding the target would lose committed progress.
+        /// </summary>
         private static JobResult TickTarget(Villager villager, MonsterAI ai, Inventory bag,
             Colony colony, ColonyJobConfig job, out string activity)
         {
@@ -364,6 +401,11 @@ namespace Kukolony.Jobs
             return JobResult.Completed;
         }
 
+        /// <summary>
+        ///     True when the destination already holds at least the configured stock limit.
+        ///     The limit is a threshold to maintain, not an amount to move, so work resumes
+        ///     on its own once stock drops below it.
+        /// </summary>
         private static bool LimitReached(Colony colony, ColonyJobConfig job)
         {
             if (job.StockLimit <= 0 || job.Destination.IsNone()) return false;
@@ -375,6 +417,10 @@ namespace Kukolony.Jobs
             return count >= job.StockLimit;
         }
 
+        /// <summary>
+        ///     Resolves a container the villager may safely write to, requesting ownership when
+        ///     another peer holds it. Every container mutation goes through this gate.
+        /// </summary>
         private static bool TryOwnedContainer(GameObject target, out Container container, out JobResult result)
         {
             container = null;
@@ -427,12 +473,19 @@ namespace Kukolony.Jobs
         private static string TargetName(GameObject target) =>
             target != null ? Utils.GetPrefabName(target) : "target";
 
+        /// <summary>Clears runtime state and yields without consuming a queue attempt.</summary>
         private static JobResult FinishSkipped(VillagerState state, string message, out string activity)
         { state.ResetRuntime(); activity = "skipping: " + message; return JobResult.Skipped; }
 
+        /// <summary>Clears runtime state and consumes a queue attempt, bounding retries.</summary>
         private static JobResult FinishFailed(VillagerState state, string message, out string activity)
         { state.ResetRuntime(); activity = message; return JobResult.Failed; }
 
+        /// <summary>
+        ///     Releases the station and records sub-state <c>1</c> so the next tick fetches the
+        ///     missing input from a source before coming back. Stays <c>Running</c>: the job is
+        ///     making progress, it just needs materials first.
+        /// </summary>
         private static JobResult NeedInput(VillagerState state, string message, out string activity)
         {
             state.SetStepTarget(ZDOID.None);

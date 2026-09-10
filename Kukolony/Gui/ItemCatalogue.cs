@@ -19,7 +19,7 @@ namespace Kukolony.Gui
                 DisplayName = displayName;
             }
 
-            /// <summary>What gets stored on the post - job steps match on this.</summary>
+            /// <summary>What gets stored in a job's item filter; executors match on this.</summary>
             internal string PrefabName { get; }
 
             /// <summary>What the player reads.</summary>

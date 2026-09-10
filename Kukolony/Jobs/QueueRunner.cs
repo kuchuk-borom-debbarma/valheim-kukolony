@@ -3,8 +3,19 @@ using Kukolony.Villagers;
 
 namespace Kukolony.Jobs
 {
+    /// <summary>
+    ///     Scheduling for a villager's ordered queue of colony job IDs. The queue is a ring:
+    ///     the entry after the last is the first. All position and attempt state lives on the
+    ///     villager ZDO, so scheduling survives a save/reload without a runtime cursor.
+    /// </summary>
     internal static class QueueRunner
     {
+        /// <summary>
+        ///     The job the villager should run now, or null if none of its entries resolve.
+        ///     Entries whose job was deleted are bypassed rather than stalling the villager,
+        ///     and the persisted position is repaired when a bypass moves it. Scans at most
+        ///     one full lap so an all-missing queue terminates.
+        /// </summary>
         internal static ColonyJobConfig Current(VillagerState state, List<ColonyJobConfig> jobs)
         {
             List<string> queue = state.GetQueue();
@@ -23,6 +34,13 @@ namespace Kukolony.Jobs
             return null;
         }
 
+        /// <summary>
+        ///     Folds a tick's outcome into queue state. <c>Running</c> changes nothing.
+        ///     <c>Skipped</c> yields immediately without consuming an attempt, so a job with no
+        ///     useful work cannot monopolise the villager. <c>Completed</c> and <c>Failed</c>
+        ///     each consume one attempt and advance only once the job's configured count is
+        ///     exhausted — failures are counted so an impossible job cannot loop forever.
+        /// </summary>
         internal static void Apply(VillagerState state, List<ColonyJobConfig> jobs, JobResult result)
         {
             List<string> queue = state.GetQueue();
@@ -48,6 +66,7 @@ namespace Kukolony.Jobs
             Advance(state, position, queue.Count);
         }
 
+        /// <summary>Moves to the next entry and clears per-entry attempt and runtime state.</summary>
         private static void Advance(VillagerState state, int position, int count)
         {
             state.SetQueuePosition((position + 1) % count);
@@ -55,6 +74,10 @@ namespace Kukolony.Jobs
             state.ResetRuntime();
         }
 
+        /// <summary>
+        ///     Clamps a persisted position into range. The queue may have shrunk since the
+        ///     position was written, so a stored index is never trusted directly.
+        /// </summary>
         private static int Normalise(int position, int count) =>
             position < 0 ? 0 : position % count;
     }

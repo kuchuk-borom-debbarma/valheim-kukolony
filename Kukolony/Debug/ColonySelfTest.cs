@@ -12,6 +12,27 @@ using UnityEngine;
 namespace Kukolony.Debug
 {
     /// <summary>Functional phases invoked exclusively by ColonyBenchmarkController.</summary>
+    /// <remarks>
+    ///     <para>
+    ///         Passive by design: nothing here starts itself, purges a world, launches a
+    ///         process, or terminates Valheim. The controller owns the lifecycle; this type
+    ///         only asserts. Fixtures are spawned into, and registered with, the uniquely
+    ///         named benchmark colony so reload cleanup owns them.
+    ///     </para>
+    ///     <para>
+    ///         The proof is split across two processes. <see cref="RunFresh"/> builds the
+    ///         colony, exercises every concrete executor against real stations and containers,
+    ///         then <see cref="PreparePersistenceSnapshot"/> writes known values.
+    ///         <see cref="RunReload"/> runs in a second launch and asserts those values
+    ///         survived a real save, process exit, and load. Persistence claims are only
+    ///         meaningful across that boundary, which is why a single run cannot pass alone.
+    ///     </para>
+    ///     <para>
+    ///         Positive claims are paired with a disabled or failing control — see
+    ///         <c>CheckPairedControls</c> — so a check cannot pass merely because the
+    ///         mechanism never ran.
+    ///     </para>
+    /// </remarks>
     internal static class BenchmarkFunctionalScenario
     {
         internal const string PersistenceName = "Kukolony Benchmark Persistence V1";
@@ -20,6 +41,11 @@ namespace Kukolony.Debug
             "kukolony.benchmark.primary-member.v2".GetStableHashCode();
         internal static bool LastPassed { get; private set; }
 
+        /// <summary>
+        ///     First-launch phase: build the colony and fixtures, assert registry eligibility,
+        ///     pipeline validity, presets, queue semantics, executors, and station contracts,
+        ///     then stamp the run so the reload phase can recognise its own colony.
+        /// </summary>
         internal static IEnumerator RunFresh(string runId)
         {
             LastPassed = false;
@@ -158,6 +184,11 @@ namespace Kukolony.Debug
             LastPassed = report.Print();
         }
 
+        /// <summary>
+        ///     Second-launch phase: assert the snapshot written before exit survived the save,
+        ///     including cross-ZDO references that a chunked save renormalises, then clean up
+        ///     the run's fixtures.
+        /// </summary>
         internal static void RunReload(Colony colony)
         {
             LastPassed = false;
@@ -192,6 +223,11 @@ namespace Kukolony.Debug
             LastPassed = report.Print();
         }
 
+        /// <summary>
+        ///     Writes known queue, position, attempt, progress, phase, and target values to the
+        ///     primary villager immediately before the world save, so the reload phase has
+        ///     specific values to verify rather than merely checking the villager still exists.
+        /// </summary>
         internal static void PreparePersistenceSnapshot(Colony colony)
         {
             if (colony == null || ZDOMan.instance == null) return;
@@ -235,6 +271,10 @@ namespace Kukolony.Debug
             return result;
         }
 
+        /// <summary>
+        ///     True when this colony was created by the given run. Lets the reload launch tell
+        ///     its own fixtures apart from any left by an earlier or interrupted run.
+        /// </summary>
         internal static bool BelongsToRun(Colony colony, string runId)
         {
             if (colony == null || !colony.TryGetComponent(out ZNetView view) || !view.IsValid()) return false;
@@ -261,6 +301,11 @@ namespace Kukolony.Debug
                 view.GetZDO().GetString(PrimaryMemberKey, string.Empty));
         }
 
+        /// <summary>
+        ///     Asserts each station prefab still exposes the vanilla RPCs the executors invoke,
+        ///     so a game update that renames or removes one fails here with a clear message
+        ///     rather than as silent no-op work in the field.
+        /// </summary>
         private static void CheckStationContracts(TestReport report)
         {
             CheckContract<Fireplace>(report, "fire_pit", "RPC_AddFuelAmount");
@@ -429,6 +474,11 @@ namespace Kukolony.Debug
             return 0;
         }
 
+        /// <summary>
+        ///     Negative controls. Each positive claim about claims, keep-alive, limits, or
+        ///     compatibility is paired with a case that must fail, so a check cannot pass
+        ///     merely because the mechanism never ran.
+        /// </summary>
         private static void CheckPairedControls(TestReport report, Colony colony, Villager villager,
             Vector3 origin, ZDOID target)
         {
@@ -506,6 +556,10 @@ namespace Kukolony.Debug
             while (inventory.GetEmptySlots() > 0) inventory.AddItem(prefab, drop.m_itemData.m_shared.m_maxStackSize);
         }
 
+        /// <summary>
+        ///     Verifies a prefab carries component <typeparamref name="T"/> and that every named
+        ///     RPC or method still exists on it.
+        /// </summary>
         private static void CheckContract<T>(TestReport report, string prefabName, params string[] methods)
             where T : Component
         {

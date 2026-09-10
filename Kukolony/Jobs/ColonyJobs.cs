@@ -4,6 +4,11 @@ using Kukolony.Colonies;
 
 namespace Kukolony.Jobs
 {
+    /// <summary>
+    ///     The concrete jobs the engine can execute. A type fixes the executor and the
+    ///     structure capability a target must expose; it is not the unit players edit —
+    ///     they edit a <see cref="ColonyJobConfig"/> pipeline built from these.
+    /// </summary>
     internal enum ColonyJobType
     {
         HaulLoose,
@@ -15,14 +20,33 @@ namespace Kukolony.Jobs
         CollectBeehives
     }
 
+    /// <summary>How a job chooses among the colony's registered structures.</summary>
     internal enum TargetMode { All, Selected, Ignore }
+
+    /// <summary>
+    ///     Outcome of one engine tick, and the input to queue scheduling.
+    ///     <c>Running</c> keeps the current entry and consumes nothing.
+    ///     <c>Completed</c> and <c>Failed</c> each consume one configured count.
+    ///     <c>Skipped</c> means no work is currently useful — no eligible target, missing
+    ///     input, or stock already at its limit — and consumes no count before yielding to
+    ///     the next entry, so an idle job cannot starve the rest of the queue.
+    /// </summary>
     internal enum JobResult { Running, Completed, Failed, Skipped }
 
     // "Customisation" is the player-facing term.  These typed values are the
     // contract used to validate a pipeline without exposing an untyped JSON editor.
     internal enum JobCustomisation { ItemFilter, Target, Source, Destination, StockLimit, Movement, Reservation }
+    /// <summary>
+    ///     The guided pieces a pipeline is built from. Deliberately linear: no player-authored
+    ///     loops, branches, variables, or async work. Queue semantics remain the only retry and
+    ///     scheduling mechanism. Ordering constraints live in <see cref="PipelineShapeRules"/>.
+    /// </summary>
     internal enum JobPieceKind { Start, StopAtStockLimit, FindLooseItem, SelectSource, SelectTarget, MoveToTarget, PickUp, TakeItem, PutItem, OperateStation, End }
 
+    /// <summary>
+    ///     One step in a pipeline. <see cref="Capability"/> narrows which registered
+    ///     structures a selection piece may resolve to; it is unused by other kinds.
+    /// </summary>
     internal sealed class JobPiece
     {
         internal JobPieceKind Kind;
@@ -30,8 +54,14 @@ namespace Kukolony.Jobs
         internal JobPiece Clone() => new JobPiece { Kind = Kind, Capability = Capability };
     }
 
+    /// <summary>Builds and validates the piece sequence behind a job.</summary>
     internal static class JobPipeline
     {
+        /// <summary>
+        ///     The starter pipeline for a job type. Haul and Transfer differ in how they
+        ///     acquire (find a loose item versus take from a chosen source); everything else
+        ///     shares select → move → operate against the type's required capability.
+        /// </summary>
         internal static List<JobPiece> For(ColonyJobType type)
         {
             List<JobPiece> pieces = new List<JobPiece> { new JobPiece { Kind = JobPieceKind.Start }, new JobPiece { Kind = JobPieceKind.StopAtStockLimit } };
@@ -47,6 +77,10 @@ namespace Kukolony.Jobs
             pieces.Add(new JobPiece { Kind = JobPieceKind.End }); return pieces;
         }
 
+        /// <summary>
+        ///     True when the pipeline's shape is executable. Delegates to the pure rules so the
+        ///     deterministic tests validate exactly what the mod does, with no Unity present.
+        /// </summary>
         internal static bool IsValid(ColonyJobConfig job, out string message)
         {
             List<JobPiece> pieces = job.Pieces;
@@ -55,6 +89,11 @@ namespace Kukolony.Jobs
         }
     }
 
+    /// <summary>
+    ///     A player-editable job: the pipeline plus the customisation its pieces read.
+    ///     Owned by a colony and persisted on the hearth ZDO as a versioned record.
+    ///     Each executor interprets only the settings it needs.
+    /// </summary>
     internal sealed class ColonyJobConfig
     {
         internal string Id = Guid.NewGuid().ToString("N");
@@ -72,6 +111,13 @@ namespace Kukolony.Jobs
         internal float StopDistance = 2f;
         internal readonly List<JobPiece> Pieces = new List<JobPiece>();
 
+        /// <summary>
+        ///     Copies the job. With <paramref name="includeTargets"/> false this strips every
+        ///     ZDO-specific target — the portable-preset contract — so the copy cannot carry a
+        ///     reference that is meaningless in another colony or after a reload. Callers assign
+        ///     a fresh <see cref="Id"/>; the clone deliberately keeps the original so preset
+        ///     application can decide.
+        /// </summary>
         internal ColonyJobConfig Clone(bool includeTargets)
         {
             ColonyJobConfig copy = new ColonyJobConfig
@@ -96,6 +142,11 @@ namespace Kukolony.Jobs
         }
     }
 
+    /// <summary>
+    ///     A saved job configuration. Colony-local presets retain exact structure IDs;
+    ///     portable presets clear them. Applying either mints a new job ID, so a preset
+    ///     never aliases a live mutable configuration.
+    /// </summary>
     internal sealed class JobPreset
     {
         internal string Name = string.Empty;
@@ -103,11 +154,21 @@ namespace Kukolony.Jobs
         internal ColonyJobConfig Settings = new ColonyJobConfig();
     }
 
+    /// <summary>
+    ///     Code-owned system defaults. A colony that has never been edited stores no job
+    ///     copies; these are materialised on demand, so defaults can change between
+    ///     versions without migrating untouched colonies.
+    /// </summary>
     internal static class ColonyJobCatalog
     {
         internal static readonly ColonyJobType[] All =
             (ColonyJobType[])Enum.GetValues(typeof(ColonyJobType));
 
+        /// <summary>
+        ///     The seven starter jobs, each a valid editable pipeline with a sensible item
+        ///     filter. IDs are stable (<c>default.&lt;type&gt;</c>) so a villager queue that
+        ///     references a default keeps resolving across sessions.
+        /// </summary>
         internal static List<ColonyJobConfig> CreateDefaults()
         {
             List<ColonyJobConfig> jobs = new List<ColonyJobConfig>();
@@ -163,6 +224,10 @@ namespace Kukolony.Jobs
             }
         }
 
+        /// <summary>
+        ///     The capability a structure must expose to be a legal target for this job type.
+        ///     Drives both starter-pipeline construction and target-picker filtering.
+        /// </summary>
         internal static StructureCapability RequiredCapability(ColonyJobType type)
         {
             switch (type)

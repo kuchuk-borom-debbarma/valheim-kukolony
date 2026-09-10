@@ -11,6 +11,9 @@ Read these first:
   and picker behavior.
 - [Jobs and queues](jobs.md) — execution and persistence rules.
 - [Job catalog](job-catalog.md) — configuration card for every concrete job.
+- [NPC design](npc-design.md) — the villager prefab contract and why the Player rig was
+  abandoned.
+- [Colony UI](ui.md) — picker, panel tabs, job card, and test seams.
 - [Automated testing](automated-testing.md) — required build, Steam launch, persistence,
   and screenshot path.
 - [In-game benchmark](in-game-testing.md) — manual/agent operation, architecture,
@@ -18,7 +21,16 @@ Read these first:
 - [Multiplayer](multiplayer.md) and [off-screen simulation](off-screen-simulation.md) —
   ownership and zone lifetime constraints.
 - [API notes](api-notes.md) — verified game contracts.
-- [Code style](code-style.md) — dependency and implementation rules.
+- [Code style](code-style.md) — dependency, implementation, and panel layout rules.
+
+Reference and background:
+
+- [Handoff](HANDOFF.md) — current architecture, required verification, and invariants.
+- [macOS setup](SETUP-macos.md) — pinned BepInEx pack, Doorstop, and Steam launch.
+- [Modding basics](modding-basics.md) — Jotunn, Harmony, and ZDO fundamentals.
+- [Spike results](spike-results.md) — measured findings behind the current design.
+- [Predecessor postmortem](predecessor-postmortem.md) — what the previous attempt got
+  wrong, kept so it is not repeated.
 
 Core rules are stable: persistent state belongs in ZDOs; the current owner performs writes;
 station changes use verified vanilla RPCs; container writes use ownership plus Inventory
