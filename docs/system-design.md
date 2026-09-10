@@ -314,11 +314,39 @@ requiring players to install a third-party chunk loader so nothing was ever unlo
 Worth remembering that vanilla does not fully trust the check either — its own creature
 spawner pairs it with an `alive_time` heartbeat so a wrong answer only delays a respawn.
 
-### Villagers are drawn with the ghost rig's own shader
+### Villagers were drawn with the ghost rig's own shader
 
-Their body and hair use `Custom/Fallen Warrior`; only their clothing uses `Custom/Player`.
-That is why villagers glow gold while the player does not, and why removing the rig's lights
-and particles did not fix it: the glow is in the skin material, not in an effect.
+Their body and hair used `Custom/Fallen Warrior`; only their clothing used `Custom/Player`.
+That is why they glowed gold while the player did not, and why removing the rig's lights and
+particles did not fix it: the glow was in the skin material, not in an effect.
+
+Fixed by taking the player's own materials at runtime — not at prefab build time, which
+happens before the scene has a player to copy from, and not by tinting, which would mean
+editing a shared material and repainting every Fallen Warrior in the world.
+
+Two things this taught that generalise:
+
+- **Repaint by shader, not by knowing which renderer is which.** Hair and beards are built
+  after the body and separately, so repainting the body left villagers with normal skin and a
+  glowing haircut.
+- **It is a race, so it needs a budget.** A twelve-tick budget lost to hair; it now keeps
+  looking until several passes running find nothing.
+
+### The game can dress and style villagers itself
+
+Nothing needs a hand-written list of prefab names, and every such list this project has
+written has been wrong or gone stale. Read from the game instead:
+
+- **Clothing** — items of each visible slot type, **filtered to what has a recipe**. "Anything
+  wearable" turned out to include monster armour, and villagers came back in golem plate and
+  fenring boots. Having a recipe is the game's own answer to "could a player have this".
+  Yields 41 chest, 19 legs, 35 helmet, 11 shoulder, 1 utility.
+- **Hair and beards** — items typed as customisation, the same set the player's own
+  appearance screen offers: 87 hairstyles and 27 beards, against the 12 and 10 a hand-written
+  list had.
+
+Wearing something is a picture, not protection, so a villager in wolf armour is dressed
+rather than armoured — this costs nothing and breaks no boundary.
 
 ---
 

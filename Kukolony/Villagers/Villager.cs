@@ -115,6 +115,7 @@ namespace Kukolony.Villagers
             // Identity first: everything below reports by name, and taming used to log
             // an empty one because it ran before the villager had been named.
             EnsureIdentity();
+            EnsureHumanSkin();
             EnsureAppearance();
             EnsureDressed();
             EnsureTamed();
@@ -200,6 +201,92 @@ namespace Kukolony.Villagers
             state.MarkAppearanceRolled();
             Log.Info($"Villager '{state.Name}' rolled its appearance");
         }
+
+        /// <summary>
+        ///     Draws this villager with the player's materials instead of the ghost rig's.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Measured, not guessed: a villager's body and hair render with
+        ///         <c>Custom/Fallen Warrior</c> while its clothing already renders with
+        ///         <c>Custom/Player</c>. That is why villagers glowed gold and the player did
+        ///         not, and why removing the rig's lights and particles changed nothing — the
+        ///         glow is in the skin material, not in an effect.
+        ///     </para>
+        ///     <para>
+        ///         It repaints by shader rather than by knowing which renderer is which,
+        ///         because hair and beards are built later and separately: repainting only the
+        ///         body left villagers with normal skin and a glowing haircut. Running for a
+        ///         few ticks catches whatever the game builds after the first one.
+        ///     </para>
+        ///     <para>
+        ///         This is done here rather than when the prefab is built, because the prefab
+        ///         is built before the scene has a player to copy from — the first attempt did
+        ///         it there and silently kept the ghost skin. Material references are swapped,
+        ///         never edited: editing a shared material would repaint every Fallen Warrior
+        ///         in the world.
+        ///     </para>
+        /// </remarks>
+        private void EnsureHumanSkin()
+        {
+            if (_cleanPasses >= CleanPasses || _repaintTicks >= RepaintTicks || _visEquipment == null) return;
+            _repaintTicks++;
+
+            GameObject player = ZNetScene.instance != null ? ZNetScene.instance.GetPrefab("Player") : null;
+            if (player == null || !player.TryGetComponent(out VisEquipment playerVis) ||
+                playerVis.m_bodyModel == null)
+            {
+                if (_repaintTicks == 1) Log.Warning("[villager] no player rig to copy; keeping the rig's own skin");
+                return;
+            }
+
+            Material skin = null;
+            Material hair = null;
+            foreach (Material candidate in playerVis.m_bodyModel.sharedMaterials)
+            {
+                if (candidate == null) continue;
+                if (candidate.name.IndexOf("Hair", System.StringComparison.OrdinalIgnoreCase) >= 0) hair = candidate;
+                else if (skin == null) skin = candidate;
+            }
+            if (skin == null) return;
+
+            int repainted = 0;
+            foreach (Renderer renderer in GetComponentsInChildren<Renderer>(true))
+            {
+                if (renderer == null) continue;
+                Material[] materials = renderer.sharedMaterials;
+                bool changed = false;
+                for (int i = 0; i < materials.Length; i++)
+                {
+                    Material material = materials[i];
+                    if (material == null || material.shader == null) continue;
+                    if (material.shader.name.IndexOf("Fallen Warrior", System.StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+                    bool isHair = material.name.IndexOf("Hair", System.StringComparison.OrdinalIgnoreCase) >= 0;
+                    materials[i] = isHair && hair != null ? hair : skin;
+                    changed = true;
+                }
+                if (!changed) continue;
+                renderer.sharedMaterials = materials;
+                repainted++;
+            }
+
+            // Hair and beards are built after the body, so a pass that finds nothing may
+            // simply be early. Only a run of clean passes means there is nothing left.
+            _cleanPasses = repainted > 0 ? 0 : _cleanPasses + 1;
+            if (repainted > 0) Log.Info($"[villager] repainted {repainted} renderer(s) with the player's materials");
+        }
+
+        /// <summary>
+        ///     How long to keep looking for the rig's own materials. Hair and beards are built
+        ///     after the body, so one pass is not enough - a budget of twelve ticks lost that
+        ///     race and left villagers with a glowing haircut. Stops early after a run of
+        ///     passes that find nothing.
+        /// </summary>
+        private const int RepaintTicks = 240;
+        private const int CleanPasses = 5;
+        private int _repaintTicks;
+        private int _cleanPasses;
 
         /// <summary>
         ///     Shows what the villager owns of its outfit.
