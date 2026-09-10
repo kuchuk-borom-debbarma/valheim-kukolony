@@ -29,6 +29,12 @@ namespace Kukolony.Jobs.Work
         /// <summary>Structures this job can deliver to or operate.</summary>
         StructureCapability TargetCapability { get; }
 
+        /// <summary>
+        ///     The settings this job actually reads, among those not every job does. The panel
+        ///     shows only these, so a job cannot offer a control it ignores.
+        /// </summary>
+        JobSetting Settings { get; }
+
         /// <summary>What to do next, given where the villager got to and what it can see.</summary>
         WorkStep Next(WorkState state, WorkFacts facts);
 

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Jotunn.Managers;
 using Kukolony.Colonies;
 using Kukolony.Jobs;
+using Kukolony.Jobs.Work;
 using Kukolony.Villagers;
 using UnityEngine;
 using UnityEngine.UI;
@@ -357,20 +358,29 @@ namespace Kukolony.Gui
                 -405, 15, 360, Color.gray);
             AddButton(_content.transform, "Choose targets", 210, -405, 180,
                 () => { _showTargetPicker = true; _search = string.Empty; _page = 0; Refresh(); });
-            AddButton(_content.transform, "Source: " + Short(StructureName(_selectedJob.Source), 16), -195, -445, 250,
-                () => { _selectedJob.Source = NextStructure(_selectedJob.Source, StructureCapability.Container); SaveJobs(jobs); });
-            AddButton(_content.transform, "Destination: " + Short(StructureName(_selectedJob.Destination), 16), 110, -445, 270,
-                () => { _selectedJob.Destination = NextStructure(_selectedJob.Destination, StructureCapability.Container); SaveJobs(jobs); });
+            // Only what this work reads. A control that does nothing is worse than a missing
+            // one: the player changes it, nothing happens, and nothing says why.
+            JobSetting reads = Reads(_selectedJob);
+            if ((reads & JobSetting.Source) != 0)
+                AddButton(_content.transform, "Source: " + Short(StructureName(_selectedJob.Source), 16), -195, -445, 250,
+                    () => { _selectedJob.Source = NextStructure(_selectedJob.Source, StructureCapability.Container); SaveJobs(jobs); });
+            if ((reads & JobSetting.Destination) != 0)
+                AddButton(_content.transform, "Destination: " + Short(StructureName(_selectedJob.Destination), 16), 110, -445, 270,
+                    () => { _selectedJob.Destination = NextStructure(_selectedJob.Destination, StructureCapability.Container); SaveJobs(jobs); });
             AddButton(_content.transform, _selectedJob.Reservations ? "Reservations: on" : "Reservations: off", 325, -445, 150,
                 () => { _selectedJob.Reservations = !_selectedJob.Reservations; SaveJobs(jobs); });
-            TextAt(_content.transform, $"Search: {_selectedJob.SearchRadius:F0}m", -255, -485, 16, 150, TextAnchor.MiddleLeft);
-            AddButton(_content.transform, "−", -130, -485, 45, () => { _selectedJob.SearchRadius=Mathf.Max(4,_selectedJob.SearchRadius-4); SaveJobs(jobs); });
-            AddButton(_content.transform, "+", -75, -485, 45, () => { _selectedJob.SearchRadius=Mathf.Min(128,_selectedJob.SearchRadius+4); SaveJobs(jobs); });
+            if ((reads & JobSetting.SearchRadius) != 0)
+            {
+                TextAt(_content.transform, $"Search: {_selectedJob.SearchRadius:F0}m", -255, -485, 16, 150, TextAnchor.MiddleLeft);
+                AddButton(_content.transform, "−", -130, -485, 45, () => { _selectedJob.SearchRadius=Mathf.Max(4,_selectedJob.SearchRadius-4); SaveJobs(jobs); });
+                AddButton(_content.transform, "+", -75, -485, 45, () => { _selectedJob.SearchRadius=Mathf.Min(128,_selectedJob.SearchRadius+4); SaveJobs(jobs); });
+            }
             TextAt(_content.transform, $"Stop: {_selectedJob.StopDistance:F1}m", 40, -485, 16, 150, TextAnchor.MiddleLeft);
             AddButton(_content.transform, "−", 175, -485, 45, () => { _selectedJob.StopDistance=Mathf.Max(.5f,_selectedJob.StopDistance-.5f); SaveJobs(jobs); });
             AddButton(_content.transform, "+", 230, -485, 45, () => { _selectedJob.StopDistance=Mathf.Min(8,_selectedJob.StopDistance+.5f); SaveJobs(jobs); });
-            AddButton(_content.transform, _selectedJob.DropOnGround ? "Result: ground" : "Result: container",
-                328, -485, 140, () => { _selectedJob.DropOnGround = !_selectedJob.DropOnGround; SaveJobs(jobs); });
+            if ((reads & JobSetting.DropOnGround) != 0)
+                AddButton(_content.transform, _selectedJob.DropOnGround ? "Result: ground" : "Result: container",
+                    328, -485, 140, () => { _selectedJob.DropOnGround = !_selectedJob.DropOnGround; SaveJobs(jobs); });
 
             AddButton(_content.transform, "Save portable preset", -150, -530, 220,
                 () => { ColonyOperations.SavePreset(_colony, _selectedJob.Name+" portable", _selectedJob, false); Refresh(); });
@@ -416,6 +426,17 @@ namespace Kukolony.Gui
         ///     player has renamed the job away from it; on a starter job the two are the same
         ///     string and printing both says nothing twice.
         /// </summary>
+        /// <summary>
+        ///     Which of the varying settings this job reads. Work the registry does not know
+        ///     shows none of them rather than all of them - guessing would be the mistake this
+        ///     exists to prevent.
+        /// </summary>
+        private static JobSetting Reads(ColonyJobConfig job)
+        {
+            IColonyWork work = WorkRegistry.For(job.Type);
+            return work != null ? work.Settings : JobSetting.None;
+        }
+
         private static string JobSummary(ColonyJobConfig job)
         {
             string work = ColonyJobCatalog.DisplayName(job.Type);

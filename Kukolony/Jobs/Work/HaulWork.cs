@@ -11,6 +11,10 @@ namespace Kukolony.Jobs.Work
         public ToolRequirement RequiredTool => ToolRequirement.None;
         public StructureCapability TargetCapability => StructureCapability.Container;
 
+        /// <summary>No source: hauling looks on the ground, which is what the radius bounds.</summary>
+        public JobSetting Settings =>
+            JobSetting.Destination | JobSetting.SearchRadius | JobSetting.DropOnGround;
+
         public WorkStep Next(WorkState state, WorkFacts facts) => FetchAndDeliver.Next(state, facts);
 
         public JobResult ChooseSource(WorkContext context, out string activity) =>

@@ -164,6 +164,7 @@ namespace Kukolony.Debug
             yield return CheckHaulPipeline(report, colony);
             yield return CheckTransferPipeline(report, colony);
             yield return CheckDestinationChoice(report, colony);
+            yield return CheckDeclaredSettings(report, colony);
             yield return CheckStationJob(report, colony);
             yield return CheckHiveJob(report, colony);
             CheckStationContracts(report);
@@ -698,6 +699,71 @@ namespace Kukolony.Debug
                 $"choose={chooseResult} steps={string.Join(" | ", chooseSteps.ToArray())} " +
                 $"whenNoRoom={stuck} stillCarrying={Count(bag.GetInventory(), "Flint")}");
 
+            VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Proves a job ignores the settings it declares it does not read.
+        /// </summary>
+        /// <remarks>
+        ///     The panel hides a setting a job does not use, which is only honest if the job
+        ///     really ignores it. So a haul job is given a source container holding exactly what
+        ///     it wants, and must take from the ground anyway and leave the container alone.
+        ///     The control is a transfer job with the same source, which must empty it - without
+        ///     that, this would pass just as well if the source were unreachable or empty.
+        /// </remarks>
+        private static IEnumerator CheckDeclaredSettings(TestReport report, Colony colony)
+        {
+            Villager worker = VillagerLifecycle.Spawn(colony);
+            if (worker == null || !worker.TryGetComponent(out ZNetView view) || !view.IsValid() ||
+                !worker.TryGetComponent(out MonsterAI ai))
+            {
+                report.Check(false, "a job ignores the settings it does not declare", "no worker");
+                yield break;
+            }
+
+            Vector3 at = worker.transform.position;
+            GameObject from = Spawn("piece_chest_wood", at + Vector3.forward * 3f);
+            GameObject into = Spawn("piece_chest_wood", at + Vector3.back * 3f);
+            Register(colony, from, "Ignored source");
+            Register(colony, into, "Declared sink");
+            Inventory source = from.GetComponent<Container>().GetInventory();
+            Inventory sink = into.GetComponent<Container>().GetInventory();
+            Container bag = VillagerInventory.Attach(worker.gameObject, view);
+            ZDOID fromId = from.GetComponent<ZNetView>().GetZDO().m_uid;
+            ZDOID intoId = into.GetComponent<ZNetView>().GetZDO().m_uid;
+
+            Clear(source); Clear(sink); Clear(bag.GetInventory());
+            Add(source, "Flint");
+            GameObject dropped = Spawn("Flint", at + Vector3.right * 3f);
+            yield return new WaitForSecondsRealtime(.3f);
+
+            ColonyJobConfig haul = Job(ColonyJobType.HaulLoose, "Flint");
+            haul.Source = fromId;
+            haul.Destination = intoId;
+            haul.StopDistance = 12f;
+            yield return Run(worker, ai, bag, colony, haul);
+            // Captured now: the control below empties this container, so reading it at report
+            // time would print the same thing whether the check passed or failed.
+            int leftInSource = Count(source, "Flint");
+            bool tookFromGround = Count(sink, "Flint") > 0 && leftInSource == 1;
+
+            // Control: the same source, read by work that declares it.
+            Clear(sink); Clear(bag.GetInventory());
+            ColonyJobConfig transfer = Job(ColonyJobType.Transfer, "Flint");
+            transfer.Source = fromId;
+            transfer.Destination = intoId;
+            transfer.StopDistance = 12f;
+            yield return new WaitForSecondsRealtime(.2f);
+            yield return Run(worker, ai, bag, colony, transfer);
+            bool tookFromSource = Count(source, "Flint") == 0 && Count(sink, "Flint") > 0;
+
+            report.Check(tookFromGround && tookFromSource,
+                "a job ignores a setting it does not declare, and reads one it does",
+                $"haulLeftSource={leftInSource} transferEmptiedIt={tookFromSource}");
+
+            if (dropped != null) ZNetScene.instance.Destroy(dropped);
             VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
             yield return new WaitForSecondsRealtime(.2f);
         }

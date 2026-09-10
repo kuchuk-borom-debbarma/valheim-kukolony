@@ -15,6 +15,10 @@ namespace Kukolony.Jobs.Work
         public ToolRequirement RequiredTool => ToolRequirement.None;
         public StructureCapability TargetCapability => StructureCapability.Container;
 
+        /// <summary>Both ends are containers, and nothing is searched for on the ground.</summary>
+        public JobSetting Settings =>
+            JobSetting.Source | JobSetting.Destination | JobSetting.DropOnGround;
+
         public WorkStep Next(WorkState state, WorkFacts facts) => FetchAndDeliver.Next(state, facts);
 
         public JobResult ChooseSource(WorkContext context, out string activity) =>

@@ -32,6 +32,12 @@ namespace Kukolony.Jobs.Work
         public ToolRequirement RequiredTool => ToolRequirement.None;
         public StructureCapability TargetCapability { get; }
 
+        /// <summary>
+        ///     No destination: the load goes into the station, which is chosen by capability
+        ///     rather than by a container setting.
+        /// </summary>
+        public virtual JobSetting Settings => JobSetting.Source;
+
         public virtual WorkStep Next(WorkState state, WorkFacts facts) => FetchAndDeliver.Next(state, facts);
 
         public virtual JobResult ChooseSource(WorkContext context, out string activity) =>
