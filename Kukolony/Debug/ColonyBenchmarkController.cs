@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -67,11 +68,12 @@ namespace Kukolony.Debug
             }
             else
             {
-                // An interrupted older run may have saved its fixtures before it wrote a
-                // terminal marker. They are benchmark-owned, but not evidence for this
-                // run, so remove them without touching any other world object.
-                foreach (Colony stale in Colony.Instances.Where(c => c != null &&
-                    c.State.Name == BenchmarkFunctionalScenario.PersistenceName).ToList()) Cleanup(stale);
+                // An interrupted older run saves its fixtures before it ever writes a
+                // terminal marker, and every run whose create phase failed leaves a colony,
+                // its villagers and its chests behind for good. They accumulate, and a
+                // leftover chest with room in it has already been picked by a job under test.
+                int purged = PurgeStaleFixtures();
+                if (purged > 0) Log.Info($"[Benchmark] purged {purged} fixture(s) left by earlier runs");
                 yield return null;
                 yield return Guard("functional", BenchmarkFunctionalScenario.RunFresh(_runId));
                 passed = !_phaseFailed && BenchmarkFunctionalScenario.LastPassed;
@@ -135,6 +137,48 @@ namespace Kukolony.Debug
         }
 
         private void Fail(Exception error) { _phaseFailed = true; Write("failure.txt", error.ToString()); Log.Error("[Benchmark] " + error); }
+
+        /// <summary>
+        ///     Removes every benchmark fixture left in the world, working from ZDOs rather
+        ///     than loaded instances so a colony whose zone is not loaded is still found.
+        ///     Returns how many were destroyed.
+        /// </summary>
+        /// <remarks>
+        ///     Scoped to the dedicated benchmark world by name. Someone can turn benchmark
+        ///     mode on in their own save to watch it run, and deleting their villagers would
+        ///     be unforgivable; there is nothing to clean up there anyway, because a run that
+        ///     completes cleans up after itself.
+        /// </remarks>
+        private static int PurgeStaleFixtures()
+        {
+            if (ZNet.instance == null || ZDOMan.instance == null) return 0;
+            if (ZNet.instance.GetWorldName() != ModConfig.BenchmarkWorld.Value) return 0;
+
+            int destroyed = 0;
+            foreach (ZDO hearth in FindAll(ColonyPrefab.PrefabName))
+            {
+                ColonyState state = new ColonyState(hearth);
+                if (!state.IsValid || state.Name != BenchmarkFunctionalScenario.PersistenceName) continue;
+                foreach (StructureRecord record in state.GetStructures()) { Destroy(record.Id); destroyed++; }
+                Destroy(hearth.m_uid);
+                destroyed++;
+            }
+
+            // Villagers are destroyed by prefab rather than by membership: a phase that ended
+            // early leaves ones that were never registered, and those are exactly the ones
+            // that pile up in the world.
+            foreach (ZDO villager in FindAll(Villagers.VillagerPrefab.PrefabName)) { Destroy(villager.m_uid); destroyed++; }
+            return destroyed;
+        }
+
+        /// <summary>Every ZDO of a prefab currently known to this peer.</summary>
+        private static List<ZDO> FindAll(string prefabName)
+        {
+            List<ZDO> found = new List<ZDO>();
+            int index = 0;
+            while (!ZDOMan.instance.GetAllZDOsWithPrefabIterative(prefabName, found, ref index)) { }
+            return found;
+        }
 
         private static void Cleanup(Colony colony)
         {

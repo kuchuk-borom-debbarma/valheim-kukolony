@@ -28,6 +28,12 @@ namespace Kukolony.Jobs
         OperateStation = 9,
         End = 10,
         /// <summary>Waits for work to produce a world drop, such as honey from a hive.</summary>
-        WaitForDrop = 11
+        WaitForDrop = 11,
+        /// <summary>Ends the cycle here unless the villager is carrying something.</summary>
+        StopUnlessCarrying = 12,
+        /// <summary>Puts down what is being carried, where the villager stands.</summary>
+        DropCarried = 13,
+        /// <summary>Chooses a container that can actually accept what is being carried.</summary>
+        SelectSpaciousTarget = 14
     }
 }

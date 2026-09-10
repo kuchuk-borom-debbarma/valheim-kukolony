@@ -17,6 +17,12 @@ namespace Kukolony.Jobs
         Wait,
         /// <summary>Destination already holds enough. Yields without consuming an attempt.</summary>
         StopAtLimit,
+        /// <summary>A condition in the pipeline ended the cycle early. Consumes no attempt.</summary>
+        StopHere,
+        /// <summary>Puts down what is carried.</summary>
+        DropCarried,
+        /// <summary>Chooses a container with room for what is carried.</summary>
+        SelectSpaciousTarget,
         /// <summary>Reached the end of the pipeline; the cycle is done.</summary>
         CompleteCycle,
         /// <summary>
@@ -130,6 +136,20 @@ namespace Kukolony.Jobs
                         break;
                     case JobPieceKind.SelectTarget:
                         if (!facts.HasTarget) return new JobStep(StepAction.SelectTarget, index);
+                        break;
+                    case JobPieceKind.SelectSpaciousTarget:
+                        if (!facts.HasTarget) return new JobStep(StepAction.SelectSpaciousTarget, index);
+                        break;
+
+                    // A guard, not work: with nothing in hand the rest of the pipeline has
+                    // nothing to act on, so end the cycle rather than walking it pointlessly.
+                    case JobPieceKind.StopUnlessCarrying:
+                        if (!facts.Carrying) return new JobStep(StepAction.StopHere, index);
+                        break;
+
+                    // Nothing carried means nothing to put down; fall through.
+                    case JobPieceKind.DropCarried:
+                        if (facts.Carrying) return new JobStep(StepAction.DropCarried, index);
                         break;
 
                     // No target means the fetch before this was skipped, so there is nothing

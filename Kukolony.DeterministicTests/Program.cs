@@ -10,6 +10,9 @@ static class Program
     static readonly JobPieceKind[] Collect =
         [Start, StopAtStockLimit, SelectTarget, MoveToTarget, OperateStation, WaitForDrop,
          FindLooseItem, MoveToTarget, PickUp, SelectTarget, MoveToTarget, PutItem, End];
+    // Gather loose items into a pile, guarding against walking a pipeline empty-handed.
+    static readonly JobPieceKind[] Gather =
+        [Start, FindLooseItem, MoveToTarget, PickUp, StopUnlessCarrying, DropCarried, End];
     static readonly JobPieceKind[] Station =
         [Start, StopAtStockLimit, SelectSource, MoveToTarget, TakeItem, SelectTarget, MoveToTarget, OperateStation, End];
 
@@ -29,7 +32,9 @@ static class Program
             ("missing start", [FindLooseItem, End], false),
             ("pickup without target", [Start, PickUp, End], false),
             ("take without source", [Start, TakeItem, End], false),
-            ("put without destination", [Start, PutItem, End], false)
+            ("put without destination", [Start, PutItem, End], false),
+            ("dropping needs something carried", [Start, DropCarried, End], false),
+            ("a guard satisfies what follows it", [Start, StopUnlessCarrying, DropCarried, End], true)
         };
         int failures = 0;
         foreach (var test in cases)
@@ -56,7 +61,11 @@ static class Program
             ("lost target restarts the cycle", Haul, 4, Facts(), StepAction.Restart),
             ("empty bag at the deposit completes", Haul, 7, Facts(), StepAction.CompleteCycle),
             ("station always asks the station", Station, 7, Facts(carrying: true, hasTarget: true, arrived: true), StepAction.OperateStation),
-            ("malformed pipeline is refused", [Start, PickUp, End], 0, Facts(), StepAction.Invalid)
+            ("malformed pipeline is refused", [Start, PickUp, End], 0, Facts(), StepAction.Invalid),
+            ("a guard stops an empty-handed villager", Gather, 4, Facts(), StepAction.StopHere),
+            ("the same guard passes when carrying", Gather, 4, Facts(carrying: true), StepAction.DropCarried),
+            ("picking a roomy target needs something in hand",
+                [Start, SelectSpaciousTarget, MoveToTarget, PutItem, End], 0, Facts(), StepAction.Invalid)
         };
         int failures = 0;
         foreach (var test in cases)
@@ -87,6 +96,8 @@ static class Program
             ("collect", Collect, false, [StepAction.SelectTarget, StepAction.Move, StepAction.OperateStation,
                 StepAction.Wait, StepAction.FindLooseItem, StepAction.Move, StepAction.PickUp,
                 StepAction.SelectTarget, StepAction.Move, StepAction.PutItem, StepAction.CompleteCycle]),
+            ("gather to a pile", Gather, false, [StepAction.FindLooseItem, StepAction.Move,
+                StepAction.PickUp, StepAction.DropCarried, StepAction.CompleteCycle]),
             // Resuming a haul mid-cycle must finish the delivery, never start a second one.
             ("haul resumed carrying", Haul, true,
                 [StepAction.SelectTarget, StepAction.Move, StepAction.PutItem, StepAction.CompleteCycle])
@@ -125,6 +136,8 @@ static class Program
                 case StepAction.PickUp:
                 case StepAction.TakeItem: carrying = true; hasTarget = false; arrived = false; break;
                 case StepAction.PutItem: carrying = false; hasTarget = false; arrived = false; break;
+                case StepAction.DropCarried: carrying = false; hasTarget = false; arrived = false; break;
+                case StepAction.SelectSpaciousTarget: hasTarget = true; arrived = false; break;
                 case StepAction.OperateStation: carrying = false; hasTarget = false; arrived = false; break;
                 case StepAction.Wait: break;   // the engine decides when the wait is over
                 default: return performed;   // StopAtLimit, CompleteCycle, Invalid all end the cycle
@@ -146,6 +159,16 @@ static class Program
                 Has(PieceCustomisation.Requires(MoveToTarget), JobCustomisation.Target), true),
             ("a deposit needs something carried",
                 Has(PieceCustomisation.Requires(PutItem), JobCustomisation.CarriedItem), true),
+            ("putting down needs something carried",
+                Has(PieceCustomisation.Requires(DropCarried), JobCustomisation.CarriedItem), true),
+            ("a roomy target provides a target",
+                Has(PieceCustomisation.Provides(SelectSpaciousTarget), JobCustomisation.Target), true),
+            ("a guard is configured by nothing",
+                PieceCustomisation.Uses(StopUnlessCarrying) == JobCustomisation.None, true),
+            // A guard establishes what it checks, so a pipeline handed a full bag is
+            // expressible without pretending some earlier step fetched the contents.
+            ("a guard provides what it guarantees",
+                Has(PieceCustomisation.Provides(StopUnlessCarrying), JobCustomisation.CarriedItem), true),
             ("taking provides something carried",
                 Has(PieceCustomisation.Provides(TakeItem), JobCustomisation.CarriedItem), true),
             ("a source selection is configured by its container",

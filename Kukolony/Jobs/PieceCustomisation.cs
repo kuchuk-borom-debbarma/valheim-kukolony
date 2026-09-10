@@ -76,6 +76,11 @@ namespace Kukolony.Jobs
                     return JobCustomisation.ItemFilter;
                 case JobPieceKind.WaitForDrop:
                     return JobCustomisation.ItemFilter | JobCustomisation.SearchRadius;
+                case JobPieceKind.DropCarried:
+                    return JobCustomisation.ItemFilter;
+                case JobPieceKind.SelectSpaciousTarget:
+                    return JobCustomisation.ItemFilter | JobCustomisation.Container |
+                           JobCustomisation.TargetScope | JobCustomisation.Reservation;
                 default:
                     return JobCustomisation.None;
             }
@@ -89,9 +94,16 @@ namespace Kukolony.Jobs
                 case JobPieceKind.FindLooseItem:
                 case JobPieceKind.SelectSource:
                 case JobPieceKind.SelectTarget:
+                case JobPieceKind.SelectSpaciousTarget:
                     return JobCustomisation.Target;
                 case JobPieceKind.PickUp:
                 case JobPieceKind.TakeItem:
+                    return JobCustomisation.CarriedItem;
+                // A guard establishes what it checks: past this piece the villager is
+                // carrying something, whether a previous step fetched it or it simply
+                // arrived holding it. Without this, a pipeline that starts with a full bag
+                // could never be expressed.
+                case JobPieceKind.StopUnlessCarrying:
                     return JobCustomisation.CarriedItem;
                 default:
                     return JobCustomisation.None;
@@ -110,6 +122,11 @@ namespace Kukolony.Jobs
                     return JobCustomisation.Target;
                 case JobPieceKind.PutItem:
                     return JobCustomisation.Target | JobCustomisation.CarriedItem;
+                // Both need something in hand: one to put it down, the other to know what
+                // size of space it must find.
+                case JobPieceKind.DropCarried:
+                case JobPieceKind.SelectSpaciousTarget:
+                    return JobCustomisation.CarriedItem;
                 default:
                     return JobCustomisation.None;
             }

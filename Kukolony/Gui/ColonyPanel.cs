@@ -670,7 +670,8 @@ namespace Kukolony.Gui
             JobPieceKind.StopAtStockLimit, JobPieceKind.FindLooseItem, JobPieceKind.SelectSource,
             JobPieceKind.SelectTarget, JobPieceKind.MoveToTarget, JobPieceKind.PickUp,
             JobPieceKind.TakeItem, JobPieceKind.PutItem, JobPieceKind.OperateStation,
-            JobPieceKind.WaitForDrop
+            JobPieceKind.WaitForDrop, JobPieceKind.StopUnlessCarrying, JobPieceKind.DropCarried,
+            JobPieceKind.SelectSpaciousTarget
         };
 
         private void SaveJobs(List<ColonyJobConfig> jobs) { _colony.State.SetJobs(jobs); Refresh(); }
@@ -735,6 +736,9 @@ namespace Kukolony.Gui
                 case JobPieceKind.OperateStation: return "Operate";
                 case JobPieceKind.End: return "End";
                 case JobPieceKind.WaitForDrop: return "Wait for drop";
+                case JobPieceKind.StopUnlessCarrying: return "Stop if empty-handed";
+                case JobPieceKind.DropCarried: return "Put down";
+                case JobPieceKind.SelectSpaciousTarget: return "Pick target with room";
                 default: return kind.ToString();
             }
         }

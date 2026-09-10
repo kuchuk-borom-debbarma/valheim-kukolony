@@ -170,6 +170,7 @@ namespace Kukolony.Debug
             yield return CheckHaulPipeline(report, colony);
             yield return CheckTransferPipeline(report, colony);
             yield return CheckPieceSettings(report, colony);
+            yield return CheckNewPieces(report, colony);
             CheckStationContracts(report);
             CheckStationProtocols(report, origin);
             report.Check(Enum.GetValues(typeof(ColonyJobType)).Length == 7, "concrete job catalog is complete");
@@ -680,6 +681,110 @@ namespace Kukolony.Debug
                 if (result == JobResult.Failed || result == JobResult.Skipped) break;
                 yield return null;
             }
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Covers the pieces that added new behaviour rather than new sequencing: putting
+        ///     down what is carried, and choosing a container that can actually take it.
+        /// </summary>
+        /// <remarks>
+        ///     Ordinary target selection picks the first eligible container and only finds out
+        ///     it is full after walking there, which fails the job. The roomy variant checks
+        ///     capacity while choosing, so the test puts a full chest and an empty one in front
+        ///     of a villager and asserts which one the item reaches. The control fills both:
+        ///     with nowhere to put anything it must come to rest rather than pick one anyway.
+        /// </remarks>
+        private static IEnumerator CheckNewPieces(TestReport report, Colony colony)
+        {
+            Villager worker = VillagerLifecycle.Spawn(colony);
+            if (worker == null || !worker.TryGetComponent(out ZNetView view) || !view.IsValid() ||
+                !worker.TryGetComponent(out MonsterAI ai))
+            {
+                report.Check(false, "put down and roomy-target pieces work", "no worker");
+                yield break;
+            }
+            Container bag = VillagerInventory.Attach(worker.gameObject, view);
+            Vector3 at = worker.transform.position;
+
+            // Put down: carry something, run a pipeline that only drops it.
+            Clear(bag.GetInventory());
+            Add(bag.GetInventory(), "Flint");
+            ColonyJobConfig pile = Job(ColonyJobType.HaulLoose, "Flint");
+            pile.Pieces.Add(new JobPiece { Kind = JobPieceKind.Start });
+            pile.Pieces.Add(new JobPiece { Kind = JobPieceKind.StopUnlessCarrying });
+            pile.Pieces.Add(new JobPiece { Kind = JobPieceKind.DropCarried });
+            pile.Pieces.Add(new JobPiece { Kind = JobPieceKind.End });
+            pile.StopDistance = 12f;
+            yield return Run(worker, ai, bag, colony, pile);
+            bool droppedIt = Count(bag.GetInventory(), "Flint") == 0 && LooseCount("Flint", at) > 0;
+
+            // Roomy target: one full chest, one with space.
+            GameObject full = Spawn("piece_chest_wood", at + Vector3.right * 3f);
+            GameObject roomy = Spawn("piece_chest_wood", at + Vector3.left * 3f);
+            StructureRecord fullRecord = Register(colony, full, "Full chest");
+            StructureRecord roomyRecord = Register(colony, roomy, "Roomy chest");
+            Inventory fullBox = full.GetComponent<Container>().GetInventory();
+            Inventory roomyBox = roomy.GetComponent<Container>().GetInventory();
+            Clear(fullBox); Clear(roomyBox);
+            Fill(fullBox, "Wood");
+            Clear(bag.GetInventory());
+            Add(bag.GetInventory(), "Flint");
+
+            ColonyJobConfig choose = Job(ColonyJobType.HaulLoose, "Flint");
+            choose.Pieces.Add(new JobPiece { Kind = JobPieceKind.Start });
+            choose.Pieces.Add(new JobPiece { Kind = JobPieceKind.StopUnlessCarrying });
+            // Scope the choice to this test's two chests. The colony already holds
+            // containers registered by earlier checks, and one of those has room - the piece
+            // was correctly choosing it, which is a fixture problem rather than a fault.
+            // Scoping also exercises a piece's own target mode.
+            JobPiece spacious = new JobPiece
+            {
+                Kind = JobPieceKind.SelectSpaciousTarget,
+                Capability = StructureCapability.Container,
+                Targets = (int)TargetMode.Selected
+            };
+            if (fullRecord != null) spacious.SelectedStructures.Add(fullRecord.Id);
+            if (roomyRecord != null) spacious.SelectedStructures.Add(roomyRecord.Id);
+            choose.Pieces.Add(spacious);
+            choose.Pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget });
+            choose.Pieces.Add(new JobPiece { Kind = JobPieceKind.PutItem });
+            choose.Pieces.Add(new JobPiece { Kind = JobPieceKind.End });
+            choose.StopDistance = 12f;
+            yield return new WaitForSecondsRealtime(.3f);
+            var chooseSteps = new List<string>();
+            JobResult chooseResult = JobResult.Running;
+            for (int tick = 0; tick < 80 && chooseResult != JobResult.Completed; tick++)
+            {
+                chooseResult = ColonyJobEngine.Tick(worker, ai, bag, colony, choose, out string step);
+                if (chooseSteps.Count == 0 || chooseSteps[chooseSteps.Count - 1] != step) chooseSteps.Add(step);
+                if (chooseResult == JobResult.Failed || chooseResult == JobResult.Skipped) break;
+                yield return null;
+            }
+            yield return new WaitForSecondsRealtime(.2f);
+            bool avoidedFull = Count(roomyBox, "Flint") == 1 && Count(fullBox, "Flint") == 0;
+
+            // Control: with every container full it must refuse rather than choose one.
+            Clear(roomyBox);
+            Fill(roomyBox, "Wood");
+            Clear(bag.GetInventory());
+            Add(bag.GetInventory(), "Flint");
+            yield return new WaitForSecondsRealtime(.2f);
+            JobResult stuck = JobResult.Running;
+            for (int tick = 0; tick < 40 && stuck == JobResult.Running; tick++)
+            {
+                stuck = ColonyJobEngine.Tick(worker, ai, bag, colony, choose, out _);
+                yield return null;
+            }
+            bool refused = stuck == JobResult.Skipped && Count(bag.GetInventory(), "Flint") == 1;
+
+            report.Check(droppedIt && avoidedFull && refused,
+                "put down leaves items on the ground, and a roomy target skips a full container",
+                $"dropped={droppedIt} roomy={Count(roomyBox, "Flint")} full={Count(fullBox, "Flint")} " +
+                $"choose={chooseResult} steps={string.Join(" | ", chooseSteps.ToArray())} " +
+                $"whenNoRoom={stuck} stillCarrying={Count(bag.GetInventory(), "Flint")}");
+
+            VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
             yield return new WaitForSecondsRealtime(.2f);
         }
 
