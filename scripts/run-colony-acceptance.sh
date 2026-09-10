@@ -28,7 +28,11 @@ dotnet build "$ROOT/Kukolony.sln" -c Debug
 set_value() {
   key="$1"
   value="$2"
-  KEY="$key" VALUE="$value" perl -0pi -e 's/^\Q$ENV{KEY}\E\s*=.*$/$ENV{KEY} . " = " . $ENV{VALUE}/me' "$CONFIG"
+  # BepInEx keys are simple identifiers.  Use BSD sed directly: the previous
+  # Perl environment interpolation silently left the user value in place on
+  # macOS, causing AutoBoot to select an unrelated, very large test world.
+  sed -i '' -e "s|^$key =.*|$key = $value|" "$CONFIG"
+  grep -Fqx "$key = $value" "$CONFIG" || { echo "failed to pin $key"; exit 1; }
 }
 
 run_game() {
@@ -48,7 +52,10 @@ run_game() {
         # was still being committed, so the supposed reload was another run 1.
         # Wait for the orderly exit before returning to the caller.
         exit_wait=0
-        while pgrep -f '/Valheim/valheim.app/Contents/MacOS/Valheim' >/dev/null && [ "$exit_wait" -lt 60 ]; do
+        # macOS/Steam can keep the Unity process alive while its final world and
+        # profile batches flush.  A minute is routinely insufficient on this
+        # installation; preserve the save rather than killing a valid run.
+        while pgrep -f '/Valheim/valheim.app/Contents/MacOS/Valheim' >/dev/null && [ "$exit_wait" -lt 180 ]; do
           sleep 1
           exit_wait=$((exit_wait + 1))
         done
