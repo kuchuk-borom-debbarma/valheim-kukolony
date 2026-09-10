@@ -32,7 +32,7 @@ namespace Kukolony.Debug
 
         private void Update()
         {
-            if (!ModConfig.AutoTestEnabled.Value || _alreadyBooted)
+            if ((!ModConfig.AutoTestEnabled.Value && !ModConfig.BenchmarkMode.Value) || _alreadyBooted)
             {
                 return;
             }

@@ -18,11 +18,12 @@ namespace Kukolony.Debug
 
         private void Update()
         {
-            if (ModConfig.AutoTestEnabled.Value)
+            if (ModConfig.AutoTestEnabled.Value || ModConfig.BenchmarkMode.Value)
             {
                 Application.runInBackground = true;
             }
-            if (_started || !ModConfig.AutoTestEnabled.Value || ModConfig.DebugProbeEnabled.Value ||
+            bool enabled = ModConfig.AutoTestEnabled.Value || (ModConfig.BenchmarkMode.Value && ModConfig.BenchmarkStage.Value != "ui");
+            if (_started || !enabled || ModConfig.DebugProbeEnabled.Value ||
                 ModConfig.DebugScreenshotEnabled.Value || Player.m_localPlayer == null ||
                 ZoneSystem.instance == null || !ZoneSystem.instance.IsActiveAreaLoaded()) return;
             _started = true;
@@ -31,7 +32,7 @@ namespace Kukolony.Debug
 
         private IEnumerator Run()
         {
-            yield return new WaitForSecondsRealtime(8f);
+            yield return new WaitForSecondsRealtime(ModConfig.BenchmarkMode.Value ? 10f : 8f);
             Colony existing = Colony.Instances.FirstOrDefault(c => c != null && c.State.Name == PersistenceName);
             if (existing != null) RunReload(existing);
             else yield return RunFresh();

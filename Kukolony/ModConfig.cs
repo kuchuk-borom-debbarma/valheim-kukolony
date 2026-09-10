@@ -65,6 +65,9 @@ namespace Kukolony
 
         /// <summary>One-shot prefab diagnostic. Replaces the acceptance test for that run.</summary>
         internal static ConfigEntry<bool> DebugProbeEnabled { get; private set; }
+        internal static ConfigEntry<bool> BenchmarkMode { get; private set; }
+        internal static ConfigEntry<string> BenchmarkStage { get; private set; }
+        internal static ConfigEntry<string> BenchmarkOutputPath { get; private set; }
 
         internal static void Bind(ConfigFile config)
         {
@@ -194,6 +197,13 @@ namespace Kukolony
                 false,
                 "Dump what prefabs and components actually exist to the log, then quit. "
                 + "Answers questions the decompiled assembly cannot, since prefab contents are asset data.");
+
+            BenchmarkMode = config.Bind("9 - Development", nameof(BenchmarkMode), false,
+                "Run the config-driven in-game benchmark. Development only; off by default.");
+            BenchmarkStage = config.Bind("9 - Development", nameof(BenchmarkStage), "create",
+                "Benchmark stage: create, reload, or ui.");
+            BenchmarkOutputPath = config.Bind("9 - Development", nameof(BenchmarkOutputPath),
+                "BepInEx/kukolony-benchmarks", "Canonical folder for benchmark reports and screenshots.");
 
             config.Save();
             config.SaveOnConfigSet = true;

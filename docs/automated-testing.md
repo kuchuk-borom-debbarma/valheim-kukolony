@@ -1,12 +1,12 @@
 # Automated testing
 
-The required verification command is:
+The required full-game verification command is:
 
 ```sh
-./scripts/run-colony-acceptance.sh
+./scripts/in-game-test.sh
 ```
 
-Do not substitute a project build, direct app launch, or manual clicking. The script builds
+Do not substitute a project build, direct app launch, or manual clicking. The benchmark script builds
 `Kukolony.sln`, confirms the installed macOS Doorstop library matches the pinned BepInEx
 5.4.2350 pack, removes quarantine from the in-scope loader files, launches Valheim through
 Steam, polls fresh BepInEx logs, and fails on missing reports or images.

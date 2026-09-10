@@ -27,11 +27,11 @@ namespace Kukolony.Debug
 
         private void Update()
         {
-            if (ModConfig.DebugScreenshotEnabled.Value)
+            if (ModConfig.DebugScreenshotEnabled.Value || (ModConfig.BenchmarkMode.Value && ModConfig.BenchmarkStage.Value == "ui"))
             {
                 Application.runInBackground = true;
             }
-            if (_started || !ModConfig.DebugScreenshotEnabled.Value)
+            if (_started || (!ModConfig.DebugScreenshotEnabled.Value && (!ModConfig.BenchmarkMode.Value || ModConfig.BenchmarkStage.Value != "ui")))
             {
                 return;
             }
@@ -224,7 +224,7 @@ namespace Kukolony.Debug
                 shot = ScreenCapture.CaptureScreenshotAsTexture();
                 byte[] png = shot.EncodeToPNG();
 
-                string directory = ModConfig.DebugScreenshotPath.Value;
+                string directory = ModConfig.BenchmarkMode.Value ? ModConfig.BenchmarkOutputPath.Value : ModConfig.DebugScreenshotPath.Value;
                 Directory.CreateDirectory(directory);
 
                 string path = Path.Combine(directory, fileName);
