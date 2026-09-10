@@ -11,6 +11,15 @@ Do not substitute a project build, direct app launch, or manual clicking. The sc
 5.4.2350 pack, removes quarantine from the in-scope loader files, launches Valheim through
 Steam, polls fresh BepInEx logs, and fails on missing reports or images.
 
+## Deterministic pipeline checks
+
+Before Steam is launched, the runner executes
+`Kukolony.DeterministicTests`. This Unity-free executable links the production pipeline
+shape validator and proves valid starter shapes plus rejected missing Start, source,
+loose-target, and destination connections. It is intentionally separate from the
+Valheim harness: pipeline authoring rules must be repeatable even when world loading,
+Steam, or rendering is unavailable.
+
 ## Three unattended launches
 
 1. **Acceptance run 1:** purge the dedicated test world, create the V2 colony fixture,

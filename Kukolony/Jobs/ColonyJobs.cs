@@ -50,14 +50,9 @@ namespace Kukolony.Jobs
         internal static bool IsValid(ColonyJobConfig job, out string message)
         {
             List<JobPiece> pieces = job.Pieces;
-            if (pieces.Count < 2 || pieces[0].Kind != JobPieceKind.Start || pieces[pieces.Count - 1].Kind != JobPieceKind.End) { message = "A job must start with Start and end with End."; return false; }
-            for (int i = 1; i < pieces.Count; i++)
-                if (pieces[i].Kind == JobPieceKind.PickUp && !HasBefore(pieces, i, JobPieceKind.FindLooseItem) ||
-                    pieces[i].Kind == JobPieceKind.TakeItem && !HasBefore(pieces, i, JobPieceKind.SelectSource) ||
-                    pieces[i].Kind == JobPieceKind.PutItem && !HasBefore(pieces, i, JobPieceKind.SelectTarget)) { message = "This piece is missing compatible customisation from an earlier selection piece."; return false; }
-            message = string.Empty; return true;
+            List<JobPieceKind> kinds = pieces.ConvertAll(piece => piece.Kind);
+            return PipelineShapeRules.IsValid(kinds, out message);
         }
-        private static bool HasBefore(List<JobPiece> pieces, int index, JobPieceKind kind) { for (int i = 0; i < index; i++) if (pieces[i].Kind == kind) return true; return false; }
     }
 
     internal sealed class ColonyJobConfig

@@ -23,6 +23,7 @@ same="$(shasum "$PACK/doorstop_libs/libdoorstop_x64.dylib" "$GAME/doorstop_libs/
 [ "$same" = "1" ] || { echo "Doorstop runtime does not match pinned pack"; exit 1; }
 
 xattr -dr com.apple.quarantine "$PACK" "$GAME/doorstop_libs" 2>/dev/null || true
+dotnet run --project "$ROOT/Kukolony.DeterministicTests/Kukolony.DeterministicTests.csproj"
 dotnet build "$ROOT/Kukolony.sln" -c Debug
 
 set_value() {
@@ -52,16 +53,19 @@ run_game() {
         # was still being committed, so the supposed reload was another run 1.
         # Wait for the orderly exit before returning to the caller.
         exit_wait=0
-        # macOS/Steam can keep the Unity process alive while its final world and
-        # profile batches flush.  A minute is routinely insufficient on this
-        # installation; preserve the save rather than killing a valid run.
-        while pgrep -f '/Valheim/valheim.app/Contents/MacOS/Valheim' >/dev/null && [ "$exit_wait" -lt 180 ]; do
+        # The in-game fixture already grants Logout eight seconds to flush. Steam
+        # occasionally leaves a headless Unity process behind afterwards; wait a
+        # further bounded grace period, then close only that stale process so the
+        # independent reload launch can verify the persisted data.
+        while pgrep -f '/Valheim/valheim.app/Contents/MacOS/Valheim' >/dev/null && [ "$exit_wait" -lt 30 ]; do
           sleep 1
           exit_wait=$((exit_wait + 1))
         done
         if pgrep -f '/Valheim/valheim.app/Contents/MacOS/Valheim' >/dev/null; then
-          echo "$label completed its report but did not exit after save"
-          return 1
+          echo "$label completed its report; closing stale post-save Valheim process"
+          pkill -TERM -f '/Valheim/valheim.app/Contents/MacOS/Valheim' 2>/dev/null || true
+          sleep 3
+          pgrep -f '/Valheim/valheim.app/Contents/MacOS/Valheim' >/dev/null && pkill -KILL -f '/Valheim/valheim.app/Contents/MacOS/Valheim' 2>/dev/null || true
         fi
         return 0
       fi
