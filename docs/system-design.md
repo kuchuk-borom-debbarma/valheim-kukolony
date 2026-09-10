@@ -118,6 +118,8 @@ grows. To begin with:
 
 - **Storage** — a container. Configured with what belongs in it.
 - **Processing** — a smelter, kiln and their relatives. Configured with what to keep it fed.
+- **Rest** — a bed, assigned to one villager.
+- **Junk** — where things go that belong nowhere else. See *Work with nowhere to go*.
 
 A structure is a bag of capabilities, not a kind of building: whatever components it has, it
 gets those settings. Nothing enumerates kinds of building, and a new capability is a new
@@ -150,6 +152,22 @@ kind of wood — because where things go is the structures' business now.
 **Presets** are named job configurations. Assigning work to a villager means assigning a job
 and a preset, so a settlement of a dozen people is not a dozen separate configurations.
 
+### Work with nowhere to go
+
+Decided, and it is a three-stage answer because the failure has three different causes.
+
+**Refuse to start.** A job checks it has somewhere to put the result *before* it begins. A
+villager that would have nowhere to put wood does not pick the wood up; it says so and does
+something else. Most of the time this is the whole answer.
+
+**Fall back to the junk area.** A check that passed can still be wrong by the time the
+villager gets back — the space filled up while it was walking. Rather than stranding a
+carried item, it goes to the **junk area**: a registered structure that exists to be the
+answer to "nowhere else". A settlement with one has no unhandled case.
+
+**Drop it.** No junk area and nowhere to store it: put it on the ground and say so. Ugly on
+purpose. Nothing is ever destroyed and nothing is ever silently held forever.
+
 ### Beds, and rest
 
 A bed is a registered structure like any other, assigned to one villager.
@@ -157,10 +175,13 @@ A bed is a registered structure like any other, assigned to one villager.
 Work costs **energy**. A tired villager goes to its bed and sleeps — properly, with the
 animation — and comes back rested.
 
+**A bed is an upgrade, not a requirement.** A villager without one goes and idles by the
+colony piece and recovers there — far more slowly than in a bed, but it does recover. So a
+settlement can never deadlock for want of furniture; beds make it *better*, not possible.
+
 Energy is a good first need precisely because it is **self-resolving**: a villager can always
-fix it by itself, given a bed. Nothing has to be supplied, so a settlement left alone for a
-week cannot deadlock on it. Food, which needs a supply chain, is the harder case and is not
-being taken on yet.
+fix it by itself. Nothing has to be supplied, so a settlement left alone for a week cannot
+starve. Food, which needs a supply chain, is the harder case and is not being taken on yet.
 
 ### Clothing and equipment
 
@@ -217,6 +238,15 @@ Settled, with the reason.
 - **Energy first, food later.** Energy is self-resolving given a bed, so a settlement left
   alone cannot deadlock on it.
 - **Clothing and equipment stay in the code, unused for now.**
+- **A job refuses to start rather than stranding its result**, falls back to a junk area, and
+  drops on the ground only as a last resort. Nothing is destroyed, nothing is held silently.
+- **A bed is an upgrade, not a requirement.** No bed means slow recovery idling by the colony
+  piece, so a settlement cannot deadlock for want of furniture.
+- **Never infer destruction from absence.** A record is removed only on positive evidence:
+  the object was seen destroyed, or the player said so. Anything else is dormant and visible.
+  A ZDO that cannot be resolved may be destroyed *or* merely not in memory, and the two are
+  indistinguishable from the outside — including through the persistent token, which is
+  stored on the ZDO and so needs the ZDO to read it.
 
 ---
 
@@ -224,31 +254,7 @@ Settled, with the reason.
 
 Numbered so we can refer back.
 
-### 1. What does "invalid" mean, and what does removal cost?
-
-Stated: a structure out of radius or destroyed becomes invalid and is removed.
-
-**Unloaded is not destroyed, and the two look identical.** A ZDO for a chest in a zone nobody
-is standing in cannot be resolved, exactly like one that was smashed. If "cannot resolve it"
-means "remove the record", then walking away from an outpost silently deletes its
-configuration, and it comes back empty. This has already bitten this project once, in a
-persistence check that failed for four runs because an unloaded chest read as a missing one.
-
-So: what actually justifies removal? Options are that a structure is removed only when its
-ZDO is *known* destroyed, or only when the player says so, or that out-of-radius means
-dormant-and-visible rather than gone.
-
-### 2. What happens to work with nowhere to go?
-
-If a villager picks up wood and **no** registered container claims wood: does it fall back to
-any container with room, drop it, or refuse to pick it up in the first place? "Nothing
-happens" is the answer the settlement must never give silently.
-
-### 3. What happens to a villager with no bed?
-
-Energy is self-resolving *given a bed*. Without one: never tires, tires and sleeps rough,
-tires and stops working, or cannot be spawned at all. This is the "teeth" question in its
-smallest and safest form.
+### 1. *(settled — see Decisions: never infer destruction from absence)*
 
 ### 4. Does a settlement have to survive being attacked?
 
