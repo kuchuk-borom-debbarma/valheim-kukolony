@@ -57,6 +57,8 @@ Rules for state wrappers:
 - Prefix keys with `kukolony.` to stay clear of vanilla and other mods.
 - Expose reads as properties, writes as explicit `Set…` methods, so "this writes to the
   save file" is visible at the call site.
+- Never persist a raw ZDOID as durable identity. Chunked saves reassign IDs on load. Use
+  `PersistentZdoReference` and retain the runtime ID only as a validated fast-path.
 
 ## Ownership
 
@@ -155,3 +157,28 @@ Unity. Piece executors use shared ownership, registry, movement, and inventory h
 they do not duplicate container writes or station RPC contracts. Persisted pipeline pieces
 are versioned ZPackage records, never a generic JSON bag. Player-visible wording is
 "customisation"; code uses typed contracts so invalid flows cannot reach AI execution.
+
+## Benchmark code
+
+Benchmark scenarios are passive and are invoked only by `ColonyBenchmarkController`.
+They never auto-start, purge a world, launch processes, or terminate Valheim. Persistent
+fixtures must belong to the uniquely named benchmark colony, coroutine phases must be
+deadline-guarded, and new coverage follows the checklist in
+[in-game-testing.md](in-game-testing.md).
+
+## Panel layout
+
+The colony wood panel is 860x680, and every helper positions on a centre pivot, so an
+element spans `x ± width/2`. Keep elements inside `±400` to leave a visible margin: at
+`±430` copy renders on the panel edge or spills onto the world behind it. Left-aligned
+copy uses `LeftTextAt`, which pins the element to the content column and clamps its
+width, instead of a hand-tuned negative `x` that silently overflows when the string or
+font size changes.
+
+Controls sharing a row must not overlap. Rows are 30 tall, so treat any two elements
+within 30 units of the same `y` as sharing a line and give them a real gap. Player-facing
+strings come from an explicit label mapping; never render a raw enum value, which leaks
+camelCase names like `OperateStation` into the UI.
+
+Fixture names used for UI evidence must be unique across benchmark phases and short
+enough to survive list truncation, so two distinct records can never render identically.

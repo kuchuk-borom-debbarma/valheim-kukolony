@@ -98,7 +98,8 @@ Keep teleport as a rare last resort.
 
 `WorkPost` was a `Vector3`, so moving or destroying the post orphaned the villager.
 
-**Replacement:** `ZDO.Set(string, ZDOID)` / `GetZDOID` — reference the post by identity.
+**Replacement:** registered structures carry a stable token resolved to the current
+runtime ZDOID. Modern chunked saves reassign raw ZDOIDs during load.
 
 ## Outright bugs found while reading
 

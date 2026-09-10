@@ -1,6 +1,7 @@
 # Structure registry
 
-Each record contains a ZDOID, editable display name, prefab/type name, and cached capability
+Each record contains a stable persistent token, its resolved runtime ZDOID, editable
+display name, prefab/type name, and cached capability
 flags. Cached flags let search and configuration work while an object is unloaded; live
 validity is always rechecked before targeting.
 

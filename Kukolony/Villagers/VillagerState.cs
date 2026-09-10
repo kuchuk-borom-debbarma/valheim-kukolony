@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Kukolony.Core;
 using UnityEngine;
 
 namespace Kukolony.Villagers
@@ -26,6 +27,7 @@ namespace Kukolony.Villagers
         // A ZDOID occupies two ZDO slots (user id + object id), so its cached key is a
         // hash pair rather than a single hash.
         private static readonly KeyValuePair<int, int> StepTargetKey = ZDO.GetHashZDOID("kukolony.step.target");
+        private static readonly int StepTargetPersistentKey = "kukolony.step.target.persistent-id.v1".GetStableHashCode();
         private static readonly int ClaimedSinceKey = "kukolony.step.since".GetStableHashCode();
         private static readonly int ActiveItemKey = "kukolony.step.item".GetStableHashCode();
         private static readonly int QueueKey = "kukolony.queue.v2".GetStableHashCode();
@@ -61,7 +63,8 @@ namespace Kukolony.Villagers
         internal bool HasAppearance => _zdo?.GetBool(AppearanceKey, false) ?? false;
 
         /// <summary>What the current step is acting on.</summary>
-        internal ZDOID StepTarget => _zdo?.GetZDOID(StepTargetKey) ?? ZDOID.None;
+        internal ZDOID StepTarget => _zdo == null ? ZDOID.None : PersistentZdoReference.Resolve(
+            _zdo.GetString(StepTargetPersistentKey, string.Empty), _zdo.GetZDOID(StepTargetKey));
 
         internal string ActiveItem => _zdo?.GetString(ActiveItemKey, string.Empty) ?? string.Empty;
         internal int QueuePosition => _zdo?.GetInt(QueuePositionKey, 0) ?? 0;
@@ -114,6 +117,8 @@ namespace Kukolony.Villagers
         internal void SetStepTarget(ZDOID target)
         {
             _zdo.Set(StepTargetKey, target);
+            _zdo.Set(StepTargetPersistentKey, target.IsNone() ? string.Empty :
+                PersistentZdoReference.Ensure(ZDOMan.instance?.GetZDO(target)));
             _zdo.Set(ClaimedSinceKey, target.IsNone() || ZNet.instance == null
                 ? 0L
                 : (long)ZNet.instance.GetTimeSeconds());

@@ -13,6 +13,8 @@ Read these first:
 - [Job catalog](job-catalog.md) — configuration card for every concrete job.
 - [Automated testing](automated-testing.md) — required build, Steam launch, persistence,
   and screenshot path.
+- [In-game benchmark](in-game-testing.md) — manual/agent operation, architecture,
+  extension rules, artifacts, and troubleshooting.
 - [Multiplayer](multiplayer.md) and [off-screen simulation](off-screen-simulation.md) —
   ownership and zone lifetime constraints.
 - [API notes](api-notes.md) — verified game contracts.

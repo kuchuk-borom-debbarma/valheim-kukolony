@@ -13,12 +13,25 @@ namespace Kukolony.Colonies
     {
         private static readonly System.Collections.Generic.KeyValuePair<int, int> ColonyKey =
             ZDO.GetHashZDOID("kukolony.colony");
+        private static readonly int ColonyPersistentKey =
+            "kukolony.colony.persistent-id.v1".GetStableHashCode();
 
-        internal static ZDOID GetColony(ZDO memberZdo) =>
-            memberZdo?.GetZDOID(ColonyKey) ?? ZDOID.None;
+        internal static ZDOID GetColony(ZDO memberZdo)
+        {
+            if (memberZdo == null) return ZDOID.None;
+            return Core.PersistentZdoReference.Resolve(
+                memberZdo.GetString(ColonyPersistentKey, string.Empty),
+                memberZdo.GetZDOID(ColonyKey));
+        }
 
-        internal static void SetColony(ZDO memberZdo, ZDOID colony) =>
-            memberZdo?.Set(ColonyKey, colony);
+        internal static void SetColony(ZDO memberZdo, ZDOID colony)
+        {
+            if (memberZdo == null) return;
+            memberZdo.Set(ColonyKey, colony);
+            ZDO target = ZDOMan.instance?.GetZDO(colony);
+            memberZdo.Set(ColonyPersistentKey,
+                colony.IsNone() ? string.Empty : Core.PersistentZdoReference.Ensure(target));
+        }
 
         internal static bool BelongsTo(ZDO memberZdo, ZDOID colony) =>
             !colony.IsNone() && GetColony(memberZdo) == colony;

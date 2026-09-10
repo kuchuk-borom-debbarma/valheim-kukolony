@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Kukolony.Core;
 using UnityEngine;
 
 namespace Kukolony.Colonies
@@ -20,6 +21,7 @@ namespace Kukolony.Colonies
     internal sealed class StructureRecord
     {
         internal ZDOID Id;
+        internal string PersistentId;
         internal string Name;
         internal string Prefab;
         internal StructureCapability Capabilities;
@@ -47,7 +49,10 @@ namespace Kukolony.Colonies
             {
                 if (piece == null || !piece.TryGetComponent(out ZNetView view) || !view.IsValid()) continue;
                 if (!TryCapabilities(piece.gameObject, out StructureCapability capabilities)) continue;
-                found.Add(new StructureRecord { Id = view.GetZDO().m_uid, Name = DisplayName(piece.gameObject),
+                string persistentId = PersistentZdoReference.Ensure(view.GetZDO());
+                if (string.IsNullOrEmpty(persistentId)) continue;
+                found.Add(new StructureRecord { Id = view.GetZDO().m_uid, PersistentId = persistentId,
+                    Name = DisplayName(piece.gameObject),
                     Prefab = Utils.GetPrefabName(piece.gameObject), Capabilities = capabilities });
             }
             found.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));

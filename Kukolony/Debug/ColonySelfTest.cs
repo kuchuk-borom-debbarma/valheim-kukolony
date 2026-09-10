@@ -11,53 +11,26 @@ using UnityEngine;
 
 namespace Kukolony.Debug
 {
-    internal sealed class ColonySelfTest : MonoBehaviour
+    /// <summary>Functional phases invoked exclusively by ColonyBenchmarkController.</summary>
+    internal static class BenchmarkFunctionalScenario
     {
-        private const string PersistenceName = "Kukolony Acceptance Colony V13";
-        private bool _started;
+        internal const string PersistenceName = "Kukolony Benchmark Persistence V1";
+        private static readonly int RunIdKey = "kukolony.benchmark.run".GetStableHashCode();
+        private static readonly int PrimaryMemberKey =
+            "kukolony.benchmark.primary-member.v2".GetStableHashCode();
+        internal static bool LastPassed { get; private set; }
 
-        private void Update()
+        internal static IEnumerator RunFresh(string runId)
         {
-            if (ModConfig.AutoTestEnabled.Value || ModConfig.BenchmarkMode.Value)
-            {
-                Application.runInBackground = true;
-            }
-            bool enabled = ModConfig.AutoTestEnabled.Value || (ModConfig.BenchmarkMode.Value && ModConfig.BenchmarkStage.Value != "ui");
-            if (_started || !enabled || ModConfig.DebugProbeEnabled.Value ||
-                ModConfig.DebugScreenshotEnabled.Value || Player.m_localPlayer == null ||
-                ZoneSystem.instance == null || !ZoneSystem.instance.IsActiveAreaLoaded()) return;
-            _started = true;
-            StartCoroutine(Run());
-        }
-
-        private IEnumerator Run()
-        {
-            yield return new WaitForSecondsRealtime(ModConfig.BenchmarkMode.Value ? 10f : 8f);
-            Colony existing = Colony.Instances.FirstOrDefault(c => c != null && c.State.Name == PersistenceName);
-            if (existing != null) RunReload(existing);
-            else yield return RunFresh();
-            yield return new WaitForSecondsRealtime(.1f);
-            if (ModConfig.AutoTestQuitWhenDone.Value && Game.instance != null)
-            {
-                Game.instance.Logout(true, false);
-                // Game.Logout starts the profile/world save batch asynchronously.
-                // Give Steam and Valheim enough time to flush it before the runner
-                // starts the next process; the shell runner also waits for exit.
-                yield return new WaitForSecondsRealtime(8f);
-                Application.Quit();
-            }
-        }
-
-        private static IEnumerator RunFresh()
-        {
+            LastPassed = false;
             TestReport report = new TestReport("Colony acceptance run 1 - create and save");
             Vector3 origin = Player.m_localPlayer.transform.position;
-            TestWorld.Purge(origin);
             Colony colony = Spawn<Colony>(ColonyPrefab.PrefabName, origin + Vector3.forward * 4f);
             report.Check(colony != null, "colony prefab is registered");
             if (colony == null) { report.Print(); yield break; }
             colony.EnsureNamed();
             colony.State.SetName(PersistenceName);
+            SetRunId(colony, runId);
 
             GameObject chest = Spawn("piece_chest_wood", origin + Vector3.right * 7f);
             StructureRecord chestRecord = Register(colony, chest, "Main storage");
@@ -92,12 +65,13 @@ namespace Kukolony.Debug
             StructureRecord outsideRecord = MakeRecord(outside, "Outside");
             report.Check(outsideRecord != null && !colony.RegisterStructure(outsideRecord),
                 "out-of-radius structure is rejected");
+            if (outside != null) ZNetScene.instance.Destroy(outside);
             report.Check(!StructureRegistry.TryCapabilities(
                 ZNetScene.instance.GetPrefab(VillagerPrefab.PrefabName), out _),
                 "NPC is excluded from structure registration");
 
             List<ColonyJobConfig> jobs = ColonyJobCatalog.CreateDefaults();
-            jobs[0].ItemFilters.Add("Wood");
+            if (!jobs[0].ItemFilters.Contains("Wood")) jobs[0].ItemFilters.Add("Wood");
             jobs[0].Destination = chestRecord.Id;
             jobs[0].SelectedStructures.Add(chestRecord.Id);
             jobs[0].Targets = TargetMode.Selected;
@@ -124,16 +98,26 @@ namespace Kukolony.Debug
             report.Check(local != null && local.Settings.Destination == chestRecord.Id &&
                          local.Settings.SelectedStructures.Count == 1, "local preset retains exact targets");
 
+            Core.Log.Info("[Benchmark] villager spawn begin");
             Villager villager = Spawn<Villager>(VillagerPrefab.PrefabName, origin + Vector3.back * 4f);
-            // A full Valheim character rig is initialized over subsequent frames.
-            // Yield before reading its ZDO/inventory so the unattended fixture never
-            // contends with that initialization on the same main-thread frame.
-            yield return new WaitForSecondsRealtime(1f);
+            // A real player-model rig initializes over several frames. Do not touch its
+            // ZDO until the production network component reports ready.
+            int readinessChecks = 0;
+            while (villager != null && readinessChecks++ < 40)
+            {
+                if (villager.TryGetComponent(out ZNetView readyView) && readyView.IsValid() && readyView.GetZDO() != null) break;
+                yield return new WaitForSecondsRealtime(.25f);
+            }
+            Core.Log.Info("[Benchmark] villager spawn frame completed");
             ZNetView view = villager != null ? villager.GetComponent<ZNetView>() : null;
             report.Check(view != null &&
                          colony.Register(ColonyMemberKind.Villager, view), "villager joins colony");
             if (villager != null && view != null)
             {
+                SetPrimaryMember(colony, view.GetZDO().m_uid);
+                Core.Log.Info($"[Benchmark] primary villager id={view.GetZDO().m_uid} " +
+                              $"prefab={view.GetZDO().GetPrefab()} persistent={view.GetZDO().Persistent}");
+                report.Check(view.GetZDO().Persistent, "live villager ZDO is persistent");
                 VillagerState state = villager.State;
                 ColonyAssignments.SetQueue(view.GetZDO().m_uid,
                     new List<string> { jobs[0].Id, jobs[1].Id });
@@ -153,7 +137,7 @@ namespace Kukolony.Debug
 
             if (villager != null && view != null)
                 yield return CheckConcreteExecutors(report, colony, villager, origin);
-            CheckPairedControls(report, villager, origin, chestRecord.Id);
+            CheckPairedControls(report, colony, villager, origin, chestRecord.Id);
             CheckStationContracts(report);
             report.Check(Enum.GetValues(typeof(ColonyJobType)).Length == 7, "concrete job catalog is complete");
 
@@ -171,11 +155,12 @@ namespace Kukolony.Debug
                 persisted.SetRuntimePhase("acceptance-persisted");
                 persisted.SetStepTarget(chestRecord.Id);
             }
-            report.Print();
+            LastPassed = report.Print();
         }
 
-        private static void RunReload(Colony colony)
+        internal static void RunReload(Colony colony)
         {
+            LastPassed = false;
             TestReport report = new TestReport("Colony acceptance run 2 - reload");
             ColonyState state = colony.State;
             report.Check(state.Name == PersistenceName, "colony name survived save and relaunch");
@@ -187,9 +172,15 @@ namespace Kukolony.Debug
             report.Check(state.GetPresets().Count == 2, "portable and local presets survived save and relaunch");
             List<ZDOID> members = state.GetMembers(ColonyMemberKind.Villager);
             report.Check(members.Count > 0, "member list survived save and relaunch");
-            if (members.Count > 0)
+            ZDOID primary = GetPrimaryMember(colony);
+            ZDO zdo = ZDOMan.instance.GetZDO(primary);
+            List<ZDO> loadedVillagers = FindVillagerZdos();
+            Core.Log.Info($"[Benchmark] reloaded primary villager id={primary} " +
+                          $"zdo={(zdo != null ? zdo.GetPrefab().ToString() : "missing")}; " +
+                          $"loaded villager ZDOs={string.Join(",", loadedVillagers.Select(item => item.m_uid.ToString()).ToArray())}");
+            report.Check(zdo != null, "real villager ZDO survived save and relaunch");
+            if (zdo != null)
             {
-                ZDO zdo = ZDOMan.instance.GetZDO(members[0]);
                 VillagerState villager = new VillagerState(zdo);
                 report.Check(villager.GetQueue().Count == 2, "villager queue survived save and relaunch");
                 report.Check(villager.QueuePosition == 1 && villager.QueueAttempt == 1,
@@ -198,8 +189,76 @@ namespace Kukolony.Debug
                              !villager.StepTarget.IsNone(), "active target and runtime progress survived save and relaunch");
             }
             CheckStationContracts(report);
-            report.Print();
-            TestWorld.Purge(Player.m_localPlayer.transform.position);
+            LastPassed = report.Print();
+        }
+
+        internal static void PreparePersistenceSnapshot(Colony colony)
+        {
+            if (colony == null || ZDOMan.instance == null) return;
+            ZDO zdo = ZDOMan.instance.GetZDO(GetPrimaryMember(colony));
+            StructureRecord target = colony.State.GetStructures().FirstOrDefault(record => record.Name == "Renamed storage");
+            if (zdo == null || target == null) return;
+            VillagerState persisted = new VillagerState(zdo);
+            persisted.SetQueue(new List<string> { "acceptance.persistence.a", "acceptance.persistence.b" });
+            persisted.SetQueuePosition(1);
+            persisted.SetQueueAttempt(1);
+            persisted.SetQueueProgress(7);
+            persisted.SetRuntimePhase("acceptance-persisted");
+            persisted.SetStepTarget(target.Id);
+
+            // ZDOMan serializes its sector index, not its ID dictionary. Verify the
+            // production creature followed the same indexing contract as a vanilla
+            // placed object before treating a successful Save call as evidence.
+            var sectorsField = typeof(ZDOMan).GetField("m_objectsBySector",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var sectors = sectorsField?.GetValue(ZDOMan.instance) as List<ZDO>[];
+            uint sector = zdo.GetSectorIndex().Sector;
+            bool indexed = sectors != null && sector < sectors.Length &&
+                           sectors[sector] != null && sectors[sector].Contains(zdo);
+            Core.Log.Info($"[Benchmark] final villager snapshot id={zdo.m_uid} " +
+                          $"persistent={zdo.Persistent} sector={sector} indexed={indexed}");
+            if (!indexed)
+            {
+                ZDOMan.instance.AddToSector(zdo, zdo.GetSectorIndex());
+                Core.Log.Warning("Repaired missing villager sector index before save");
+            }
+            ZDOMan.instance.SetDirtySector(zdo);
+            Core.Log.Info("[Benchmark] final villager persistence snapshot written");
+        }
+
+        private static List<ZDO> FindVillagerZdos()
+        {
+            List<ZDO> result = new List<ZDO>();
+            int index = 0;
+            while (!ZDOMan.instance.GetAllZDOsWithPrefabIterative(
+                       VillagerPrefab.PrefabName, result, ref index)) { }
+            return result;
+        }
+
+        internal static bool BelongsToRun(Colony colony, string runId)
+        {
+            if (colony == null || !colony.TryGetComponent(out ZNetView view) || !view.IsValid()) return false;
+            return view.GetZDO().GetString(RunIdKey, string.Empty) == runId;
+        }
+
+        private static void SetRunId(Colony colony, string runId)
+        {
+            if (colony.TryGetComponent(out ZNetView view) && view.IsValid())
+                view.GetZDO().Set(RunIdKey, runId ?? string.Empty);
+        }
+
+        private static void SetPrimaryMember(Colony colony, ZDOID member)
+        {
+            if (colony.TryGetComponent(out ZNetView view) && view.IsValid())
+                view.GetZDO().Set(PrimaryMemberKey,
+                    Core.PersistentZdoReference.Ensure(ZDOMan.instance.GetZDO(member)));
+        }
+
+        private static ZDOID GetPrimaryMember(Colony colony)
+        {
+            if (colony == null || !colony.TryGetComponent(out ZNetView view) || !view.IsValid()) return ZDOID.None;
+            return Core.PersistentZdoReference.Resolve(
+                view.GetZDO().GetString(PrimaryMemberKey, string.Empty));
         }
 
         private static void CheckStationContracts(TestReport report)
@@ -220,6 +279,7 @@ namespace Kukolony.Debug
             // inventory. Attaching a new Container to a fully animated NPC is an
             // engine-hostile mutation and can stall the macOS player rig.
             GameObject bagObject = Spawn("piece_chest_wood", origin + Vector3.back * 7f);
+            Register(colony, bagObject, "Benchmark inventory");
             Container bagComponent = bagObject != null ? bagObject.GetComponent<Container>() : null;
             Inventory bag = bagComponent != null ? bagComponent.GetInventory() : null;
             if (bag == null)
@@ -264,20 +324,22 @@ namespace Kukolony.Debug
                 "transfer executes ownership-safe source and destination writes",
                 $"acquire={acquireActivity} bag={Count(bag, "Wood")} source={Count(source, "Wood")} slots={bag.GetEmptySlots()} size={bag.GetWidth()}x{bag.GetHeight()}");
 
-            yield return CheckStation(report, state, bag, origin, "fire_pit",
+            yield return CheckStation(report, colony, state, bag, origin, "fire_pit",
                 Job(ColonyJobType.FuelFireplaces, "Wood"), "Wood", "fuel fireplaces");
-            yield return CheckStation(report, state, bag, origin, "smelter",
+            yield return CheckStation(report, colony, state, bag, origin, "smelter",
                 Job(ColonyJobType.OperateSmelters, "CopperOre"), "CopperOre", "operate smelters");
-            yield return CheckStation(report, state, bag, origin, "charcoal_kiln",
+            yield return CheckStation(report, colony, state, bag, origin, "charcoal_kiln",
                 Job(ColonyJobType.OperateSmelters, "Wood"), "Wood", "operate charcoal kilns");
 
             GameObject cooking = Spawn("piece_cookingstation", origin + Vector3.right * 12f);
+            Register(colony, cooking, "Benchmark cooking station");
             CookingStation cookingComponent = cooking != null ? cooking.GetComponent<CookingStation>() : null;
             string cookable = FirstAllowed(cookingComponent, "RawMeat", "DeerMeat", "NeckTail", "FishRaw");
             yield return CheckStation(report, state, bag, origin, cooking,
                 Job(ColonyJobType.OperateCookingStations, cookable), cookable, "operate cooking stations");
 
             GameObject fermenter = Spawn("fermenter", origin + Vector3.right * 15f);
+            Register(colony, fermenter, "Benchmark fermenter");
             Fermenter fermenterComponent = fermenter != null ? fermenter.GetComponent<Fermenter>() : null;
             string fermentable = FirstAllowed(fermenterComponent, "BarleyWineBase", "MeadBaseHealthMinor",
                 "MeadBaseStaminaMinor", "MeadBasePoisonResist");
@@ -286,6 +348,7 @@ namespace Kukolony.Debug
 
             Clear(bag);
             GameObject hiveObject = Spawn("piece_beehive", origin + Vector3.right * 18f);
+            Register(colony, hiveObject, "Benchmark beehive");
             Beehive hive = hiveObject != null ? hiveObject.GetComponent<Beehive>() : null;
             if (hive != null) hive.m_secPerUnit = .01f;
             yield return new WaitForSecondsRealtime(1f);
@@ -327,10 +390,11 @@ namespace Kukolony.Debug
                 "deleted or invalid station target fails safely");
         }
 
-        private static IEnumerator CheckStation(TestReport report, VillagerState state, Inventory bag,
+        private static IEnumerator CheckStation(TestReport report, Colony colony, VillagerState state, Inventory bag,
             Vector3 origin, string prefab, ColonyJobConfig job, string item, string label)
         {
             GameObject target = Spawn(prefab, origin + Vector3.right * UnityEngine.Random.Range(8f, 20f));
+            Register(colony, target, "Benchmark " + prefab);
             yield return CheckStation(report, state, bag, origin, target, job, item, label);
         }
 
@@ -365,11 +429,14 @@ namespace Kukolony.Debug
             return 0;
         }
 
-        private static void CheckPairedControls(TestReport report, Villager villager, Vector3 origin, ZDOID target)
+        private static void CheckPairedControls(TestReport report, Colony colony, Villager villager,
+            Vector3 origin, ZDOID target)
         {
             bool claims = ModConfig.ClaimsEnabled.Value;
             bool keepAlive = ModConfig.KeepAliveEnabled.Value;
             Villager other = Spawn<Villager>(VillagerPrefab.PrefabName, origin + Vector3.back * 10f);
+            if (other != null && other.TryGetComponent(out ZNetView otherView))
+                colony.Register(ColonyMemberKind.Villager, otherView);
             if (villager != null) villager.State.SetStepTarget(target);
             ModConfig.ClaimsEnabled.Value = true;
             bool claimed = other != null && TargetClaims.IsClaimedByOther(target, other);
@@ -476,7 +543,7 @@ namespace Kukolony.Debug
             GameObject prefab = ZNetScene.instance.GetPrefab(prefabName);
             if (prefab == null) return null;
             position.y = ZoneSystem.instance.GetSolidHeight(position) + .2f;
-            return Instantiate(prefab, position, Quaternion.identity);
+            return UnityEngine.Object.Instantiate(prefab, position, Quaternion.identity);
         }
     }
 }

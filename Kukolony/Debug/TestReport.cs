@@ -24,6 +24,7 @@ namespace Kukolony.Debug
         }
 
         internal bool HasFailures => _failures > 0;
+        internal static string LastText { get; private set; } = string.Empty;
 
         internal void Check(bool passed, string description, string detail = null)
         {
@@ -38,7 +39,7 @@ namespace Kukolony.Debug
 
         internal void Note(string message) => _lines.Add($"  ....  {message}");
 
-        internal void Print()
+        internal bool Print()
         {
             StringBuilder builder = new StringBuilder();
             builder.AppendLine();
@@ -56,6 +57,7 @@ namespace Kukolony.Debug
                 ? "  RESULT: PASS"
                 : $"  RESULT: FAIL ({_failures} failed)");
             builder.Append("============================================================");
+            LastText = builder.ToString();
 
             if (_failures == 0)
             {
@@ -65,6 +67,7 @@ namespace Kukolony.Debug
             {
                 Log.Error(builder.ToString());
             }
+            return _failures == 0;
         }
     }
 }

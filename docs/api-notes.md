@@ -6,9 +6,11 @@ must not be enabled from guessed field names or raw station ZDO keys.
 
 ## Network and persistence
 
-`ZNetView.Awake` creates the instance ZDO. Persistent references use `ZDOID`; resolve
-them through `ZDOMan.instance.GetZDO(id)` or loaded instances through
-`ZNetScene.instance.FindInstance(id)`.
+`ZNetView.Awake` creates the instance ZDO. A `ZDOID` is a runtime address: the current
+chunked save format assigns new IDs during load. Durable cross-ZDO references therefore
+use Kukolony's stable token on the target ZDO, resolved through
+`ZDOExtraData.GetAllZDOIDsWithHash`; the resolved runtime ID can then be passed to
+`ZDOMan.instance.GetZDO` or `ZNetScene.instance.FindInstance`.
 
 ZDO typed accessors cover strings, primitives, vectors, byte arrays, and ZDOID hash pairs.
 Kukolony stores bounded versioned ZPackage payloads as base64 strings and caches stable key
@@ -87,9 +89,11 @@ A registered structure caches flags when its loaded GameObject exposes any of:
 `Beehive`. Cached capability supports unloaded UI filtering, but every actual target is
 revalidated for ZDO existence, colony radius, loaded instance, component, and ownership.
 
-## Player-model villager
+## Player-like NPC villager
 
-The custom creature is assembled through Jötunn from a vanilla humanoid/network base, with
-the player visual rig transplanted before registration. Identity, appearance decision,
-home fallback, queue/runtime, and bag state are ZDO-backed. All peers need the mod because
-ZDO ownership can transfer simulation to any nearby peer.
+The probe verified `FallenWarrior` is a genuine `Humanoid` + `MonsterAI` NPC with the
+male/female human `VisEquipment` rig. Kukolony clones that prefab and removes event-only
+drop, dialogue, and naming components. It never adds or clones `Player`,
+`PlayerController`, or `Skills`. Identity, appearance decision, home fallback,
+queue/runtime, and bag state are ZDO-backed. All peers need the mod because ZDO ownership
+can transfer simulation to any nearby peer.

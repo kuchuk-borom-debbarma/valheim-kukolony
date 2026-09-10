@@ -28,14 +28,15 @@ the game's Doorstop/BepInEx runtime come from
 ## Automated acceptance
 
 ```sh
-./scripts/run-colony-acceptance.sh
+./scripts/in-game-test.sh
 ```
 
 The script builds the solution, verifies the installed Doorstop matches the pinned pack,
-launches Valheim through Steam twice for save/relaunch persistence, launches it again for
-UI capture, checks the reports and expected PNGs, and copies evidence to
+launches Valheim through Steam twice for save/relaunch persistence, captures UI during the
+create run, checks the reports and expected PNGs, and copies evidence to
 `~/Desktop/kukolony`. Debug features are config-gated and off by default.
 
 Start with [current features](features.md), [colonies](docs/colonies.md),
 [structure registry](docs/structure-registry.md), [jobs](docs/jobs.md),
-[job catalog](docs/job-catalog.md), and [automated testing](docs/automated-testing.md).
+[job catalog](docs/job-catalog.md), [automated testing](docs/automated-testing.md), and the
+[in-game benchmark reference](docs/in-game-testing.md).

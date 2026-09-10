@@ -33,7 +33,7 @@ namespace Kukolony.Debug
             _done = true;
             Probe();
 
-            if (ModConfig.AutoTestQuitWhenDone.Value)
+            if (ModConfig.BenchmarkAutoExit.Value)
             {
                 Log.Info("[Probe] done - quitting.");
                 Application.Quit();
@@ -49,6 +49,8 @@ namespace Kukolony.Debug
             ReportVisEquipmentRigs(prefabs);
             ReportRandomisedHumanoids(prefabs);
             ReportComponents(prefabs, "Dverger");
+            ReportComponents(prefabs, "FallenWarrior");
+            ReportComponents(prefabs, "ShadowPerson");
             ReportSmallPieces(prefabs);
             ReportStationContracts(prefabs);
         }

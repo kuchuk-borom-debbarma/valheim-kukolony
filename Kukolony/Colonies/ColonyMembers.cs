@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Kukolony.Core;
 
 namespace Kukolony.Colonies
 {
@@ -20,10 +21,12 @@ namespace Kukolony.Colonies
             List<ZDOID> list = new List<ZDOID>(ids);
 
             ZPackage package = new ZPackage();
+            package.Write(2);
             package.Write(list.Count);
             foreach (ZDOID id in list)
             {
                 package.Write(id);
+                package.Write(PersistentZdoReference.Ensure(ZDOMan.instance?.GetZDO(id)));
             }
 
             return package.GetBase64();
@@ -40,6 +43,7 @@ namespace Kukolony.Colonies
             try
             {
                 ZPackage package = new ZPackage(encoded);
+                if (package.ReadInt() != 2) return result;
                 int count = package.ReadInt();
                 if (count < 0 || count > MaxMembers)
                 {
@@ -49,7 +53,10 @@ namespace Kukolony.Colonies
 
                 for (int i = 0; i < count; i++)
                 {
-                    result.Add(package.ReadZDOID());
+                    ZDOID saved = package.ReadZDOID();
+                    string persistentId = package.ReadString();
+                    ZDOID resolved = PersistentZdoReference.Resolve(persistentId, saved);
+                    if (!resolved.IsNone()) result.Add(resolved);
                 }
             }
             catch (System.Exception e)

@@ -29,8 +29,7 @@ namespace Kukolony
         private void Awake()
         {
             ModConfig.Bind(Config);
-            if (ModConfig.AutoTestEnabled.Value || ModConfig.DebugProbeEnabled.Value ||
-                ModConfig.DebugScreenshotEnabled.Value)
+            if (ModConfig.BenchmarkMode.Value || ModConfig.DebugProbeEnabled.Value)
             {
                 Application.runInBackground = true;
             }
@@ -46,9 +45,8 @@ namespace Kukolony
             gameObject.AddComponent<Debug.DebugHotkeys>();
             gameObject.AddComponent<Debug.AutoBoot>();
             gameObject.AddComponent<Debug.PrefabProbe>();
-            gameObject.AddComponent<Debug.ColonySelfTest>();
+            gameObject.AddComponent<Debug.ColonyBenchmarkController>();
             gameObject.AddComponent<Debug.DedicatedServerProbe>();
-            gameObject.AddComponent<Debug.PanelScreenshot>();
 
             Log.Info($"{ModInfo.Name} {ModInfo.Version} loaded");
         }

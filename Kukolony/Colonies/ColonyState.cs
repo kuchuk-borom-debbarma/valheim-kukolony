@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Kukolony.Core;
 using Kukolony.Jobs;
 
 namespace Kukolony.Colonies
@@ -39,10 +40,17 @@ namespace Kukolony.Colonies
             try
             {
                 ZPackage p = new ZPackage(encoded);
-                if (p.ReadInt() != 2) return result;
+                if (p.ReadInt() != 3) return result;
                 int count = p.ReadInt();
                 if (count < 0 || count > 4096) return result;
-                for (int i = 0; i < count; i++) result.Add(new StructureRecord { Id = p.ReadZDOID(), Name = p.ReadString(), Prefab = p.ReadString(), Capabilities = (StructureCapability)p.ReadInt() });
+                for (int i = 0; i < count; i++)
+                {
+                    ZDOID saved = p.ReadZDOID();
+                    string persistentId = p.ReadString();
+                    result.Add(new StructureRecord { Id = PersistentZdoReference.Resolve(persistentId, saved),
+                        PersistentId = persistentId, Name = p.ReadString(), Prefab = p.ReadString(),
+                        Capabilities = (StructureCapability)p.ReadInt() });
+                }
             }
             catch (System.Exception e) { Core.Log.Warning("[colony] invalid structure registry: " + e.Message); }
             return result;
@@ -50,8 +58,15 @@ namespace Kukolony.Colonies
 
         internal void SetStructures(List<StructureRecord> records)
         {
-            ZPackage p = new ZPackage(); p.Write(2); p.Write(records.Count);
-            foreach (StructureRecord r in records) { p.Write(r.Id); p.Write(r.Name ?? string.Empty); p.Write(r.Prefab ?? string.Empty); p.Write((int)r.Capabilities); }
+            ZPackage p = new ZPackage(); p.Write(3); p.Write(records.Count);
+            foreach (StructureRecord r in records)
+            {
+                ZDO zdo = ZDOMan.instance?.GetZDO(r.Id);
+                string persistentId = !string.IsNullOrEmpty(r.PersistentId)
+                    ? r.PersistentId : PersistentZdoReference.Ensure(zdo);
+                p.Write(r.Id); p.Write(persistentId); p.Write(r.Name ?? string.Empty);
+                p.Write(r.Prefab ?? string.Empty); p.Write((int)r.Capabilities);
+            }
             _zdo.Set(StructuresKey, p.GetBase64());
         }
 
@@ -59,7 +74,7 @@ namespace Kukolony.Colonies
         {
             List<ColonyJobConfig> result = new List<ColonyJobConfig>(); string encoded = _zdo?.GetString(JobsKey, string.Empty) ?? string.Empty;
             if (string.IsNullOrEmpty(encoded)) return result;
-            try { ZPackage p = new ZPackage(encoded); int version=p.ReadInt(); if (version != 2 && version != 3) return result; int count = p.ReadInt(); if (count < 0 || count > 512) return result;
+            try { ZPackage p = new ZPackage(encoded); int version=p.ReadInt(); if (version != 4) return result; int count = p.ReadInt(); if (count < 0 || count > 512) return result;
                 for (int i = 0; i < count; i++) result.Add(ReadJob(p, version)); }
             catch (System.Exception e) { Core.Log.Warning("[colony] invalid job registry: " + e.Message); }
             return result;
@@ -67,7 +82,7 @@ namespace Kukolony.Colonies
 
         internal void SetJobs(List<ColonyJobConfig> jobs)
         {
-            ZPackage p = new ZPackage(); p.Write(3); p.Write(jobs.Count);
+            ZPackage p = new ZPackage(); p.Write(4); p.Write(jobs.Count);
             foreach (ColonyJobConfig j in jobs) WriteJob(p, j);
             _zdo.Set(JobsKey, p.GetBase64());
         }
@@ -86,7 +101,7 @@ namespace Kukolony.Colonies
             try
             {
                 ZPackage p = new ZPackage(encoded);
-                int version=p.ReadInt(); if (version != 2 && version != 3) return result;
+                int version=p.ReadInt(); if (version != 4) return result;
                 int count = p.ReadInt();
                 if (count < 0 || count > 512) return result;
                 for (int i = 0; i < count; i++)
@@ -98,7 +113,7 @@ namespace Kukolony.Colonies
 
         internal void SetPresets(List<JobPreset> presets)
         {
-            ZPackage p = new ZPackage(); p.Write(3); p.Write(presets.Count);
+            ZPackage p = new ZPackage(); p.Write(4); p.Write(presets.Count);
             foreach (JobPreset preset in presets)
             {
                 p.Write(preset.Name ?? string.Empty);
@@ -116,8 +131,8 @@ namespace Kukolony.Colonies
                 Type = (ColonyJobType)p.ReadInt(),
                 Name = p.ReadString(),
                 Targets = (TargetMode)p.ReadInt(),
-                Source = p.ReadZDOID(),
-                Destination = p.ReadZDOID(),
+                Source = ReadReference(p, version),
+                Destination = ReadReference(p, version),
                 StockLimit = p.ReadInt(),
                 Count = p.ReadInt(),
                 Reservations = p.ReadBool(),
@@ -126,7 +141,7 @@ namespace Kukolony.Colonies
             };
             int structures = p.ReadInt();
             if (structures < 0 || structures > 4096) throw new System.IO.InvalidDataException("invalid target count");
-            for (int i = 0; i < structures; i++) job.SelectedStructures.Add(p.ReadZDOID());
+            for (int i = 0; i < structures; i++) job.SelectedStructures.Add(ReadReference(p, version));
             int filters = p.ReadInt();
             if (filters < 0 || filters > 4096) throw new System.IO.InvalidDataException("invalid filter count");
             for (int i = 0; i < filters; i++) job.ItemFilters.Add(p.ReadString());
@@ -143,13 +158,27 @@ namespace Kukolony.Colonies
         private static void WriteJob(ZPackage p, ColonyJobConfig job)
         {
             p.Write(job.Id ?? string.Empty); p.Write((int)job.Type); p.Write(job.Name ?? string.Empty);
-            p.Write((int)job.Targets); p.Write(job.Source); p.Write(job.Destination);
+            p.Write((int)job.Targets); WriteReference(p, job.Source); WriteReference(p, job.Destination);
             p.Write(job.StockLimit); p.Write(System.Math.Max(1, job.Count)); p.Write(job.Reservations);
             p.Write(job.SearchRadius); p.Write(job.StopDistance);
-            p.Write(job.SelectedStructures.Count); foreach (ZDOID id in job.SelectedStructures) p.Write(id);
+            p.Write(job.SelectedStructures.Count); foreach (ZDOID id in job.SelectedStructures) WriteReference(p, id);
             p.Write(job.ItemFilters.Count); foreach (string item in job.ItemFilters) p.Write(item ?? string.Empty);
             List<JobPiece> pieces = job.Pieces.Count == 0 ? JobPipeline.For(job.Type) : job.Pieces;
             p.Write(pieces.Count); foreach (JobPiece piece in pieces) { p.Write((int)piece.Kind); p.Write((int)piece.Capability); }
+        }
+
+        private static ZDOID ReadReference(ZPackage package, int version)
+        {
+            ZDOID saved = package.ReadZDOID();
+            string persistentId = version >= 4 ? package.ReadString() : string.Empty;
+            return PersistentZdoReference.Resolve(persistentId, saved);
+        }
+
+        private static void WriteReference(ZPackage package, ZDOID id)
+        {
+            package.Write(id);
+            package.Write(id.IsNone() ? string.Empty :
+                PersistentZdoReference.Ensure(ZDOMan.instance?.GetZDO(id)));
         }
 
         internal List<ZDOID> GetMembers(ColonyMemberKind kind) =>

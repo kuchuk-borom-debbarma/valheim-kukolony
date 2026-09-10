@@ -6,6 +6,7 @@ The placed Colony Hearth is the persistent root. Its ZDO stores the colony name,
 membership, versioned structure records, edited concrete jobs, and presets. System defaults
 are code-owned. Each villager ZDO stores its queue, queue position, consumed count, active
 target, runtime phase/progress, identity, home fallback, and persistent bag inventory.
+Cross-ZDO links use stable tokens because chunked saves reassign runtime ZDOIDs on reload.
 
 Structures are discovered through the Piece registry and register only when they are
 network-backed, supported, and inside the colony's live radius. Records remain visible when
@@ -53,14 +54,14 @@ The installed Doorstop library must match that pack and must not carry macOS qua
 Run:
 
 ```sh
-./scripts/run-colony-acceptance.sh
+./scripts/in-game-test.sh
 ```
 
 It verifies the pinned runtime, builds the solution, launches through Steam, performs the
 two-run save/relaunch checks, then runs the in-game screenshot harness. Reports and PNGs
 are copied to `~/Desktop/kukolony`. Debug settings are restored on exit.
 
-The runner pins the dedicated local `KukolonyJobs` save. The acceptance report covers
+The runner pins the dedicated local `KukolonyBenchmark` save. The acceptance report covers
 registry eligibility/status/search/sorting, seven persisted
 job configs, portable/local target behavior, queue result/count/loop semantics, actual
 inventory/RPC executor calls, full and invalid targets, claims and keep-alive paired
@@ -73,7 +74,7 @@ member pagination/detail, jobs/configuration, target picker, and preset applicat
 - Only the current owner writes; shared station mutation uses vanilla RPCs.
 - AI has no async/tasks and no behavior coroutines.
 - World queries use game registries, not broad physics scans.
-- Keep dependencies inward and avoid premature generic job abstractions.
+- Keep dependencies inward; shared job pieces earn helpers from demonstrated concrete jobs.
 - Test/debug features remain off by default and operate only in the dedicated test world.
 - Build and launch exactly through the documented solution/Steam path.
 

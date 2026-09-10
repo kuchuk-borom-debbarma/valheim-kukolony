@@ -32,7 +32,7 @@ namespace Kukolony.Debug
 
         private void Update()
         {
-            if ((!ModConfig.AutoTestEnabled.Value && !ModConfig.BenchmarkMode.Value) || _alreadyBooted)
+            if (!(ModConfig.BenchmarkMode.Value && ModConfig.BenchmarkAutoBoot.Value) || _alreadyBooted)
             {
                 return;
             }
@@ -64,7 +64,7 @@ namespace Kukolony.Debug
             Log.Info($"[AutoBoot] characters: {Describe(profiles.Select(p => p.GetName()))}");
             Log.Info($"[AutoBoot] worlds: {Describe(worlds.Select(w => w.m_name))}");
 
-            PlayerProfile profile = Select(profiles, ModConfig.AutoTestCharacter.Value, p => p.GetName());
+            PlayerProfile profile = Select(profiles, ModConfig.BenchmarkCharacter.Value, p => p.GetName());
             World world = ResolveWorld(worlds);
 
             if (profile == null || world == null)
@@ -89,7 +89,7 @@ namespace Kukolony.Debug
         /// </summary>
         private static World ResolveWorld(List<World> worlds)
         {
-            string wanted = ModConfig.AutoTestWorld.Value;
+            string wanted = ModConfig.BenchmarkWorld.Value;
             if (string.IsNullOrEmpty(wanted))
             {
                 return worlds.Count > 0 ? worlds[0] : null;

@@ -98,6 +98,17 @@ namespace Kukolony.Gui
             { _selectedMember = members[index]; _tab = Tab.Members; Refresh(); }
         }
 
+        /// <summary>
+        ///     Selects an exact member so UI evidence shows a chosen fixture rather than
+        ///     whichever member happens to sort first.
+        /// </summary>
+        internal void ShowMemberDetailForTest(ZDOID member)
+        {
+            List<ZDOID> members = _colony?.State.GetMembers(ColonyMemberKind.Villager);
+            if (members != null && members.Contains(member))
+            { _selectedMember = member; _tab = Tab.Members; Refresh(); }
+        }
+
         internal void ShowJobForTest(int index)
         {
             List<ColonyJobConfig> jobs = _colony?.State.GetEffectiveJobs();
@@ -143,11 +154,11 @@ namespace Kukolony.Gui
                 "search structures", 24, 360, 30).GetComponent<InputField>();
             search.text = _search;
             search.onEndEdit.AddListener(value => { _search = value; _page = 0; Refresh(); });
-            AddButton(_content.transform, "Register nearby", 155, -155, 160, () =>
+            AddButton(_content.transform, "Register nearby", 115, -155, 150, () =>
             { ColonyOperations.RegisterDiscovered(_colony); Refresh(); });
-            AddButton(_content.transform, "Sort: " + _sort, 285, -155, 100, () =>
+            AddButton(_content.transform, "Sort: " + _sort, 250, -155, 100, () =>
             { _sort = (StructureSort)(((int)_sort + 1) % 4); Refresh(); });
-            AddButton(_content.transform, "Filter: " + CapabilityName(_capabilityFilter), 375, -155, 85, () =>
+            AddButton(_content.transform, "Filter: " + CapabilityName(_capabilityFilter), 355, -155, 90, () =>
             { _capabilityFilter = NextCapability(_capabilityFilter); _page = 0; Refresh(); });
 
             List<StructureRecord> records = ColonyOperations.FilterStructures(_colony, _search,
@@ -167,8 +178,8 @@ namespace Kukolony.Gui
                 { _colony.RemoveStructure(record.Id); Refresh(); });
             }
             Pager(records.Count);
-            TextAt(_content.transform, $"{records.Count} registered • radius {_colony.EffectiveRadius:F0}m",
-                -250, -570, 14, 320, TextAnchor.MiddleLeft, Color.gray);
+            LeftTextAt(_content.transform, $"{records.Count} registered • radius {_colony.EffectiveRadius:F0}m",
+                -570, 14, 320, Color.gray);
         }
 
         private void BuildMembers()
@@ -209,26 +220,28 @@ namespace Kukolony.Gui
             ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(_selectedMember) : null;
             VillagerState state = new VillagerState(zdo);
             AddButton(_content.transform, "← Members", -315, -160, 140, () => { _selectedMember=ZDOID.None; Refresh(); });
-            TextAt(_content.transform, ColonyAssignments.NameOf(_selectedMember), -120, -160, 22, 280, TextAnchor.MiddleLeft);
-            TextAt(_content.transform, "Current activity: " + ColonyAssignments.DescribeActivity(_selectedMember),
-                -250, -210, 15, 560, TextAnchor.MiddleLeft, Color.gray);
+            TextAt(_content.transform, ColonyAssignments.NameOf(_selectedMember), -20, -160, 22, 400, TextAnchor.MiddleLeft);
+            LeftTextAt(_content.transform, "Current activity: " + ColonyAssignments.DescribeActivity(_selectedMember),
+                -210, 15, 560, Color.gray);
             List<string> queue = state.GetQueue();
-            TextAt(_content.transform, "Queue", -300, -255, 18, 160, TextAnchor.MiddleLeft);
+            LeftTextAt(_content.transform, "Queue", -255, 18, 160);
             List<ColonyJobConfig> jobs = _colony.State.GetEffectiveJobs();
             for (int i=0; i<queue.Count && i<6; i++)
             {
                 ColonyJobConfig queued = jobs.Find(j => j.Id == queue[i]);
-                TextAt(_content.transform, $"{i+1}. {(queued != null ? queued.Name : "(missing job)")}",
-                    -220, -295-i*38, 15, 420, TextAnchor.MiddleLeft,
+                LeftTextAt(_content.transform, $"{i+1}. {(queued != null ? queued.Name : "(missing job)")}",
+                    -295-i*38, 15, 420,
                     i == state.QueuePosition ? GUIManager.Instance.ValheimOrange : Color.white);
             }
-            int x=-300;
-            foreach (ColonyJobConfig job in jobs)
+            for (int i = 0; i < jobs.Count; i++)
             {
+                ColonyJobConfig job = jobs[i];
                 ColonyJobConfig captured=job;
-                AddButton(_content.transform, "+ "+Short(job.Name,15), x, -555, 130,
+                int row = i / 4;
+                int column = i % 4;
+                AddButton(_content.transform, "+ " + QueueButtonName(job), -270 + column * 180,
+                    -535 - row * 40, 155,
                     () => { ColonyAssignments.AppendJob(_selectedMember, captured.Id); Refresh(); });
-                x += 140; if (x > 300) break;
             }
             AddButton(_content.transform, "Clear queue", 300, -600, 130,
                 () => { ColonyAssignments.SetQueue(_selectedMember, new List<string>()); Refresh(); });
@@ -238,11 +251,11 @@ namespace Kukolony.Gui
         {
             List<ColonyJobConfig> jobs = _colony.State.GetEffectiveJobs();
             if (_selectedJob != null) { BuildJobCard(jobs); return; }
-            AddButton(_content.transform, _showPresets ? "Configured jobs" : "Saved presets", 300, -155, 160,
+            AddButton(_content.transform, _showPresets ? "Configured jobs" : "Saved presets", 310, -160, 160,
                 () => { _showPresets = !_showPresets; _page = 0; Refresh(); });
             if (_showPresets) { BuildPresets(jobs); return; }
-            TextAt(_content.transform, "Configured jobs", -290, -160, 18, 240, TextAnchor.MiddleLeft);
-            AddButton(_content.transform, "New pipeline", 170, -160, 140, () =>
+            LeftTextAt(_content.transform, "Configured jobs", -160, 18, 240);
+            AddButton(_content.transform, "New pipeline", 150, -160, 140, () =>
             {
                 ColonyJobConfig created = new ColonyJobConfig { Name = "New job", Type = ColonyJobType.HaulLoose };
                 created.Pieces.Add(new JobPiece { Kind = JobPieceKind.Start });
@@ -259,14 +272,14 @@ namespace Kukolony.Gui
                 AddButton(_content.transform, "Configure", 310, -210-row*48, 130, () => { _selectedJob=job; Refresh(); });
             }
             Pager(jobs.Count);
-            TextAt(_content.transform, $"{_colony.State.GetPresets().Count} saved presets",
-                -285, -555, 14, 260, TextAnchor.MiddleLeft, Color.gray);
+            LeftTextAt(_content.transform, $"{_colony.State.GetPresets().Count} saved presets",
+                -555, 14, 260, Color.gray);
         }
 
         private void BuildPresets(List<ColonyJobConfig> jobs)
         {
             List<JobPreset> presets = _colony.State.GetPresets();
-            TextAt(_content.transform, "Saved presets", -290, -160, 18, 240, TextAnchor.MiddleLeft);
+            LeftTextAt(_content.transform, "Saved presets", -160, 18, 240);
             int start = _page * Rows;
             for (int row = 0; row < Rows && start + row < presets.Count; row++)
             {
@@ -283,8 +296,8 @@ namespace Kukolony.Gui
                 });
             }
             Pager(presets.Count);
-            TextAt(_content.transform, "Portable presets can be reused without stale ZDO targets.",
-                -260, -555, 14, 520, TextAnchor.MiddleLeft, Color.gray);
+            LeftTextAt(_content.transform, "Portable presets can be reused without stale ZDO targets.",
+                -555, 14, 520, Color.gray);
         }
 
         private void BuildJobCard(List<ColonyJobConfig> jobs)
@@ -294,21 +307,23 @@ namespace Kukolony.Gui
             InputField jobName = InputAt(_content.transform, _selectedJob.Name, -110, -160, 330);
             jobName.onEndEdit.AddListener(value => { if (!string.IsNullOrWhiteSpace(value)) _selectedJob.Name=value.Trim(); SaveJobs(jobs); });
             bool valid = JobPipeline.IsValid(_selectedJob, out string validation);
-            TextAt(_content.transform, valid ? "Pipeline valid — compatible customisation auto-connects." : validation,
-                -250, -215, 14, 590, TextAnchor.MiddleLeft, valid ? Color.green : Color.red);
-            TextAt(_content.transform, "Pieces: " + string.Join(" → ", _selectedJob.Pieces.ConvertAll(piece => piece.Kind.ToString()).ToArray()), -250, -242, 13, 590, TextAnchor.MiddleLeft, Color.gray);
+            LeftTextAt(_content.transform, valid ? "Pipeline valid — compatible customisation auto-connects." : validation,
+                -215, 14, 590, valid ? Color.green : Color.red);
+            LeftTextAt(_content.transform, "Pieces: " + string.Join(" → ",
+                _selectedJob.Pieces.ConvertAll(piece => PieceLabel(piece.Kind)).ToArray()),
+                -242, 12, 650, Color.gray);
             AddButton(_content.transform, "Duplicate", 310, -160, 110, () => { ColonyJobConfig copy=_selectedJob.Clone(true); copy.Id=System.Guid.NewGuid().ToString("N"); copy.Name += " copy"; jobs.Add(copy); SaveJobs(jobs); });
-            TextAt(_content.transform, "Targets: " + _selectedJob.Targets, -250, -275, 16, 420, TextAnchor.MiddleLeft);
+            LeftTextAt(_content.transform, "Targets: " + _selectedJob.Targets, -275, 16, 420);
             AddButton(_content.transform, "Target mode", 270, -255, 150, () =>
             { _selectedJob.Targets=(TargetMode)(((int)_selectedJob.Targets+1)%3); SaveJobs(jobs); });
-            TextAt(_content.transform, $"Count: {_selectedJob.Count}", -250, -305, 16, 180, TextAnchor.MiddleLeft);
+            LeftTextAt(_content.transform, $"Count: {_selectedJob.Count}", -305, 16, 180);
             AddButton(_content.transform, "−", -80, -305, 45, () => { _selectedJob.Count=Mathf.Max(1,_selectedJob.Count-1); SaveJobs(jobs); });
             AddButton(_content.transform, "+", -25, -305, 45, () => { _selectedJob.Count++; SaveJobs(jobs); });
-            TextAt(_content.transform, $"Stock limit: {_selectedJob.StockLimit}", 100, -305, 16, 220, TextAnchor.MiddleLeft);
+            TextAt(_content.transform, $"Stock limit: {_selectedJob.StockLimit}", 115, -305, 16, 220, TextAnchor.MiddleLeft);
             AddButton(_content.transform, "−", 300, -305, 45, () => { _selectedJob.StockLimit=Mathf.Max(0,_selectedJob.StockLimit-1); SaveJobs(jobs); });
             AddButton(_content.transform, "+", 355, -305, 45, () => { _selectedJob.StockLimit++; SaveJobs(jobs); });
-            TextAt(_content.transform, "Items: " + (_selectedJob.ItemFilters.Count == 0 ? "any" : string.Join(", ", _selectedJob.ItemFilters)),
-                -250, -360, 15, 560, TextAnchor.MiddleLeft, Color.gray);
+            LeftTextAt(_content.transform, "Items: " + (_selectedJob.ItemFilters.Count == 0 ? "any" : string.Join(", ", _selectedJob.ItemFilters)),
+                -360, 15, 400, Color.gray);
             InputField items = InputAt(_content.transform, string.Join(",", _selectedJob.ItemFilters), 170, -360, 300);
             items.onEndEdit.AddListener(value =>
             {
@@ -316,15 +331,15 @@ namespace Kukolony.Gui
                 foreach (string item in value.Split(',')) if (!string.IsNullOrWhiteSpace(item)) _selectedJob.ItemFilters.Add(item.Trim());
                 SaveJobs(jobs);
             });
-            TextAt(_content.transform, "Selected structures: " + _selectedJob.SelectedStructures.Count,
-                -250, -405, 15, 360, TextAnchor.MiddleLeft, Color.gray);
+            LeftTextAt(_content.transform, "Selected structures: " + _selectedJob.SelectedStructures.Count,
+                -405, 15, 360, Color.gray);
             AddButton(_content.transform, "Choose targets", 210, -405, 180,
                 () => { _showTargetPicker = true; _search = string.Empty; _page = 0; Refresh(); });
             AddButton(_content.transform, "Source: " + Short(StructureName(_selectedJob.Source), 16), -195, -445, 250,
                 () => { _selectedJob.Source = NextStructure(_selectedJob.Source, StructureCapability.Container); SaveJobs(jobs); });
-            AddButton(_content.transform, "Destination: " + Short(StructureName(_selectedJob.Destination), 16), 120, -445, 280,
+            AddButton(_content.transform, "Destination: " + Short(StructureName(_selectedJob.Destination), 16), 110, -445, 270,
                 () => { _selectedJob.Destination = NextStructure(_selectedJob.Destination, StructureCapability.Container); SaveJobs(jobs); });
-            AddButton(_content.transform, _selectedJob.Reservations ? "Reservations: on" : "Reservations: off", 330, -445, 150,
+            AddButton(_content.transform, _selectedJob.Reservations ? "Reservations: on" : "Reservations: off", 325, -445, 150,
                 () => { _selectedJob.Reservations = !_selectedJob.Reservations; SaveJobs(jobs); });
             TextAt(_content.transform, $"Search: {_selectedJob.SearchRadius:F0}m", -255, -485, 16, 150, TextAnchor.MiddleLeft);
             AddButton(_content.transform, "−", -130, -485, 45, () => { _selectedJob.SearchRadius=Mathf.Max(4,_selectedJob.SearchRadius-4); SaveJobs(jobs); });
@@ -336,15 +351,15 @@ namespace Kukolony.Gui
                 () => { ColonyOperations.SavePreset(_colony, _selectedJob.Name+" portable", _selectedJob, false); Refresh(); });
             AddButton(_content.transform, "Save local preset", 150, -530, 220,
                 () => { ColonyOperations.SavePreset(_colony, _selectedJob.Name+" local", _selectedJob, true); Refresh(); });
-            TextAt(_content.transform, "Portable presets omit exact structure IDs; local presets retain them.",
-                -250, -575, 14, 590, TextAnchor.MiddleLeft, Color.gray);
+            LeftTextAt(_content.transform, "Portable presets omit exact structure IDs; local presets retain them.",
+                -575, 14, 590, Color.gray);
         }
 
         private void BuildTargetPicker(List<ColonyJobConfig> jobs)
         {
             StructureCapability required = ColonyJobCatalog.RequiredCapability(_selectedJob.Type);
             AddButton(_content.transform, "← Job", -330, -160, 110, () => { _showTargetPicker=false; Refresh(); });
-            TextAt(_content.transform, "Choose " + CapabilityName(required) + " targets", -135, -160, 20, 370, TextAnchor.MiddleLeft);
+            TextAt(_content.transform, "Choose " + CapabilityName(required) + " targets", -60, -160, 20, 420, TextAnchor.MiddleLeft);
             InputField search = InputAt(_content.transform, _search, -110, -205, 420);
             search.onEndEdit.AddListener(value => { _search=value; _page=0; Refresh(); });
             AddButton(_content.transform, "Sort: " + _sort, 285, -205, 130,
@@ -409,6 +424,38 @@ namespace Kukolony.Gui
             return next > (int)StructureCapability.BeeHive ? StructureCapability.None : (StructureCapability)next;
         }
         private static string CapabilityName(StructureCapability capability) => capability == StructureCapability.None ? "All" : capability.ToString();
+        private static string QueueButtonName(ColonyJobConfig job)
+        {
+            switch (job.Type)
+            {
+                case ColonyJobType.HaulLoose: return "Haul";
+                case ColonyJobType.Transfer: return "Transfer";
+                case ColonyJobType.FuelFireplaces: return "Fireplaces";
+                case ColonyJobType.OperateSmelters: return job.Name.IndexOf("kiln", System.StringComparison.OrdinalIgnoreCase) >= 0 ? "Kilns" : "Smelters";
+                case ColonyJobType.OperateCookingStations: return "Cooking";
+                case ColonyJobType.OperateFermenters: return "Fermenters";
+                case ColonyJobType.CollectBeehives: return "Beehives";
+                default: return Short(job.Name, 12);
+            }
+        }
+        private static string PieceLabel(JobPieceKind kind)
+        {
+            switch (kind)
+            {
+                case JobPieceKind.Start: return "Start";
+                case JobPieceKind.StopAtStockLimit: return "Limit";
+                case JobPieceKind.FindLooseItem: return "Find item";
+                case JobPieceKind.SelectSource: return "Pick source";
+                case JobPieceKind.SelectTarget: return "Pick target";
+                case JobPieceKind.MoveToTarget: return "Move";
+                case JobPieceKind.PickUp: return "Pick up";
+                case JobPieceKind.TakeItem: return "Take";
+                case JobPieceKind.PutItem: return "Store";
+                case JobPieceKind.OperateStation: return "Operate";
+                case JobPieceKind.End: return "End";
+                default: return kind.ToString();
+            }
+        }
         private static Button AddButton(Transform parent,string text,float x,float y,float width,UnityEngine.Events.UnityAction action)
         {
             Button button=GUIManager.Instance.CreateButton(text,parent,new Vector2(.5f,1),new Vector2(.5f,1),new Vector2(x,y),width,30).GetComponent<Button>();
@@ -420,6 +467,18 @@ namespace Kukolony.Gui
                 new Vector2(x,y), InputField.ContentType.Standard, string.Empty, 16, width, 30).GetComponent<InputField>();
             input.text = value ?? string.Empty;
             return input;
+        }
+        /// <summary>
+        ///     Left edge of the panel's content column. The wood panel is 860 wide, so a
+        ///     centre-pivoted element may not extend past ±430; this keeps a visible margin.
+        /// </summary>
+        private const float ContentLeft = -400f;
+        private const float ContentWidth = 800f;
+        /// <summary>Places left-aligned copy on the content column so it cannot spill outside the panel.</summary>
+        private static Text LeftTextAt(Transform parent,string text,float y,int size,float width,Color? colour=null)
+        {
+            float clamped = Mathf.Min(width, ContentWidth);
+            return TextAt(parent, text, ContentLeft + clamped / 2f, y, size, clamped, TextAnchor.MiddleLeft, colour);
         }
         private static Text TextAt(Transform parent,string text,float x,float y,int size,float width,
             TextAnchor anchor=TextAnchor.MiddleCenter,Color? colour=null)

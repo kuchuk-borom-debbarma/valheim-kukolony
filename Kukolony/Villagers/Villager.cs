@@ -158,6 +158,15 @@ namespace Kukolony.Villagers
                 return false;
             }
 
+            // CustomCreature registration may rebuild parts of the network prefab after
+            // our template configuration. Persistence is a property of the live ZDO, so
+            // enforce it at the boundary that actually matters for save/unload behavior.
+            if (_nview.IsValid() && _nview.GetZDO() != null && !_nview.GetZDO().Persistent)
+            {
+                _nview.GetZDO().Persistent = true;
+                Log.Warning("Corrected non-persistent villager ZDO created by the prefab pipeline");
+            }
+
             TryGetComponent(out _visEquipment);
             return true;
         }

@@ -28,7 +28,7 @@ A villager stores an ordered list of colony job IDs and independently persists:
 
 - queue position;
 - consumed attempt count for the current entry;
-- active target ZDOID;
+- active target stable identity plus its current runtime ZDOID;
 - runtime phase and progress;
 - active item metadata.
 

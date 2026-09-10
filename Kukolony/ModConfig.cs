@@ -45,29 +45,19 @@ namespace Kukolony
         internal static ConfigEntry<bool> DebugSpawnEnabled { get; private set; }
         internal static ConfigEntry<KeyCode> ColonyPickerHotkey { get; private set; }
 
-        /// <summary>Boot straight into a world and run the villager acceptance test.</summary>
-        internal static ConfigEntry<bool> AutoTestEnabled { get; private set; }
-
-        /// <summary>Character to auto-boot with. Empty means "first available".</summary>
-        internal static ConfigEntry<string> AutoTestCharacter { get; private set; }
-
-        /// <summary>World to auto-boot into. Empty means "first available".</summary>
-        internal static ConfigEntry<string> AutoTestWorld { get; private set; }
-
-        /// <summary>Save and exit once the test has reported. Makes runs self-terminating.</summary>
-        internal static ConfigEntry<bool> AutoTestQuitWhenDone { get; private set; }
-
-        /// <summary>Build a populated colony, open the panel, and photograph it.</summary>
-        internal static ConfigEntry<bool> DebugScreenshotEnabled { get; private set; }
-
-        /// <summary>Where panel screenshots are written.</summary>
-        internal static ConfigEntry<string> DebugScreenshotPath { get; private set; }
-
         /// <summary>One-shot prefab diagnostic. Replaces the acceptance test for that run.</summary>
         internal static ConfigEntry<bool> DebugProbeEnabled { get; private set; }
         internal static ConfigEntry<bool> BenchmarkMode { get; private set; }
-        internal static ConfigEntry<string> BenchmarkStage { get; private set; }
+        internal static ConfigEntry<bool> BenchmarkAutoBoot { get; private set; }
+        internal static ConfigEntry<string> BenchmarkCharacter { get; private set; }
+        internal static ConfigEntry<string> BenchmarkWorld { get; private set; }
+        internal static ConfigEntry<string> BenchmarkRunId { get; private set; }
         internal static ConfigEntry<string> BenchmarkOutputPath { get; private set; }
+        internal static ConfigEntry<float> BenchmarkSettleSeconds { get; private set; }
+        internal static ConfigEntry<float> BenchmarkPhaseTimeoutSeconds { get; private set; }
+        internal static ConfigEntry<float> BenchmarkSaveGraceSeconds { get; private set; }
+        internal static ConfigEntry<bool> BenchmarkScreenshots { get; private set; }
+        internal static ConfigEntry<bool> BenchmarkAutoExit { get; private set; }
 
         internal static void Bind(ConfigFile config)
         {
@@ -152,45 +142,6 @@ namespace Kukolony
                 "1 - Colony", nameof(ColonyPickerHotkey), KeyCode.C,
                 "Press this key (outside chat) to open the colony picker.");
 
-            AutoTestEnabled = config.Bind(
-                "9 - Development",
-                nameof(AutoTestEnabled),
-                false,
-                "Boot straight into a world on launch and run the villager acceptance test, "
-                + "writing the result to the log. Development aid - never enable for normal play.");
-
-            AutoTestCharacter = config.Bind(
-                "9 - Development",
-                nameof(AutoTestCharacter),
-                string.Empty,
-                "Character to auto-boot with. Leave empty to use the first available.");
-
-            AutoTestWorld = config.Bind(
-                "9 - Development",
-                nameof(AutoTestWorld),
-                "KukolonyTest",
-                "World to auto-boot into. Created automatically if it does not exist, so "
-                + "tests never write into a world you care about.");
-
-            AutoTestQuitWhenDone = config.Bind(
-                "9 - Development",
-                nameof(AutoTestQuitWhenDone),
-                true,
-                "Save and exit the game once the test has reported.");
-
-            DebugScreenshotEnabled = config.Bind(
-                "9 - Development",
-                nameof(DebugScreenshotEnabled),
-                false,
-                "Build a populated colony, open the panel and screenshot it. The harness can "
-                + "verify every rule behind a button but not whether the panel reads well.");
-
-            DebugScreenshotPath = config.Bind(
-                "9 - Development",
-                nameof(DebugScreenshotPath),
-                "/tmp/kukolony-shots",
-                "Directory for panel screenshots.");
-
             DebugProbeEnabled = config.Bind(
                 "9 - Development",
                 nameof(DebugProbeEnabled),
@@ -200,10 +151,26 @@ namespace Kukolony
 
             BenchmarkMode = config.Bind("9 - Development", nameof(BenchmarkMode), false,
                 "Run the config-driven in-game benchmark. Development only; off by default.");
-            BenchmarkStage = config.Bind("9 - Development", nameof(BenchmarkStage), "create",
-                "Benchmark stage: create, reload, or ui.");
+            BenchmarkAutoBoot = config.Bind("9 - Development", nameof(BenchmarkAutoBoot), false,
+                "Let automation enter BenchmarkWorld from the menu. Leave false for a manual run in the world you choose.");
+            BenchmarkCharacter = config.Bind("9 - Development", nameof(BenchmarkCharacter), string.Empty,
+                "Character used only by automated menu boot. Empty selects the first available character.");
+            BenchmarkWorld = config.Bind("9 - Development", nameof(BenchmarkWorld), "KukolonyBenchmark",
+                "World used only by automated menu boot. Manual benchmark mode runs in the world you enter.");
+            BenchmarkRunId = config.Bind("9 - Development", nameof(BenchmarkRunId), string.Empty,
+                "Stable ID shared by create and reload processes. Empty generates one in-game.");
             BenchmarkOutputPath = config.Bind("9 - Development", nameof(BenchmarkOutputPath),
                 "BepInEx/kukolony-benchmarks", "Canonical folder for benchmark reports and screenshots.");
+            BenchmarkSettleSeconds = config.Bind("9 - Development", nameof(BenchmarkSettleSeconds), 10f,
+                new ConfigDescription("Seconds to wait after the active area loads.", new AcceptableValueRange<float>(1f, 60f)));
+            BenchmarkPhaseTimeoutSeconds = config.Bind("9 - Development", nameof(BenchmarkPhaseTimeoutSeconds), 120f,
+                new ConfigDescription("Maximum time for an in-game phase.", new AcceptableValueRange<float>(15f, 600f)));
+            BenchmarkSaveGraceSeconds = config.Bind("9 - Development", nameof(BenchmarkSaveGraceSeconds), 15f,
+                new ConfigDescription("Grace period after requesting save/logout.", new AcceptableValueRange<float>(5f, 120f)));
+            BenchmarkScreenshots = config.Bind("9 - Development", nameof(BenchmarkScreenshots), true,
+                "Capture all UI evidence during the create run.");
+            BenchmarkAutoExit = config.Bind("9 - Development", nameof(BenchmarkAutoExit), true,
+                "Save and close Valheim after the terminal report.");
 
             config.Save();
             config.SaveOnConfigSet = true;
