@@ -52,6 +52,9 @@ The run directory contains `benchmark-create.log`, `benchmark-reload.log`,
 logs, and `failure.txt` on errors. The terminal marker is
 `BENCHMARK TERMINAL <create|reload> <PASS|FAIL> run=<id>`.
 
+Fourteen screenshots are required, including the three pipeline screens: the piece editor,
+one piece's settings, and the add-a-piece list.
+
 The UI phase arms the remove confirmation but never executes it: that phase registers chest
 fixtures as colony members, so an executing seam would destroy them mid-run. Removal itself
 is proven in the functional phase against real villagers.

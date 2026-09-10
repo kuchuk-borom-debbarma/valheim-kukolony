@@ -25,6 +25,16 @@ sources were deleted. This is intentionally a breaking pre-release schema.
 - operate fermenters;
 - collect beehives.
 
+A job's pieces are what execute. The engine walks the piece list and performs each step,
+reusing one executor per kind; it no longer switches on the job's type, which survives only
+as a display name and a catalogue seed. Which station protocol runs is decided by probing
+the target, so supporting a new station is a new file rather than another case.
+
+Sequencing is a pure function over the piece list, a cursor persisted on the villager ZDO,
+and four facts about the world. Facts win over the cursor, which is what lets a villager
+resume mid-cycle after a reload. Every piece carries its own settings, each inheriting from
+the job when unset.
+
 Jobs use typed settings and a synchronous fixed-tick dispatcher. Station changes invoke
 probe-verified vanilla RPCs. Container operations claim ownership, use Inventory APIs, and
 call Container.Save. No executor uses raw internal ZDO station keys.

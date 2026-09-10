@@ -58,6 +58,13 @@ make a partly broken queue look correct.
 
 ## Jobs tab
 
+**Edit pieces** opens the pipeline itself: the ordered list of steps, with reorder, remove
+and configure. Start and End have no controls, so the rule that a job runs between them
+cannot be broken from the panel. Configuring a piece shows only the settings that kind
+actually reads, taken from its declared contract rather than a list kept in the UI, so a
+piece can never offer a setting the engine ignores. Every value reads "job" until it is
+changed, which makes inheriting visible, and Clear overrides puts a piece back.
+
 Lists configured jobs with piece count, execution count, and target mode. New pipeline
 creates a blank `Start → End` job; Configure opens the job card; Saved presets toggles to
 the preset list, where Apply materialises a preset as a new job.
