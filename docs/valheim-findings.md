@@ -153,21 +153,74 @@ Durability needs no handling: the game exempts non-players from wear.
 
 ## Stations
 
-From this project and from the two earlier mods, worth verifying against the current build
-before use:
+Every RPC name below was probe-verified against the running game, and the arguments are the
+shapes that actually worked. **The names carry an `RPC_` prefix** — the method names in the
+decompiled source do not, and calling those does nothing.
 
-- Smelters and kilns: RPCs `AddFuel` and `AddOre`; `IsItemAllowed`, `GetFuel`, `GetQueueSize`,
-  `m_maxFuel`, `m_maxOre`, `m_fuelItem`. Only fuel what is queued —
-  `min(queued × m_fuelPerProduct, m_maxFuel) − currentFuel` — or an idle smelter is fed forever.
-- Fireplaces: `AddFuel` owns the max-fuel guard. `m_infiniteFuel` and `m_canRefill` must both be
-  checked, or resin is destroyed indefinitely by a fire that never needed it. `CanUseItems`
-  checks the *local player's* inventory and is useless here; compare the ZDO's data revision
-  instead to tell a real change from a no-op.
-- Cooking stations: slot state in ZDO keys `slot{i}`, `slotstatus{i}`; RPCs `AddItem` and
-  `RemoveDoneItem`, the latter taking a position for where the food pops out.
-- Beehives: `RPC_Extract`, `GetHoneyLevel`. Honey appears as a **world drop**, not in the hive.
+| Station | Call | Notes |
+|---|---|---|
+| Smelter, kiln | `InvokeRPC("RPC_AddFuel")` | no arguments |
+| | `InvokeRPC("RPC_AddOre", prefabName, false)` | ore by **name** |
+| Cooking station | `InvokeRPC("RPC_AddItem", prefabName, false)` | |
+| | `InvokeRPC("RPC_RemoveDoneItem", position, 1)` | position is where the food pops out |
+| Fermenter | `InvokeRPC("RPC_Tap")` | |
+| | `InvokeRPC("RPC_AddItem", prefabHash, false)` | by **hash**, not name — unlike the others |
+| Beehive | `InvokeRPC("RPC_Extract")` | |
+
+Behavioural facts, each of which cost a run to find:
+
+- **Consume the carried item before submitting the RPC**, never after. A removal that fails
+  after the call has already handed the station a free item.
+- **Read the fermenter's prefab hash before consuming.** The item is gone by the time the call
+  is made.
+- **Smelters:** fuel-versus-ore is decided by the station's own `m_fuelItem`, not by the job.
+  Capacity via `GetFuel() >= m_maxFuel` and `GetQueueSize() >= m_maxOre`; `IsItemAllowed` for
+  input. Only fuel what is queued — `min(queued × m_fuelPerProduct, m_maxFuel) − currentFuel` —
+  or an idle smelter is fed forever.
+- **Fireplaces are the trap.** One that burns forever or refuses refills *still accepts*
+  `AddFuel` and *still reports a change*, so without checking `m_infiniteFuel` and
+  `m_canRefill` a villager feeds resin into it indefinitely and the fuel is simply destroyed.
+  `AddFuel` owns the max-fuel guard. `CanUseItems` is useless here — it checks the local
+  *player's* inventory. To tell a real change from a no-op, compare the ZDO's `DataRevision`
+  before and after.
+- **Cooking stations: clear before adding.** A station full of cooked food cannot accept
+  anything, so taking it off is the only move that makes progress.
+- **Beehives are unlike the rest**: extracting produces a **world drop** rather than changing
+  what the station holds, so the work is not finished when the RPC returns.
+- **Several prefabs carry more than one of these components** — an oven is a cooking station, a
+  hearth is a fireplace, a windmill is a smelter, and fuelled cooking stations are both. Probe
+  order matters, and **Fireplace must be probed last** precisely because it is the one most
+  often present alongside something else.
 - `DamageText.instance` is null on a dedicated server, which matters for any path that shows
   damage.
+
+## Inventory
+
+**`Inventory.MoveItemToThis`'s amount overload requires a real grid coordinate.** Passing
+`(-1, -1)` is rejected in current Valheim *even after `CanAddItem` has succeeded* — a measured
+API defect, and a silent one.
+
+The working pattern is to find the slot yourself: prefer an existing compatible stack, then an
+empty slot, and let the vanilla helper do both inventories' bookkeeping.
+
+```
+destination.MoveItemToThis(source, item, 1, x, y)   // x,y must be a real slot
+```
+
+## Claims and ownership
+
+**`ZDO.Set` ignores its `okForNotOwner` argument.** A write to a ZDO this peer does not own
+lands locally and is clobbered on the next sync from its owner. That is why a claim on a
+target is *not* written onto the target: doing so would mean taking ownership first, which is
+an RPC round trip with exponential backoff, before the villager has even started walking.
+
+The claim used instead is the villager's own recorded target, read by everyone else. It needs
+no new state and cleans itself up, because the target is cleared on success and on every
+failure.
+
+**Claiming is asynchronous, so the work waits a tick.** The pattern that works for containers
+and for trees alike: if not the owner, call `ClaimOwnership()` and report *still running*; the
+mutation lands on a later tick, once ownership has actually moved.
 
 ## Crafting
 

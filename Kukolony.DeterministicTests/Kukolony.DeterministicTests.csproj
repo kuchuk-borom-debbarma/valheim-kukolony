@@ -1,9 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
-  <ItemGroup>
-    <Compile Include="../Kukolony/Jobs/Work/WorkState.cs" Link="WorkState.cs" />
-    <Compile Include="../Kukolony/Jobs/Work/FetchAndDeliver.cs" Link="FetchAndDeliver.cs" />
-    <Compile Include="../Kukolony/Jobs/Work/TapThenGather.cs" Link="TapThenGather.cs" />
-    <Compile Include="../Kukolony/Jobs/Work/WorkUntilGone.cs" Link="WorkUntilGone.cs" />
-  </ItemGroup>
+  <!--
+    Pure decision logic is linked in here, without Unity, so a whole behaviour cycle is
+    verified in about a second rather than only inside a four-minute game run. There is
+    nothing to link at the moment: the job system that used this was removed with the rest
+    of the feature layer, and gets rebuilt at roadmap milestone 6. The wiring stays so the
+    first pure logic written after that is covered immediately.
+  -->
 </Project>
