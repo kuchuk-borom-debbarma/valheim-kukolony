@@ -119,13 +119,16 @@ namespace Kukolony.Debug
             panel.ShowOutfitCardForTest();
             yield return new WaitForSecondsRealtime(1f);
             yield return Capture("colony-outfit-card.png");
+            panel.ShowSlotPickerForTest();
+            yield return new WaitForSecondsRealtime(1f);
+            yield return Capture("colony-slot-picker.png");
             panel.ShowTabForTest("Jobs");
             yield return new WaitForSecondsRealtime(.5f);
             yield return Capture("colony-jobs.png");
             panel.ShowJobForTest(0);
             yield return new WaitForSecondsRealtime(1f);
             yield return Capture("colony-job-config.png");
-            panel.ShowTargetPickerForTest();
+            panel.ShowSettingPickerForTest();
             yield return new WaitForSecondsRealtime(1f);
             yield return Capture("colony-structure-picker.png");
             panel.ShowPresetsForTest();

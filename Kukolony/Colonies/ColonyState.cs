@@ -94,8 +94,15 @@ namespace Kukolony.Colonies
             return jobs.Count == 0 ? ColonyJobCatalog.CreateDefaults() : jobs;
         }
 
-        /// <summary>Outfit record format. Slot count is written, so adding a slot stays readable.</summary>
-        private const int OutfitRecordVersion = 1;
+        /// <summary>
+        ///     Outfit record format. Slot count is written, so adding a slot stays readable.
+        /// </summary>
+        /// <remarks>
+        ///     Version 2 holds a list of acceptable items per slot instead of one name, because
+        ///     "leather or troll leather, whichever we have" is what a colony wants. A version 1
+        ///     record reads as a list of one, which means exactly what it used to.
+        /// </remarks>
+        private const int OutfitRecordVersion = 2;
 
         /// <summary>
         ///     Every outfit this colony defines. Villagers reference one by name, the way jobs
@@ -120,10 +127,22 @@ namespace Kukolony.Colonies
                     if (slots < 0 || slots > 64) throw new System.IO.InvalidDataException("invalid slot count");
                     for (int slot = 0; slot < slots; slot++)
                     {
-                        string item = p.ReadString();
                         // A record written by a build with more slots than this one still
-                        // reads: the extra names are past the end and simply dropped.
-                        if (slot < Villagers.Outfit.SlotCount) outfit.Items[slot] = item;
+                        // reads: the extra entries are past the end and simply dropped.
+                        bool kept = slot < Villagers.Outfit.SlotCount;
+                        if (version == 1)
+                        {
+                            string only = p.ReadString();
+                            if (kept && only.Length > 0) outfit.Choices[slot].Add(only);
+                            continue;
+                        }
+                        int choices = p.ReadInt();
+                        if (choices < 0 || choices > 64) throw new System.IO.InvalidDataException("invalid choice count");
+                        for (int choice = 0; choice < choices; choice++)
+                        {
+                            string item = p.ReadString();
+                            if (kept && item.Length > 0) outfit.Choices[slot].Add(item);
+                        }
                     }
                     result.Add(outfit);
                 }
@@ -159,7 +178,11 @@ namespace Kukolony.Colonies
                 p.Write(outfit.Name ?? string.Empty);
                 p.Write(Villagers.Outfit.SlotCount);
                 for (int slot = 0; slot < Villagers.Outfit.SlotCount; slot++)
-                    p.Write(outfit.Items[slot] ?? string.Empty);
+                {
+                    List<string> choices = outfit.Choices[slot];
+                    p.Write(choices.Count);
+                    foreach (string item in choices) p.Write(item ?? string.Empty);
+                }
             }
             _zdo.Set(OutfitsKey, p.GetBase64());
         }

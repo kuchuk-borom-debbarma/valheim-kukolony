@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Jotunn.Managers;
 using Kukolony.Colonies;
 using Kukolony.Jobs;
+using Kukolony.Jobs.Settings;
 using Kukolony.Jobs.Work;
 using Kukolony.Villagers;
 using UnityEngine;
@@ -14,6 +15,14 @@ namespace Kukolony.Gui
     {
         private enum Tab { Structures, Members, Jobs }
         private const int Rows = 4;
+        /// <summary>
+        ///     A picker screen has nothing under its list but one line of help, so it can show
+        ///     more at once than a screen with controls along the bottom.
+        /// </summary>
+        private const int PickerRows = 6;
+        /// <summary>Settings stack at a fixed pitch, leaving room for a line of help under each.</summary>
+        private const int SettingRows = 6;
+        private const float SettingPitch = 48f;
         internal static ColonyPanel Instance { get; private set; }
 
         private GameObject _root;
@@ -32,12 +41,15 @@ namespace Kukolony.Gui
         private int _memberJobIndex;
         private ColonyJobConfig _selectedJob;
         private bool _showPresets;
-        private bool _showTargetPicker;
         /// <summary>Outfit being edited, or -1 for the outfit list. Cleared on every navigation.</summary>
         private int _selectedOutfit = -1;
         private bool _showOutfits;
         /// <summary>True while the Structures tab is choosing something new to register.</summary>
         private bool _showRegisterPicker;
+        /// <summary>Index into the visible settings of the one being picked for, or -1.</summary>
+        private int _editingSetting = -1;
+        /// <summary>Outfit slot being filled, or -1.</summary>
+        private int _editingSlot = -1;
         private bool _blocked;
 
         internal bool IsOpen => _root != null && _root.activeSelf;
@@ -159,6 +171,16 @@ namespace Kukolony.Gui
             Refresh();
         }
 
+        /// <summary>Opens the chooser for one outfit slot, for UI evidence.</summary>
+        internal void ShowSlotPickerForTest()
+        {
+            ShowOutfitCardForTest();
+            _editingSlot = (int)OutfitSlot.Chest;
+            _search = string.Empty;
+            _page = 0;
+            Refresh();
+        }
+
         internal void ShowJobForTest(int index)
         {
             List<ColonyJobConfig> jobs = _colony?.State.GetEffectiveJobs();
@@ -168,7 +190,22 @@ namespace Kukolony.Gui
 
         internal void ShowPresetsForTest() { _tab = Tab.Jobs; _selectedJob = null; _showPresets = true; Refresh(); }
         internal void ShowPageForTest(int page) { _page = Mathf.Max(0, page); Refresh(); }
-        internal void ShowTargetPickerForTest() { if (_selectedJob != null) { _showTargetPicker = true; Refresh(); } }
+        /// <summary>Opens the chooser for a job's first list-valued setting, for UI evidence.</summary>
+        internal void ShowSettingPickerForTest()
+        {
+            if (_selectedJob == null) return;
+            List<JobSettingSpec> specs = VisibleSettings(_selectedJob);
+            for (int i = 0; i < specs.Count; i++)
+            {
+                if (specs[i].Kind != SettingKind.Items && specs[i].Kind != SettingKind.Structures &&
+                    specs[i].Kind != SettingKind.StructureRef) continue;
+                _editingSetting = i;
+                _search = string.Empty;
+                _page = 0;
+                Refresh();
+                return;
+            }
+        }
 
         private void Update()
         {
@@ -179,10 +216,11 @@ namespace Kukolony.Gui
         private void Block(bool value) { if (_blocked == value) return; _blocked = value; GUIManager.BlockInput(value); }
         private void SetTab(Tab tab)
         {
-            _tab = tab; _page = 0; _pendingRemoval = ZDOID.None; _showTargetPicker = false;
+            _tab = tab; _page = 0; _pendingRemoval = ZDOID.None; _editingSetting = -1;
             _showOutfits = false; _selectedOutfit = -1; _showRegisterPicker = false;
+            _editingSetting = -1; _editingSlot = -1;
             if (tab != Tab.Members) _selectedMember = ZDOID.None;
-            if (tab != Tab.Jobs) { _selectedJob = null; _showPresets = false; _showTargetPicker = false; }
+            if (tab != Tab.Jobs) { _selectedJob = null; _showPresets = false; }
             Refresh();
         }
 
@@ -372,118 +410,272 @@ namespace Kukolony.Gui
                 -555, 14, 520, Color.gray);
         }
 
+        /// <summary>
+        ///     One job's settings, drawn from what the job says it has.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Nothing here knows what any particular job is configured by. Each job
+        ///         describes its settings and this renders a control per kind, so different
+        ///         jobs genuinely offer different configuration without this method growing a
+        ///         branch for each, and a setting cannot appear on a screen the job then
+        ///         ignores - one declaration drives both.
+        ///     </para>
+        ///     <para>
+        ///         Rows stack down a single column at a fixed pitch rather than being placed by
+        ///         hand. Hand-placed coordinates are how controls ended up overlapping and
+        ///         spilling out of the panel; a stack cannot, and it pages when a job has more
+        ///         settings than fit.
+        ///     </para>
+        /// </remarks>
         private void BuildJobCard(List<ColonyJobConfig> jobs)
         {
-            if (_showTargetPicker) { BuildTargetPicker(jobs); return; }
+            if (_editingSetting >= 0) { BuildSettingPicker(jobs); return; }
+
             AddButton(_content.transform, "← Jobs", -330, -160, 110,
-                () => { _selectedJob=null; Refresh(); });
+                () => { _selectedJob = null; _page = 0; _editingSetting = -1; Refresh(); });
             InputField jobName = InputAt(_content.transform, _selectedJob.Name, -110, -160, 330);
-            jobName.onEndEdit.AddListener(value => { if (!string.IsNullOrWhiteSpace(value)) _selectedJob.Name=value.Trim(); SaveJobs(jobs); });
-            LeftTextAt(_content.transform, ColonyJobCatalog.Describe(_selectedJob.Type), -215, 13, 330, Color.gray);
-            LeftTextAt(_content.transform, "Needs: " + CapabilityName(ColonyJobCatalog.RequiredCapability(_selectedJob.Type)),
-                -242, 12, 330, Color.gray);
-            AddButton(_content.transform, "Work: " + ColonyJobCatalog.DisplayName(_selectedJob.Type), 200, -215, 380,
-                () => { _selectedJob.Type = ColonyJobCatalog.Next(_selectedJob.Type); SaveJobs(jobs); });
-            AddButton(_content.transform, "Duplicate", 310, -160, 110, () => { ColonyJobConfig copy=_selectedJob.Clone(true); copy.Id=System.Guid.NewGuid().ToString("N"); copy.Name += " copy"; jobs.Add(copy); SaveJobs(jobs); });
-            LeftTextAt(_content.transform, "Targets: " + _selectedJob.Targets, -275, 16, 420);
-            AddButton(_content.transform, "Target mode", 270, -255, 150, () =>
-            { _selectedJob.Targets=(TargetMode)(((int)_selectedJob.Targets+1)%3); SaveJobs(jobs); });
-            LeftTextAt(_content.transform, $"Count: {_selectedJob.Count}", -305, 16, 180);
-            AddButton(_content.transform, "−", -80, -305, 45, () => { _selectedJob.Count=Mathf.Max(1,_selectedJob.Count-1); SaveJobs(jobs); });
-            AddButton(_content.transform, "+", -25, -305, 45, () => { _selectedJob.Count++; SaveJobs(jobs); });
-            TextAt(_content.transform, $"Stock limit: {_selectedJob.StockLimit}", 115, -305, 16, 220, TextAnchor.MiddleLeft);
-            AddButton(_content.transform, "−", 300, -305, 45, () => { _selectedJob.StockLimit=Mathf.Max(0,_selectedJob.StockLimit-1); SaveJobs(jobs); });
-            AddButton(_content.transform, "+", 355, -305, 45, () => { _selectedJob.StockLimit++; SaveJobs(jobs); });
-            LeftTextAt(_content.transform, "Items: " + (_selectedJob.ItemFilters.Count == 0 ? "any" : string.Join(", ", _selectedJob.ItemFilters)),
-                -360, 15, 400, Color.gray);
-            InputField items = InputAt(_content.transform, string.Join(",", _selectedJob.ItemFilters), 170, -360, 300);
-            items.onEndEdit.AddListener(value =>
+            jobName.onEndEdit.AddListener(value =>
+            { if (!string.IsNullOrWhiteSpace(value)) _selectedJob.Name = value.Trim(); SaveJobs(jobs); });
+            AddButton(_content.transform, "Duplicate", 310, -160, 110, () =>
             {
-                _selectedJob.ItemFilters.Clear();
-                foreach (string item in value.Split(',')) if (!string.IsNullOrWhiteSpace(item)) _selectedJob.ItemFilters.Add(item.Trim());
+                ColonyJobConfig copy = _selectedJob.Clone(true);
+                copy.Id = System.Guid.NewGuid().ToString("N");
+                copy.Name += " copy";
+                jobs.Add(copy);
                 SaveJobs(jobs);
             });
-            LeftTextAt(_content.transform, "Selected structures: " + _selectedJob.SelectedStructures.Count,
-                -405, 15, 360, Color.gray);
-            AddButton(_content.transform, "Choose targets", 210, -405, 180,
-                () => { _showTargetPicker = true; _search = string.Empty; _page = 0; Refresh(); });
-            // Only what this work reads. A control that does nothing is worse than a missing
-            // one: the player changes it, nothing happens, and nothing says why.
-            JobSetting reads = Reads(_selectedJob);
-            if ((reads & JobSetting.Source) != 0)
-                AddButton(_content.transform, "Source: " + Short(StructureName(_selectedJob.Source), 16), -195, -445, 250,
-                    () => { _selectedJob.Source = NextStructure(_selectedJob.Source, StructureCapability.Container); SaveJobs(jobs); });
-            if ((reads & JobSetting.Destination) != 0)
-                AddButton(_content.transform, "Destination: " + Short(StructureName(_selectedJob.Destination), 16), 110, -445, 270,
-                    () => { _selectedJob.Destination = NextStructure(_selectedJob.Destination, StructureCapability.Container); SaveJobs(jobs); });
-            AddButton(_content.transform, _selectedJob.Reservations ? "Reservations: on" : "Reservations: off", 325, -445, 150,
-                () => { _selectedJob.Reservations = !_selectedJob.Reservations; SaveJobs(jobs); });
-            if ((reads & JobSetting.SearchRadius) != 0)
-            {
-                TextAt(_content.transform, $"Search: {_selectedJob.SearchRadius:F0}m", -255, -485, 16, 150, TextAnchor.MiddleLeft);
-                AddButton(_content.transform, "−", -130, -485, 45, () => { _selectedJob.SearchRadius=Mathf.Max(4,_selectedJob.SearchRadius-4); SaveJobs(jobs); });
-                AddButton(_content.transform, "+", -75, -485, 45, () => { _selectedJob.SearchRadius=Mathf.Min(128,_selectedJob.SearchRadius+4); SaveJobs(jobs); });
-            }
-            TextAt(_content.transform, $"Stop: {_selectedJob.StopDistance:F1}m", 40, -485, 16, 150, TextAnchor.MiddleLeft);
-            AddButton(_content.transform, "−", 175, -485, 45, () => { _selectedJob.StopDistance=Mathf.Max(.5f,_selectedJob.StopDistance-.5f); SaveJobs(jobs); });
-            AddButton(_content.transform, "+", 230, -485, 45, () => { _selectedJob.StopDistance=Mathf.Min(8,_selectedJob.StopDistance+.5f); SaveJobs(jobs); });
-            if ((reads & JobSetting.DropOnGround) != 0)
-                AddButton(_content.transform, _selectedJob.DropOnGround ? "Result: ground" : "Result: container",
-                    328, -485, 140, () => { _selectedJob.DropOnGround = !_selectedJob.DropOnGround; SaveJobs(jobs); });
 
-            AddButton(_content.transform, "Save portable preset", -150, -530, 220,
-                () => { ColonyOperations.SavePreset(_colony, _selectedJob.Name+" portable", _selectedJob, false); Refresh(); });
-            AddButton(_content.transform, "Save local preset", 150, -530, 220,
-                () => { ColonyOperations.SavePreset(_colony, _selectedJob.Name+" local", _selectedJob, true); Refresh(); });
-            LeftTextAt(_content.transform, "Portable presets omit exact structure IDs; local presets retain them.",
+            AddButton(_content.transform, "Work: " + ColonyJobCatalog.DisplayName(_selectedJob.Type), 200, -205, 380,
+                () => { _selectedJob.Type = ColonyJobCatalog.Next(_selectedJob.Type); _page = 0; SaveJobs(jobs); });
+            LeftTextAt(_content.transform, ColonyJobCatalog.Describe(_selectedJob.Type), -205, 13, 330, Color.gray);
+            LeftTextAt(_content.transform, "Needs: " + CapabilityName(ColonyJobCatalog.RequiredCapability(_selectedJob.Type)),
+                -230, 12, 330, Color.gray);
+
+            List<JobSettingSpec> specs = VisibleSettings(_selectedJob);
+            int start = _page * SettingRows;
+            for (int row = 0; row < SettingRows && start + row < specs.Count; row++)
+            {
+                int index = start + row;
+                DrawSetting(jobs, specs[index], index, -270 - row * SettingPitch);
+            }
+            Pager(specs.Count, SettingRows);
+
+            AddButton(_content.transform, "Save portable preset", -150, -560, 220,
+                () => { ColonyOperations.SavePreset(_colony, _selectedJob.Name + " portable", _selectedJob, false); Refresh(); });
+            AddButton(_content.transform, "Save local preset", 150, -560, 220,
+                () => { ColonyOperations.SavePreset(_colony, _selectedJob.Name + " local", _selectedJob, true); Refresh(); });
+        }
+
+        /// <summary>Settings this job has, minus those its current configuration makes moot.</summary>
+        private List<JobSettingSpec> VisibleSettings(ColonyJobConfig job)
+        {
+            List<JobSettingSpec> visible = new List<JobSettingSpec>();
+            IColonyWork work = WorkRegistry.For(job.Type);
+            if (work == null) return visible;
+            foreach (JobSettingSpec spec in work.Describe())
+                if (spec.IsVisible(job)) visible.Add(spec);
+            return visible;
+        }
+
+        /// <summary>One setting: its name, its value, and the control that changes it.</summary>
+        private void DrawSetting(List<ColonyJobConfig> jobs, JobSettingSpec spec, int index, float y)
+        {
+            LeftTextAt(_content.transform, spec.Label, y, 16, 260);
+            if (spec.Help.Length > 0)
+                LeftTextAt(_content.transform, spec.Help, y - 20f, 12, 400, Color.gray);
+
+            switch (spec.Kind)
+            {
+                case SettingKind.Toggle:
+                    AddButton(_content.transform, spec.GetFlag(_selectedJob) ? "Yes" : "No", 330, y, 130,
+                        () => { spec.SetFlag(_selectedJob, !spec.GetFlag(_selectedJob)); SaveJobs(jobs); });
+                    break;
+
+                case SettingKind.Number:
+                    TextAt(_content.transform, spec.Describe(_selectedJob, _colony), 190, y, 16, 150, TextAnchor.MiddleRight);
+                    AddButton(_content.transform, "−", 290, y, 45, () => Nudge(jobs, spec, -spec.Step));
+                    AddButton(_content.transform, "+", 345, y, 45, () => Nudge(jobs, spec, spec.Step));
+                    break;
+
+                case SettingKind.Choice:
+                    AddButton(_content.transform, Short(spec.Describe(_selectedJob, _colony), 22), 300, y, 190,
+                        () => { Cycle(jobs, spec); });
+                    break;
+
+                default:
+                    // Everything else picks from a list too long to cycle through, so it opens
+                    // a screen of its own with search and paging.
+                    AddButton(_content.transform, Short(Summarise(spec), 22), 300, y, 190,
+                        () => { _editingSetting = index; _search = string.Empty; _page = 0; Refresh(); });
+                    break;
+            }
+        }
+
+        /// <summary>
+        ///     What a list-valued setting currently holds, in the words a player recognises.
+        ///     The job stores prefab names because that is what the engine matches on; showing
+        ///     those would undo the point of picking from a list.
+        /// </summary>
+        private string Summarise(JobSettingSpec spec)
+        {
+            if (spec.Kind == SettingKind.Items)
+            {
+                List<string> items = spec.GetList(_selectedJob);
+                if (items.Count == 0) return "anything";
+                List<string> names = new List<string>();
+                foreach (string item in items) names.Add(ItemCatalogue.Label(item));
+                return string.Join(", ", names.ToArray());
+            }
+            if (spec.Kind == SettingKind.StructureRef)
+            {
+                ZDOID chosen = spec.GetReference(_selectedJob);
+                if (chosen.IsNone()) return "automatic";
+                StructureRecord record = _colony.State.GetStructures().Find(r => r.Id == chosen);
+                return record != null ? record.Name : "missing";
+            }
+            return spec.Describe(_selectedJob, _colony);
+        }
+
+        private void Nudge(List<ColonyJobConfig> jobs, JobSettingSpec spec, float by)
+        {
+            float value = Mathf.Clamp(spec.GetNumber(_selectedJob) + by, spec.Minimum, spec.Maximum);
+            spec.SetNumber(_selectedJob, value);
+            SaveJobs(jobs);
+        }
+
+        /// <summary>Steps a choice to the next option, wrapping.</summary>
+        private void Cycle(List<ColonyJobConfig> jobs, JobSettingSpec spec)
+        {
+            List<Option> options = spec.Options(_colony);
+            if (options.Count == 0) return;
+            string current = spec.GetChoice(_selectedJob);
+            int at = options.FindIndex(option => option.Value == current);
+            spec.SetChoice(_selectedJob, options[(at + 1 + options.Count) % options.Count].Value);
+            SaveJobs(jobs);
+        }
+
+        /// <summary>
+        ///     Choosing values for a setting whose options are too many to cycle through.
+        /// </summary>
+        /// <remarks>
+        ///     Items and structures both land here, because both are lists a player picks
+        ///     several of from hundreds of candidates. Search and paging make that bearable;
+        ///     typing prefab names, which is what this replaces, did not - it asked a player to
+        ///     know strings the game never shows and answered a typo with silence.
+        /// </remarks>
+        private void BuildSettingPicker(List<ColonyJobConfig> jobs)
+        {
+            List<JobSettingSpec> specs = VisibleSettings(_selectedJob);
+            if (_editingSetting >= specs.Count) { _editingSetting = -1; Refresh(); return; }
+            JobSettingSpec spec = specs[_editingSetting];
+
+            AddButton(_content.transform, "← Job", -330, -160, 110,
+                () => { _editingSetting = -1; _page = 0; Refresh(); });
+            TextAt(_content.transform, spec.Label, -60, -160, 20, 420, TextAnchor.MiddleLeft);
+            InputField search = InputAt(_content.transform, _search, -170, -205, 300);
+            search.onEndEdit.AddListener(value => { _search = value; _page = 0; Refresh(); });
+            AddButton(_content.transform, "Clear all", 280, -205, 200, () => { ClearSetting(jobs, spec); });
+
+            List<Option> options = OptionsFor(spec);
+            int start = _page * PickerRows;
+            for (int row = 0; row < PickerRows && start + row < options.Count; row++)
+            {
+                Option option = options[start + row];
+                bool chosen = IsChosen(spec, option);
+                AddButton(_content.transform, (chosen ? "✓ " : "○ ") + Short(option.Label, 24),
+                    -190, -260 - row * 48, 360, () => { Choose(jobs, spec, option); });
+                TextAt(_content.transform, option.Value, 190, -260 - row * 48, 12, 200,
+                    TextAnchor.MiddleLeft, Color.gray);
+            }
+            Pager(options.Count, PickerRows);
+            LeftTextAt(_content.transform, spec.Help.Length > 0 ? spec.Help : "Choose as many as you like.",
                 -575, 14, 590, Color.gray);
         }
 
-        private void BuildTargetPicker(List<ColonyJobConfig> jobs)
-        {
-            StructureCapability required = ColonyJobCatalog.RequiredCapability(_selectedJob.Type);
-            AddButton(_content.transform, "← Job", -330, -160, 110,
-                () => { _showTargetPicker=false; Refresh(); });
-            TextAt(_content.transform, "Choose " + CapabilityName(required) + " targets", -60, -160, 20, 420, TextAnchor.MiddleLeft);
-            InputField search = InputAt(_content.transform, _search, -110, -205, 420);
-            search.onEndEdit.AddListener(value => { _search=value; _page=0; Refresh(); });
-            AddButton(_content.transform, "Sort: " + _sort, 285, -205, 130,
-                () => { _sort=(StructureSort)(((int)_sort+1)%4); Refresh(); });
-            List<StructureRecord> choices = ColonyOperations.FilterStructures(_colony, _search, required, _sort);
-            int start = _page * Rows;
-            for (int row = 0; row < Rows && start + row < choices.Count; row++)
-            {
-                StructureRecord record = choices[start + row];
-                bool selected = _selectedJob.SelectedStructures.Contains(record.Id);
-                AddButton(_content.transform, selected ? "✓ " + Short(record.Name, 22) : "○ " + Short(record.Name, 22),
-                    -190, -260-row*48, 360, () =>
-                    {
-                        if (!_selectedJob.SelectedStructures.Remove(record.Id)) _selectedJob.SelectedStructures.Add(record.Id);
-                        SaveJobs(jobs);
-                    });
-                TextAt(_content.transform, record.IsLiveIn(_colony) ? "ready" : "unavailable",
-                    150, -260-row*48, 14, 150, TextAnchor.MiddleLeft,
-                    record.IsLiveIn(_colony) ? Color.green : Color.gray);
-            }
-            Pager(choices.Count);
-            AddButton(_content.transform, "Done", 300, -555, 120,
-                () => { _showTargetPicker=false; Refresh(); });
-        }
-
         /// <summary>
-        ///     A job row's second column. Which work it does is only worth repeating when the
-        ///     player has renamed the job away from it; on a starter job the two are the same
-        ///     string and printing both says nothing twice.
-        /// </summary>
-        /// <summary>
-        ///     Everything nearby the colony could use, so a player can register one thing
-        ///     rather than sweeping up everything at once.
+        ///     What this setting can be set to, narrowed by whatever is in the search box.
         /// </summary>
         /// <remarks>
-        ///     Registering all of it is still one button away, and is what most bases want. But
-        ///     a sweep cannot express "that chest, not that one", and until this existed the
-        ///     only way to leave something out was to register it and then remove it.
+        ///     Items are searched by relevance rather than filtered in place: with a thousand
+        ///     of them, typing "wood" and getting a page of WoodArrow and WoodBridge before
+        ///     Wood itself is worse than useless. Structures are few enough to just filter.
         /// </remarks>
+        private List<Option> OptionsFor(JobSettingSpec spec)
+        {
+            List<Option> options = new List<Option>();
+            if (spec.Kind == SettingKind.Items)
+            {
+                List<ItemCatalogue.Entry> entries = _search.Length == 0
+                    ? ItemCatalogue.All()
+                    : ItemCatalogue.Search(_search, 200);
+                foreach (ItemCatalogue.Entry entry in entries)
+                    options.Add(new Option(entry.PrefabName, entry.DisplayName));
+                return options;
+            }
+
+            foreach (StructureRecord record in _colony.State.GetStructures())
+            {
+                if ((record.Capabilities & spec.Capability) == 0) continue;
+                if (_search.Length > 0 &&
+                    record.Name.IndexOf(_search, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+                options.Add(new Option(record.Id.ToString(), record.Name));
+            }
+            return options;
+        }
+
+        private bool IsChosen(JobSettingSpec spec, Option option)
+        {
+            switch (spec.Kind)
+            {
+                case SettingKind.Items: return spec.GetList(_selectedJob).Contains(option.Value);
+                case SettingKind.Structures:
+                    return spec.GetReferences(_selectedJob).Exists(id => id.ToString() == option.Value);
+                default: return spec.GetReference(_selectedJob).ToString() == option.Value;
+            }
+        }
+
+        private void Choose(List<ColonyJobConfig> jobs, JobSettingSpec spec, Option option)
+        {
+            switch (spec.Kind)
+            {
+                case SettingKind.Items:
+                    List<string> items = spec.GetList(_selectedJob);
+                    if (!items.Remove(option.Value)) items.Add(option.Value);
+                    break;
+                case SettingKind.Structures:
+                    List<ZDOID> chosen = spec.GetReferences(_selectedJob);
+                    int at = chosen.FindIndex(id => id.ToString() == option.Value);
+                    if (at >= 0) chosen.RemoveAt(at);
+                    else
+                    {
+                        StructureRecord record = _colony.State.GetStructures()
+                            .Find(candidate => candidate.Id.ToString() == option.Value);
+                        if (record != null) chosen.Add(record.Id);
+                    }
+                    break;
+                default:
+                    // One at a time, and picking the current one again means "none".
+                    StructureRecord picked = _colony.State.GetStructures()
+                        .Find(candidate => candidate.Id.ToString() == option.Value);
+                    spec.SetReference(_selectedJob,
+                        picked == null || spec.GetReference(_selectedJob) == picked.Id ? ZDOID.None : picked.Id);
+                    break;
+            }
+            SaveJobs(jobs);
+        }
+
+        private void ClearSetting(List<ColonyJobConfig> jobs, JobSettingSpec spec)
+        {
+            switch (spec.Kind)
+            {
+                case SettingKind.Items: spec.GetList(_selectedJob).Clear(); break;
+                case SettingKind.Structures: spec.GetReferences(_selectedJob).Clear(); break;
+                default: spec.SetReference(_selectedJob, ZDOID.None); break;
+            }
+            SaveJobs(jobs);
+        }
+
         private void BuildRegisterPicker()
         {
             AddButton(_content.transform, "← Structures", -310, -160, 150,
@@ -505,8 +697,8 @@ namespace Kukolony.Gui
                 candidates.Add(candidate);
             }
 
-            int start = _page * Rows;
-            for (int row = 0; row < Rows && start + row < candidates.Count; row++)
+            int start = _page * PickerRows;
+            for (int row = 0; row < PickerRows && start + row < candidates.Count; row++)
             {
                 StructureRecord candidate = candidates[start + row];
                 float y = -260 - row * 48;
@@ -515,21 +707,13 @@ namespace Kukolony.Gui
                 TextAt(_content.transform, candidate.Capabilities.ToString(), 190, y, 13, 200,
                     TextAnchor.MiddleLeft, Color.gray);
             }
-            Pager(candidates.Count);
+            Pager(candidates.Count, PickerRows);
             LeftTextAt(_content.transform, candidates.Count == 0
                     ? "Nothing unregistered within " + Mathf.RoundToInt(_colony.EffectiveRadius) + "m."
                     : "You can also look at something and press " + ModConfig.MarkStructureHotkey.Value + ".",
                 -575, 14, 590, Color.gray);
         }
 
-        /// <summary>
-        ///     The colony's outfits, and the one being edited.
-        /// </summary>
-        /// <remarks>
-        ///     An outfit is a preference, so this edits names rather than items: nothing here
-        ///     moves anything, and naming a piece the colony does not own is allowed. The
-        ///     villagers go and find it, and go without until they do.
-        /// </remarks>
         private void BuildOutfits()
         {
             List<Outfit> outfits = _colony.State.GetEffectiveOutfits();
@@ -564,8 +748,9 @@ namespace Kukolony.Gui
 
         private void BuildOutfitCard(List<Outfit> outfits, Outfit outfit)
         {
+            if (_editingSlot >= 0) { BuildSlotPicker(outfits, outfit); return; }
             AddButton(_content.transform, "← Outfits", -320, -160, 130,
-                () => { _selectedOutfit = -1; Refresh(); });
+                () => { _selectedOutfit = -1; _editingSlot = -1; Refresh(); });
             InputField name = InputAt(_content.transform, outfit.Name, -80, -160, 330);
             name.onEndEdit.AddListener(value =>
             { if (!string.IsNullOrWhiteSpace(value)) outfit.Name = value.Trim(); SaveOutfits(outfits); });
@@ -583,12 +768,71 @@ namespace Kukolony.Gui
                 int index = slot;
                 float y = -215 - slot * 48;
                 LeftTextAt(_content.transform, SlotLabel((OutfitSlot)slot), y, 15, 220);
-                InputField item = InputAt(_content.transform, outfit.Items[index] ?? string.Empty, 40, y, 330);
-                item.onEndEdit.AddListener(value =>
-                { outfit.Items[index] = (value ?? string.Empty).Trim(); SaveOutfits(outfits); });
+                AddButton(_content.transform, Short(SlotSummary(outfit, (OutfitSlot)slot), 26), 230, y, 320,
+                    () => { _editingSlot = index; _search = string.Empty; _page = 0; Refresh(); });
             }
-            LeftTextAt(_content.transform, "Item prefab names, such as ArmorLeatherChest or AxeFlint. Blank leaves the slot alone.",
+            LeftTextAt(_content.transform, "Pick what a villager should wear. Several per slot means "
+                    + "whichever we have, best first. An empty slot is left as it was.",
                 -560, 14, 600, Color.gray);
+        }
+
+        /// <summary>
+        ///     Choosing what may fill one outfit slot.
+        /// </summary>
+        /// <remarks>
+        ///     Offered from the game's own items, narrowed to the kind that fits the slot, so a
+        ///     chest row cannot be filled with an axe. The hands take both tools and weapons,
+        ///     which the game files under several types, so those rows offer everything rather
+        ///     than a tidy list that quietly omits the axe.
+        /// </remarks>
+        private void BuildSlotPicker(List<Outfit> outfits, Outfit outfit)
+        {
+            OutfitSlot slot = (OutfitSlot)_editingSlot;
+            List<string> chosen = outfit.Choices[_editingSlot];
+            AddButton(_content.transform, "← Outfit", -320, -160, 130,
+                () => { _editingSlot = -1; _page = 0; Refresh(); });
+            TextAt(_content.transform, SlotLabel(slot), -10, -160, 20, 400, TextAnchor.MiddleLeft);
+            InputField search = InputAt(_content.transform, _search, -170, -205, 300);
+            search.onEndEdit.AddListener(value => { _search = value; _page = 0; Refresh(); });
+            AddButton(_content.transform, "Leave slot alone", 280, -205, 200,
+                () => { chosen.Clear(); SaveOutfits(outfits); });
+
+            ItemDrop.ItemData.ItemType accepts = Outfit.Accepts(slot);
+            List<ItemCatalogue.Entry> entries = _search.Length > 0
+                ? ItemCatalogue.Search(_search, 200)
+                : ItemCatalogue.All(accepts == ItemDrop.ItemData.ItemType.None
+                    ? (ItemDrop.ItemData.ItemType?)null : accepts);
+
+            int start = _page * PickerRows;
+            for (int row = 0; row < PickerRows && start + row < entries.Count; row++)
+            {
+                ItemCatalogue.Entry entry = entries[start + row];
+                int rank = chosen.IndexOf(entry.PrefabName);
+                AddButton(_content.transform,
+                    (rank >= 0 ? (rank + 1) + ". " : "○ ") + Short(entry.DisplayName, 22),
+                    -190, -260 - row * 48, 360, () =>
+                    {
+                        if (!chosen.Remove(entry.PrefabName)) chosen.Add(entry.PrefabName);
+                        SaveOutfits(outfits);
+                    });
+                TextAt(_content.transform, entry.PrefabName, 190, -260 - row * 48, 12, 200,
+                    TextAnchor.MiddleLeft, Color.gray);
+            }
+            Pager(entries.Count, PickerRows);
+            LeftTextAt(_content.transform, chosen.Count == 0
+                    ? "Nothing chosen, so this slot keeps whatever the villager was born wearing."
+                    : "Numbered in preference order: a villager wears the first one it owns.",
+                -575, 14, 590, Color.gray);
+        }
+
+        /// <summary>What a slot currently asks for, in the words a player recognises.</summary>
+        private static string SlotSummary(Outfit outfit, OutfitSlot slot)
+        {
+            List<string> chosen = outfit.Choices[(int)slot];
+            if (chosen.Count == 0) return "leave as-is";
+            List<string> names = new List<string>();
+            foreach (string item in chosen) names.Add(ItemCatalogue.Label(item));
+            return string.Join(" / ", names.ToArray());
         }
 
         private void SaveOutfits(List<Outfit> outfits) { _colony.State.SetOutfits(outfits); Refresh(); }
@@ -607,23 +851,6 @@ namespace Kukolony.Gui
             }
         }
 
-        private static string Describe(Outfit outfit)
-        {
-            List<string> worn = outfit.Wanted();
-            return worn.Count == 0 ? "nothing set" : Short(string.Join(", ", worn.ToArray()), 30);
-        }
-
-        /// <summary>
-        ///     Which of the varying settings this job reads. Work the registry does not know
-        ///     shows none of them rather than all of them - guessing would be the mistake this
-        ///     exists to prevent.
-        /// </summary>
-        private static JobSetting Reads(ColonyJobConfig job)
-        {
-            IColonyWork work = WorkRegistry.For(job.Type);
-            return work != null ? work.Settings : JobSetting.None;
-        }
-
         private static string JobSummary(ColonyJobConfig job)
         {
             string work = ColonyJobCatalog.DisplayName(job.Type);
@@ -631,10 +858,20 @@ namespace Kukolony.Gui
             return job.Name == work ? tail : Short(work, 18) + " • " + tail;
         }
 
-        private void SaveJobs(List<ColonyJobConfig> jobs) { _colony.State.SetJobs(jobs); Refresh(); }
-        private void Pager(int count)
+        private static string Describe(Outfit outfit)
         {
-            int pages=Mathf.Max(1,Mathf.CeilToInt(count/(float)Rows)); _page=Mathf.Clamp(_page,0,pages-1);
+            List<string> worn = outfit.Wanted();
+            if (worn.Count == 0) return "nothing set";
+            List<string> names = new List<string>();
+            foreach (string item in worn) names.Add(ItemCatalogue.Label(item));
+            return Short(string.Join(", ", names.ToArray()), 30);
+        }
+
+        private void SaveJobs(List<ColonyJobConfig> jobs) { _colony.State.SetJobs(jobs); Refresh(); }
+        private void Pager(int count) => Pager(count, Rows);
+        private void Pager(int count, int perPage)
+        {
+            int pages=Mathf.Max(1,Mathf.CeilToInt(count/(float)perPage)); _page=Mathf.Clamp(_page,0,pages-1);
             AddButton(_content.transform, "‹", -65, -600, 50, () => { _page=Mathf.Max(0,_page-1); Refresh(); });
             TextAt(_content.transform, $"{_page+1} / {pages}", 0, -600, 14, 80);
             AddButton(_content.transform, "›", 65, -600, 50, () => { _page=Mathf.Min(pages-1,_page+1); Refresh(); });

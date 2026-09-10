@@ -36,7 +36,7 @@ namespace Kukolony.Jobs.Work
         ///     Only how far to range. There is no container at either end: trees are not
         ///     stored anywhere and the wood is left where it falls.
         /// </summary>
-        public override JobSetting Settings => JobSetting.SearchRadius;
+        public override JobSetting Reads => JobSetting.SearchRadius;
 
         public override WorkStep Next(WorkState state, WorkFacts facts) => WorkUntilGone.Next(state, facts);
 

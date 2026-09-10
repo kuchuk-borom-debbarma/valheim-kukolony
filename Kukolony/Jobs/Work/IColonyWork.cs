@@ -33,7 +33,7 @@ namespace Kukolony.Jobs.Work
         ///     The settings this job actually reads, among those not every job does. The panel
         ///     shows only these, so a job cannot offer a control it ignores.
         /// </summary>
-        JobSetting Settings { get; }
+        JobSetting Reads { get; }
 
         /// <summary>What to do next, given where the villager got to and what it can see.</summary>
         WorkStep Next(WorkState state, WorkFacts facts);
@@ -63,6 +63,13 @@ namespace Kukolony.Jobs.Work
         ///     the hardest kind of fault to find.
         /// </remarks>
         bool GathersFromTheWorld { get; }
+
+        /// <summary>
+        ///     Everything this job can be configured with, described rather than drawn. The
+        ///     panel renders controls from this, so a job cannot offer a setting it ignores and
+        ///     cannot hide one it reads.
+        /// </summary>
+        System.Collections.Generic.List<Settings.JobSettingSpec> Describe();
 
         /// <summary>
         ///     Chooses what to work on. Separated from delivery because a job that hauls looks

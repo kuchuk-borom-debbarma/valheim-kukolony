@@ -28,7 +28,7 @@ namespace Kukolony.Jobs.Work
         ///     A source container is the only choice worth offering. There is no destination -
         ///     the villager is one - and nothing is searched for on the ground.
         /// </summary>
-        public override JobSetting Settings => JobSetting.Source;
+        public override JobSetting Reads => JobSetting.Source;
 
         public override WorkStep Next(WorkState state, WorkFacts facts) => FetchOnly.Next(state, facts);
 

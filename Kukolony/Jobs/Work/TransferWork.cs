@@ -14,7 +14,7 @@ namespace Kukolony.Jobs.Work
         public override ColonyJobType Type => ColonyJobType.Transfer;
 
         /// <summary>Both ends are containers, and nothing is searched for on the ground.</summary>
-        public override JobSetting Settings =>
+        public override JobSetting Reads =>
             JobSetting.Source | JobSetting.Destination | JobSetting.DropOnGround;
 
         public override JobResult ChooseSource(WorkContext context, out string activity) =>

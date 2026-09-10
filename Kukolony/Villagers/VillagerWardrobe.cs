@@ -51,20 +51,47 @@ namespace Kukolony.Villagers
             if (vis == null || outfit == null) return;
             for (int slot = 0; slot < Outfit.SlotCount; slot++)
             {
-                string wanted = outfit.Items[slot] ?? string.Empty;
-                if (wanted.Length == 0) continue;
-                Set(vis, (OutfitSlot)slot, Find(bag, wanted));
+                if (outfit.Ignores((OutfitSlot)slot)) continue;
+                Set(vis, (OutfitSlot)slot, Preferred(bag, outfit.Choices[slot]));
             }
         }
 
-        /// <summary>Outfit items the villager does not own, which is what an equip job fetches.</summary>
+        /// <summary>
+        ///     What an equip job should go and fetch: for each slot the outfit manages and the
+        ///     villager cannot yet fill, everything that would fill it.
+        /// </summary>
+        /// <remarks>
+        ///     A slot already satisfied asks for nothing, even when a more preferred item in it
+        ///     is missing - otherwise a villager wearing leather would spend forever walking to
+        ///     containers looking for troll leather nobody has crafted.
+        /// </remarks>
         internal static List<string> Missing(Inventory bag, Outfit outfit)
         {
             List<string> missing = new List<string>();
             if (outfit == null) return missing;
-            foreach (string item in outfit.Wanted())
-                if (Find(bag, item) == null) missing.Add(item);
+            for (int slot = 0; slot < Outfit.SlotCount; slot++)
+            {
+                List<string> choices = outfit.Choices[slot];
+                if (choices.Count == 0 || Preferred(bag, choices) != null) continue;
+                foreach (string item in choices)
+                    if (!missing.Contains(item)) missing.Add(item);
+            }
             return missing;
+        }
+
+        /// <summary>
+        ///     The first item in this slot's preference order that the villager actually owns,
+        ///     or null. Order is the whole point: put the better armour first and everybody
+        ///     upgrades as soon as one exists.
+        /// </summary>
+        private static ItemDrop.ItemData Preferred(Inventory bag, List<string> choices)
+        {
+            foreach (string item in choices)
+            {
+                ItemDrop.ItemData found = Find(bag, item);
+                if (found != null) return found;
+            }
+            return null;
         }
 
         /// <summary>The bag's copy of this item, or null when it has none.</summary>

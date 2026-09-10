@@ -33,7 +33,7 @@ namespace Kukolony.Jobs.Work
         ///     No destination: the load goes into the station, which is chosen by capability
         ///     rather than by a container setting.
         /// </summary>
-        public override JobSetting Settings => JobSetting.Source;
+        public override JobSetting Reads => JobSetting.Source;
 
         public override JobResult ChooseSource(WorkContext context, out string activity) =>
             ColonyJobEngine.ChooseStockedContainer(context, out activity);

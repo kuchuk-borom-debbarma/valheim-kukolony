@@ -835,7 +835,7 @@ namespace Kukolony.Debug
             const string Piece = "ArmorLeatherChest";
             List<Outfit> outfits = colony.State.GetEffectiveOutfits();
             Outfit uniform = new Outfit { Name = "Benchmark uniform" };
-            uniform[OutfitSlot.Chest] = Piece;
+            uniform[OutfitSlot.Chest].Add(Piece);
             outfits.RemoveAll(entry => entry.Name == uniform.Name);
             outfits.Add(uniform);
             colony.State.SetOutfits(outfits);

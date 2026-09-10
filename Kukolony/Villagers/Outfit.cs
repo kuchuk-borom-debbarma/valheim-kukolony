@@ -39,28 +39,44 @@ namespace Kukolony.Villagers
 
         internal string Name = string.Empty;
 
-        /// <summary>Prefab name per slot, indexed by <see cref="OutfitSlot"/>. Empty means bare.</summary>
-        internal readonly string[] Items = new string[SlotCount];
+        /// <summary>
+        ///     Acceptable items per slot, in order of preference. An empty list leaves the slot
+        ///     alone.
+        /// </summary>
+        /// <remarks>
+        ///     A list rather than one name, because "leather or troll leather, whichever we
+        ///     have" is what a colony actually wants, and a single choice is just a list of
+        ///     one. Order is the preference: the villager wears the first it owns, so putting
+        ///     the better armour first upgrades everybody as soon as one is crafted.
+        /// </remarks>
+        internal readonly List<string>[] Choices = NewChoices();
 
-        internal string this[OutfitSlot slot]
+        internal List<string> this[OutfitSlot slot] => Choices[(int)slot];
+
+        private static List<string>[] NewChoices()
         {
-            get => Items[(int)slot] ?? string.Empty;
-            set => Items[(int)slot] = value ?? string.Empty;
+            List<string>[] slots = new List<string>[SlotCount];
+            for (int i = 0; i < SlotCount; i++) slots[i] = new List<string>();
+            return slots;
         }
 
-        /// <summary>Every item this outfit names, without the empty slots.</summary>
+        /// <summary>Every item this outfit names, without duplicates.</summary>
         internal List<string> Wanted()
         {
             List<string> wanted = new List<string>();
-            foreach (string item in Items)
-                if (!string.IsNullOrEmpty(item) && !wanted.Contains(item)) wanted.Add(item);
+            foreach (List<string> slot in Choices)
+                foreach (string item in slot)
+                    if (!string.IsNullOrEmpty(item) && !wanted.Contains(item)) wanted.Add(item);
             return wanted;
         }
+
+        /// <summary>True when this slot is left to whatever the villager was born wearing.</summary>
+        internal bool Ignores(OutfitSlot slot) => Choices[(int)slot].Count == 0;
 
         internal Outfit Clone()
         {
             Outfit copy = new Outfit { Name = Name };
-            for (int i = 0; i < SlotCount; i++) copy.Items[i] = Items[i];
+            for (int i = 0; i < SlotCount; i++) copy.Choices[i].AddRange(Choices[i]);
             return copy;
         }
 
@@ -73,5 +89,21 @@ namespace Kukolony.Villagers
         ///     shipped. Naming a slot is how a player takes it over.
         /// </remarks>
         internal static Outfit Everyday() => new Outfit { Name = "Everyday" };
+
+        /// <summary>Which kind of item belongs in a slot, so a chest row offers chestpieces.</summary>
+        internal static ItemDrop.ItemData.ItemType Accepts(OutfitSlot slot)
+        {
+            switch (slot)
+            {
+                case OutfitSlot.Helmet: return ItemDrop.ItemData.ItemType.Helmet;
+                case OutfitSlot.Chest: return ItemDrop.ItemData.ItemType.Chest;
+                case OutfitSlot.Legs: return ItemDrop.ItemData.ItemType.Legs;
+                case OutfitSlot.Shoulder: return ItemDrop.ItemData.ItemType.Shoulder;
+                case OutfitSlot.Utility: return ItemDrop.ItemData.ItemType.Utility;
+                // Hands take tools and weapons, which the game files under several types, so
+                // those rows offer everything rather than a list that quietly omits the axe.
+                default: return ItemDrop.ItemData.ItemType.None;
+            }
+        }
     }
 }

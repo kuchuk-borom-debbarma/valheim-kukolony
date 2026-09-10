@@ -19,7 +19,7 @@ namespace Kukolony.Jobs.Work
         ///     No source: the hive is chosen by capability, and what it produces is found on
         ///     the ground, which is what the radius bounds.
         /// </summary>
-        public override JobSetting Settings =>
+        public override JobSetting Reads =>
             JobSetting.Destination | JobSetting.SearchRadius | JobSetting.DropOnGround;
 
         public override WorkStep Next(WorkState state, WorkFacts facts) => TapThenGather.Next(state, facts);

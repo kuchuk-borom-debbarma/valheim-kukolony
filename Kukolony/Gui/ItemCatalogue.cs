@@ -13,10 +13,11 @@ namespace Kukolony.Gui
     {
         internal readonly struct Entry
         {
-            internal Entry(string prefabName, string displayName)
+            internal Entry(string prefabName, string displayName, ItemDrop.ItemData.ItemType type)
             {
                 PrefabName = prefabName;
                 DisplayName = displayName;
+                Type = type;
             }
 
             /// <summary>What gets stored in a job's item filter; executors match on this.</summary>
@@ -24,9 +25,51 @@ namespace Kukolony.Gui
 
             /// <summary>What the player reads.</summary>
             internal string DisplayName { get; }
+
+            /// <summary>
+            ///     Which slot this belongs in, so an outfit's chest row can offer chestpieces
+            ///     rather than every item in the game.
+            /// </summary>
+            internal ItemDrop.ItemData.ItemType Type { get; }
         }
 
         private static readonly List<Entry> Entries = new List<Entry>();
+
+        /// <summary>
+        ///     Builds on first use and stays built. Nothing has to remember to call Rebuild,
+        ///     which is what left this catalogue empty and unused for a while.
+        /// </summary>
+        internal static void EnsureBuilt()
+        {
+            if (Entries.Count == 0) Rebuild();
+        }
+
+        /// <summary>Dropped when a world unloads; ObjectDB is rebuilt with it.</summary>
+        internal static void Clear() => Entries.Clear();
+
+        /// <summary>
+        ///     Everything, or everything that goes in one slot, sorted by the name a player
+        ///     reads. This is the browse case; <see cref="Search"/> is the typed-a-filter case.
+        /// </summary>
+        internal static List<Entry> All(ItemDrop.ItemData.ItemType? type = null)
+        {
+            EnsureBuilt();
+            List<Entry> results = new List<Entry>();
+            foreach (Entry entry in Entries)
+                if (type == null || entry.Type == type.Value) results.Add(entry);
+            results.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName,
+                System.StringComparison.OrdinalIgnoreCase));
+            return results;
+        }
+
+        /// <summary>What a player reads for a stored prefab name, or the name itself.</summary>
+        internal static string Label(string prefabName)
+        {
+            EnsureBuilt();
+            foreach (Entry entry in Entries)
+                if (entry.PrefabName == prefabName) return entry.DisplayName;
+            return prefabName;
+        }
 
         /// <summary>
         ///     Built once from ObjectDB. Rebuilt if the game reloads it, since a stale
@@ -53,7 +96,7 @@ namespace Kukolony.Gui
                     ? prefab.name
                     : Localization.instance.Localize(token);
 
-                Entries.Add(new Entry(prefab.name, display));
+                Entries.Add(new Entry(prefab.name, display, drop.m_itemData.m_shared.m_itemType));
             }
         }
 
@@ -70,6 +113,7 @@ namespace Kukolony.Gui
         /// </summary>
         internal static List<Entry> Search(string filter, int limit)
         {
+            EnsureBuilt();
             List<Entry> results = new List<Entry>();
             if (string.IsNullOrEmpty(filter))
             {

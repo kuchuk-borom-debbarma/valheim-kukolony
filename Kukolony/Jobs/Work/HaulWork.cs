@@ -10,7 +10,7 @@ namespace Kukolony.Jobs.Work
         public override ColonyJobType Type => ColonyJobType.HaulLoose;
 
         /// <summary>No source: hauling looks on the ground, which is what the radius bounds.</summary>
-        public override JobSetting Settings =>
+        public override JobSetting Reads =>
             JobSetting.Destination | JobSetting.SearchRadius | JobSetting.DropOnGround;
 
         public override JobResult ChooseSource(WorkContext context, out string activity) =>
