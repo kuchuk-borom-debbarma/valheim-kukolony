@@ -36,6 +36,7 @@ namespace Kukolony.Villagers
         private static readonly int QueueProgressKey = "kukolony.queue.progress".GetStableHashCode();
         private static readonly int RuntimePhaseKey = "kukolony.queue.phase".GetStableHashCode();
         private static readonly int StepCursorKey = "kukolony.step.cursor.v1".GetStableHashCode();
+        private static readonly int WorkStateKey = "kukolony.work.state.v1".GetStableHashCode();
 
         private readonly ZDO _zdo;
 
@@ -107,6 +108,15 @@ namespace Kukolony.Villagers
         internal int StepCursor => _zdo?.GetInt(StepCursorKey, 0) ?? 0;
 
         internal void SetStepCursor(int index) => _zdo.Set(StepCursorKey, index < 0 ? 0 : index);
+
+        /// <summary>
+        ///     Where this villager has got to in the job it is running. Zero is the start of a
+        ///     cycle, which is what every existing save reads and is always safe to resume
+        ///     from, so adding this needed no versioning.
+        /// </summary>
+        internal Jobs.Work.WorkState Work => (Jobs.Work.WorkState)(_zdo?.GetInt(WorkStateKey, 0) ?? 0);
+
+        internal void SetWork(Jobs.Work.WorkState state) => _zdo.Set(WorkStateKey, (int)state);
         /// <summary>
         ///     Releases the current target only. The pipeline cursor survives, so a step that
         ///     finished with its target resumes at the next piece rather than starting the
@@ -128,6 +138,7 @@ namespace Kukolony.Villagers
             ClearTarget();
             SetQueueProgress(0);
             SetStepCursor(0);
+            SetWork(Jobs.Work.WorkState.Choosing);
         }
 
         /// <summary>Existing name for <see cref="ResetJob"/>, kept while callers migrate.</summary>

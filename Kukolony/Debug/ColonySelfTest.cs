@@ -171,6 +171,8 @@ namespace Kukolony.Debug
             yield return CheckTransferPipeline(report, colony);
             yield return CheckPieceSettings(report, colony);
             yield return CheckNewPieces(report, colony);
+            yield return CheckStationJob(report, colony);
+            yield return CheckHiveJob(report, colony);
             CheckStationContracts(report);
             CheckStationProtocols(report, origin);
             report.Check(Enum.GetValues(typeof(ColonyJobType)).Length == 7, "concrete job catalog is complete");
@@ -472,7 +474,7 @@ namespace Kukolony.Debug
             if (worker == null || !worker.TryGetComponent(out ZNetView view) || !view.IsValid() ||
                 !worker.TryGetComponent(out MonsterAI ai))
             {
-                report.Check(false, "haul pipeline runs end to end through the engine tick", "no worker");
+                report.Check(false, "the haul job runs end to end through the engine tick", "no worker");
                 yield break;
             }
 
@@ -505,17 +507,21 @@ namespace Kukolony.Debug
             int after = Count(destination, "Flint");
             // Delivered amount is the drop's own stack size, not necessarily one.
             report.Check(result == JobResult.Completed && after > before && worker.State.StepCursor == 0,
-                "haul pipeline runs end to end through the engine tick",
+                "the haul job runs end to end through the engine tick",
                 $"result={result} stored={after} was={before} cursor={worker.State.StepCursor} " +
                 $"steps={string.Join(" | ", actions.ToArray())}");
 
-            // Control: the same job with no pieces cannot run. Without it this would pass
-            // just as well if the walker were ignoring the piece list and hauling anyway.
-            ColonyJobConfig empty = Job(ColonyJobType.HaulLoose, "Flint");
-            empty.Destination = job.Destination;
-            JobResult emptyResult = ColonyJobEngine.Tick(worker, ai, bag, colony, empty, out _);
-            report.Check(emptyResult == JobResult.Skipped,
-                "control: a job with no pipeline refuses to run", $"result={emptyResult}");
+            // Control: the same job asking for something that is not lying about must come
+            // to rest and carry nothing. Without it the check above would pass just as well
+            // if hauling ignored its filter and fetched whatever it found first.
+            Clear(bag.GetInventory());
+            ColonyJobConfig absent = Job(ColonyJobType.HaulLoose, "Ruby");
+            absent.Destination = job.Destination;
+            absent.StopDistance = 12f;
+            JobResult absentResult = ColonyJobEngine.Tick(worker, ai, bag, colony, absent, out _);
+            report.Check(absentResult == JobResult.Skipped && Count(bag.GetInventory(), "Flint") == 0,
+                "control: a haul job whose item is not on the ground carries nothing",
+                $"result={absentResult} bag={Count(bag.GetInventory(), "Flint")}");
 
             if (dropped != null) ZNetScene.instance.Destroy(dropped);
             VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
@@ -537,7 +543,7 @@ namespace Kukolony.Debug
             if (worker == null || !worker.TryGetComponent(out ZNetView view) || !view.IsValid() ||
                 !worker.TryGetComponent(out MonsterAI ai))
             {
-                report.Check(false, "transfer pipeline runs end to end through the engine tick", "no worker");
+                report.Check(false, "the transfer job runs end to end through the engine tick", "no worker");
                 yield break;
             }
 
@@ -574,7 +580,7 @@ namespace Kukolony.Debug
 
             report.Check(result == JobResult.Completed && Count(sink, "Flint") == 1 &&
                          Count(source, "Flint") == 0 && worker.State.StepCursor == 0,
-                "transfer pipeline moves an item between containers through the engine tick",
+                "the transfer job moves an item between containers through the engine tick",
                 $"result={result} moved={Count(sink, "Flint")} left={Count(source, "Flint")} " +
                 $"cursor={worker.State.StepCursor} steps={string.Join(" | ", steps.ToArray())}");
 
@@ -646,7 +652,7 @@ namespace Kukolony.Debug
                 if (piece.Kind == JobPieceKind.TakeItem || piece.Kind == JobPieceKind.PutItem)
                     piece.ItemFilters.Add("Flint");
             yield return new WaitForSecondsRealtime(.3f);
-            yield return Run(worker, ai, bag, colony, overridden);
+            yield return RunWalker(worker, ai, bag, colony, overridden);
             bool movedOverride = Count(sink, "Flint") == 1 && Count(sink, "Wood") == 0;
 
             // Control: same pipeline, no overrides. It must move the job's item instead.
@@ -659,7 +665,7 @@ namespace Kukolony.Debug
             plain.Destination = intoId;
             plain.StopDistance = 12f;
             yield return new WaitForSecondsRealtime(.2f);
-            yield return Run(worker, ai, bag, colony, plain);
+            yield return RunWalker(worker, ai, bag, colony, plain);
             bool movedJob = Count(sink, "Wood") == 1 && Count(sink, "Flint") == 0;
 
             report.Check(movedOverride && movedJob,
@@ -672,12 +678,27 @@ namespace Kukolony.Debug
 
         /// <summary>Runs a job through the engine tick until it completes or gives up.</summary>
         private static IEnumerator Run(Villager worker, MonsterAI ai, Container bag, Colony colony,
-            ColonyJobConfig job)
+            ColonyJobConfig job) =>
+            Drive(worker, ai, bag, colony, job, false);
+
+        /// <summary>
+        ///     The same, forced down the piece walker. Only the checks that exist to cover
+        ///     pieces use this; everything else goes through whichever path the job's type
+        ///     selects, which is the thing worth testing.
+        /// </summary>
+        private static IEnumerator RunWalker(Villager worker, MonsterAI ai, Container bag, Colony colony,
+            ColonyJobConfig job) =>
+            Drive(worker, ai, bag, colony, job, true);
+
+        private static IEnumerator Drive(Villager worker, MonsterAI ai, Container bag, Colony colony,
+            ColonyJobConfig job, bool walker)
         {
             JobResult result = JobResult.Running;
             for (int tick = 0; tick < 80 && result != JobResult.Completed; tick++)
             {
-                result = ColonyJobEngine.Tick(worker, ai, bag, colony, job, out _);
+                result = walker
+                    ? ColonyJobEngine.TestTickWalker(worker, ai, bag, colony, job, out _)
+                    : ColonyJobEngine.Tick(worker, ai, bag, colony, job, out _);
                 if (result == JobResult.Failed || result == JobResult.Skipped) break;
                 yield return null;
             }
@@ -716,7 +737,7 @@ namespace Kukolony.Debug
             pile.Pieces.Add(new JobPiece { Kind = JobPieceKind.DropCarried });
             pile.Pieces.Add(new JobPiece { Kind = JobPieceKind.End });
             pile.StopDistance = 12f;
-            yield return Run(worker, ai, bag, colony, pile);
+            yield return RunWalker(worker, ai, bag, colony, pile);
             bool droppedIt = Count(bag.GetInventory(), "Flint") == 0 && LooseCount("Flint", at) > 0;
 
             // Roomy target: one full chest, one with space.
@@ -756,13 +777,15 @@ namespace Kukolony.Debug
             JobResult chooseResult = JobResult.Running;
             for (int tick = 0; tick < 80 && chooseResult != JobResult.Completed; tick++)
             {
-                chooseResult = ColonyJobEngine.Tick(worker, ai, bag, colony, choose, out string step);
+                chooseResult = ColonyJobEngine.TestTickWalker(worker, ai, bag, colony, choose, out string step);
                 if (chooseSteps.Count == 0 || chooseSteps[chooseSteps.Count - 1] != step) chooseSteps.Add(step);
                 if (chooseResult == JobResult.Failed || chooseResult == JobResult.Skipped) break;
                 yield return null;
             }
             yield return new WaitForSecondsRealtime(.2f);
-            bool avoidedFull = Count(roomyBox, "Flint") == 1 && Count(fullBox, "Flint") == 0;
+            int reachedRoomy = Count(roomyBox, "Flint");
+            int reachedFull = Count(fullBox, "Flint");
+            bool avoidedFull = reachedRoomy == 1 && reachedFull == 0;
 
             // Control: with every container full it must refuse rather than choose one.
             Clear(roomyBox);
@@ -773,16 +796,171 @@ namespace Kukolony.Debug
             JobResult stuck = JobResult.Running;
             for (int tick = 0; tick < 40 && stuck == JobResult.Running; tick++)
             {
-                stuck = ColonyJobEngine.Tick(worker, ai, bag, colony, choose, out _);
+                stuck = ColonyJobEngine.TestTickWalker(worker, ai, bag, colony, choose, out _);
                 yield return null;
             }
             bool refused = stuck == JobResult.Skipped && Count(bag.GetInventory(), "Flint") == 1;
 
             report.Check(droppedIt && avoidedFull && refused,
                 "put down leaves items on the ground, and a roomy target skips a full container",
-                $"dropped={droppedIt} roomy={Count(roomyBox, "Flint")} full={Count(fullBox, "Flint")} " +
+                $"dropped={droppedIt} roomy={reachedRoomy} full={reachedFull} " +
                 $"choose={chooseResult} steps={string.Join(" | ", chooseSteps.ToArray())} " +
                 $"whenNoRoom={stuck} stillCarrying={Count(bag.GetInventory(), "Flint")}");
+
+            VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Drives a whole station job through the engine tick: fetch the fuel, carry it
+        ///     over, hand it in.
+        /// </summary>
+        /// <remarks>
+        ///     The station protocols are already covered one call at a time. What this covers
+        ///     is the order they are called in, which is the part that changed when stations
+        ///     stopped being a piece list and became a job that sequences itself. The job is
+        ///     scoped to the fireplace this check placed, because the colony hearth is itself
+        ///     a fireplace and would otherwise be a legitimate answer.
+        /// </remarks>
+        private static IEnumerator CheckStationJob(TestReport report, Colony colony)
+        {
+            Villager worker = VillagerLifecycle.Spawn(colony);
+            if (worker == null || !worker.TryGetComponent(out ZNetView view) || !view.IsValid() ||
+                !worker.TryGetComponent(out MonsterAI ai))
+            {
+                report.Check(false, "the fuel job runs end to end through the engine tick", "no worker");
+                yield break;
+            }
+
+            Vector3 at = worker.transform.position;
+            GameObject chest = Spawn("piece_chest_wood", at + Vector3.right * 3f);
+            GameObject fire = Spawn("fire_pit", at + Vector3.left * 3f);
+            Register(colony, chest, "Fuel source");
+            StructureRecord fireRecord = Register(colony, fire, "Fuel destination");
+            Inventory store = chest.GetComponent<Container>().GetInventory();
+            Container bag = VillagerInventory.Attach(worker.gameObject, view);
+            Clear(store);
+            Clear(bag.GetInventory());
+            Add(store, "Wood");
+            yield return new WaitForSecondsRealtime(.3f);
+
+            ColonyJobConfig job = Job(ColonyJobType.FuelFireplaces, "Wood");
+            job.Source = chest.GetComponent<ZNetView>().GetZDO().m_uid;
+            job.Targets = TargetMode.Selected;
+            if (fireRecord != null) job.SelectedStructures.Add(fireRecord.Id);
+            job.StopDistance = 12f;
+
+            int before = StationMetric(fire, job);
+            JobResult result = JobResult.Running;
+            var steps = new List<string>();
+            for (int tick = 0; tick < 80 && result != JobResult.Completed; tick++)
+            {
+                result = ColonyJobEngine.Tick(worker, ai, bag, colony, job, out string activity);
+                if (steps.Count == 0 || steps[steps.Count - 1] != activity) steps.Add(activity);
+                if (result == JobResult.Failed || result == JobResult.Skipped) break;
+                yield return null;
+            }
+            yield return new WaitForSecondsRealtime(.2f);
+            int after = StationMetric(fire, job);
+            bool fuelled = result == JobResult.Completed && after != before && Count(store, "Wood") == 0;
+
+            // Control: nothing to fetch, so the job must come to rest without touching the
+            // fire. Without it the check above would pass just as well if the villager were
+            // feeding the fire out of thin air.
+            Clear(store);
+            Clear(bag.GetInventory());
+            int settled = StationMetric(fire, job);
+            JobResult idle = JobResult.Running;
+            for (int tick = 0; tick < 40 && idle == JobResult.Running; tick++)
+            {
+                idle = ColonyJobEngine.Tick(worker, ai, bag, colony, job, out _);
+                yield return null;
+            }
+            bool refused = idle == JobResult.Skipped && StationMetric(fire, job) == settled;
+
+            report.Check(fuelled && refused,
+                "the fuel job fetches fuel and feeds a fireplace through the engine tick",
+                $"result={result} station={before}->{after} left={Count(store, "Wood")} " +
+                $"whenEmpty={idle} steps={string.Join(" | ", steps.ToArray())}");
+
+            VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Drives a whole beehive job through the engine tick: tap, wait, pick up, store.
+        /// </summary>
+        /// <remarks>
+        ///     This is the only job whose cycle collects twice - once at the hive and once off
+        ///     the ground - and telling those apart is the thing most likely to go wrong. A
+        ///     villager that tapped the hive a second time instead of picking up the honey
+        ///     would still look busy, so the check is that honey reaches the chest.
+        /// </remarks>
+        private static IEnumerator CheckHiveJob(TestReport report, Colony colony)
+        {
+            Villager worker = VillagerLifecycle.Spawn(colony);
+            if (worker == null || !worker.TryGetComponent(out ZNetView view) || !view.IsValid() ||
+                !worker.TryGetComponent(out MonsterAI ai))
+            {
+                report.Check(false, "the beehive job runs end to end through the engine tick", "no worker");
+                yield break;
+            }
+
+            Vector3 at = worker.transform.position;
+            GameObject chest = Spawn("piece_chest_wood", at + Vector3.right * 3f);
+            GameObject hiveObject = Spawn("piece_beehive", at + Vector3.left * 3f);
+            Register(colony, chest, "Honey destination");
+            StructureRecord hiveRecord = Register(colony, hiveObject, "Honey source");
+            Inventory store = chest.GetComponent<Container>().GetInventory();
+            Container bag = VillagerInventory.Attach(worker.gameObject, view);
+            Clear(store);
+            Clear(bag.GetInventory());
+
+            // Hives fill up on their own schedule, which is far longer than a benchmark. Run
+            // the clock forward rather than waiting it out.
+            Beehive hive = hiveObject != null ? hiveObject.GetComponent<Beehive>() : null;
+            if (hive != null) hive.m_secPerUnit = .01f;
+            yield return new WaitForSecondsRealtime(1f);
+            if (hive != null) hive.UpdateBees();
+
+            ColonyJobConfig job = Job(ColonyJobType.CollectBeehives, "Honey");
+            job.Destination = chest.GetComponent<ZNetView>().GetZDO().m_uid;
+            job.Targets = TargetMode.Selected;
+            if (hiveRecord != null) job.SelectedStructures.Add(hiveRecord.Id);
+            job.StopDistance = 12f;
+            job.SearchRadius = 64f;
+
+            int before = Count(store, "Honey");
+            JobResult result = JobResult.Running;
+            var steps = new List<string>();
+            for (int tick = 0; tick < 120 && result != JobResult.Completed; tick++)
+            {
+                result = ColonyJobEngine.Tick(worker, ai, bag, colony, job, out string activity);
+                if (steps.Count == 0 || steps[steps.Count - 1] != activity) steps.Add(activity);
+                if (result == JobResult.Failed || result == JobResult.Skipped) break;
+                // The honey is a world drop, so the wait needs real time to pass rather than
+                // frames to elapse.
+                yield return new WaitForSecondsRealtime(.05f);
+            }
+            yield return new WaitForSecondsRealtime(.2f);
+            int stored = Count(store, "Honey");
+            bool collected = result == JobResult.Completed && stored > before;
+
+            // Control: an emptied hive has nothing to give, so the job must come to rest
+            // without storing anything.
+            int settled = Count(store, "Honey");
+            JobResult idle = JobResult.Running;
+            for (int tick = 0; tick < 60 && idle == JobResult.Running; tick++)
+            {
+                idle = ColonyJobEngine.Tick(worker, ai, bag, colony, job, out _);
+                yield return new WaitForSecondsRealtime(.05f);
+            }
+            bool refused = idle == JobResult.Skipped && Count(store, "Honey") == settled;
+
+            report.Check(collected && refused,
+                "the beehive job taps, collects and stores honey through the engine tick",
+                $"result={result} stored={stored} was={before} whenEmpty={idle} " +
+                $"after={Count(store, "Honey")} steps={string.Join(" | ", steps.ToArray())}");
 
             VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
             yield return new WaitForSecondsRealtime(.2f);

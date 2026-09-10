@@ -63,11 +63,13 @@ namespace Kukolony.Jobs
             ColonyJobConfig job, out string activity)
         {
             activity = string.IsNullOrEmpty(job.Name) ? "working" : job.Name;
-            VillagerState state = villager.State;
             Inventory inventory = bag != null ? bag.GetInventory() : null;
             if (inventory == null) return JobResult.Failed;
 
-            return TickWalker(villager, ai, inventory, colony, job, out activity);
+            Work.IColonyWork work = Work.WorkRegistry.For(job.Type);
+            return work != null
+                ? TickWork(work, villager, ai, inventory, colony, job, out activity)
+                : TickWalker(villager, ai, inventory, colony, job, out activity);
         }
 
 
@@ -297,6 +299,184 @@ namespace Kukolony.Jobs
             return null;
         }
 
+        // ---- Work adapters -------------------------------------------------------------
+        // A job says what it wants done; these give it the existing executors unchanged, so
+        // moving a job onto the new path changes how it is sequenced and not what it does.
+
+        internal static JobResult ChooseLooseItem(Work.WorkContext c, out string activity) =>
+            SelectLooseItem(c.Villager, c.Colony, c.Job, null, "pickup", out activity);
+
+        internal static JobResult ChooseStockedContainer(Work.WorkContext c, out string activity) =>
+            SelectSource(c.Villager, c.Colony, c.Job, null, out activity);
+
+        internal static JobResult ChooseContainer(Work.WorkContext c, StructureCapability capability,
+            out string activity) =>
+            !c.Job.Destination.IsNone()
+                ? SelectExplicitContainer(c.Villager, c.Colony, c.Job.Destination, "depositing", out activity)
+                : SelectStructure(c.Villager, c.Colony, c.Job, null, capability, "depositing", out activity);
+
+        internal static JobResult PickUpTarget(Work.WorkContext c, out string activity) =>
+            PickupLoose(c.Target, c.Bag, c.State, out activity);
+
+        internal static JobResult TakeFromTarget(Work.WorkContext c, out string activity) =>
+            Acquire(c.Target, c.Bag, c.Job.ItemFilters, c.State, out activity);
+
+        internal static JobResult DepositCarried(Work.WorkContext c, out string activity) =>
+            Deposit(c.Target, c.Bag, c.Job.ItemFilters, c.State, out activity);
+
+        internal static JobResult ChooseStation(Work.WorkContext c, StructureCapability capability,
+            out string activity) =>
+            SelectStructure(c.Villager, c.Colony, c.Job, null, capability, "operating", out activity);
+
+        internal static JobResult OperateTarget(Work.WorkContext c, StructureCapability capability,
+            out string activity) =>
+            Operate(c.Target, c.Bag, c.Job, capability, c.State, out activity);
+
+        /// <summary>
+        ///     Stands by until the work already started puts something on the ground, giving
+        ///     up after a bounded wait so a job that will never produce anything cannot hold a
+        ///     villager forever. Reports whether the wait is over, because only then may the
+        ///     villager move on to collecting.
+        /// </summary>
+        internal static JobResult AwaitProduce(Work.WorkContext c, out bool appeared, out string activity)
+        {
+            appeared = FindLoose(c.Colony, c.Job.ItemFilters, c.Job.SearchRadius) != null;
+            if (appeared)
+            {
+                c.State.SetQueueProgress(0);
+                activity = "collecting what appeared";
+                return JobResult.Running;
+            }
+            int waited = c.State.QueueProgress + 1;
+            if (waited > WaitTicks) return JobOutcomes.Skipped(c.State, "nothing appeared to collect", out activity);
+            c.State.SetQueueProgress(waited);
+            activity = "waiting for the work to finish";
+            return JobResult.Running;
+        }
+
+        /// <summary>
+        ///     Harness hook that runs a job through the piece walker whatever its type. The
+        ///     checks that cover pieces themselves need this now that haul and transfer are
+        ///     sequenced by their own jobs instead, and it goes when the pieces do.
+        /// </summary>
+        internal static JobResult TestTickWalker(Villager villager, MonsterAI ai, Container inventory,
+            Colony colony, ColonyJobConfig job, out string activity) =>
+            TickWalker(villager, ai, inventory != null ? inventory.GetInventory() : null,
+                colony, job, out activity);
+
+        /// <summary>
+        ///     Runs a job that owns its own sequence. The job decides what to do; this performs
+        ///     it and records where the villager got to.
+        /// </summary>
+        private static JobResult TickWork(Work.IColonyWork work, Villager villager, MonsterAI ai,
+            Inventory bag, Colony colony, ColonyJobConfig job, out string activity)
+        {
+            VillagerState state = villager.State;
+            GameObject target = ResolveTarget(state, out bool targetLost);
+            if (targetLost)
+            {
+                state.ResetJob();
+                activity = "target missing";
+                return JobResult.Failed;
+            }
+
+            bool arrived = false;
+            if (target != null)
+            {
+                // Arrival is measured rather than remembered: a villager pushed away from its
+                // target between ticks has not arrived, whatever it recorded last time.
+                arrived = Utils.DistanceXZ(villager.transform.position, target.transform.position)
+                          <= Mathf.Max(.5f, job.StopDistance);
+            }
+
+            Work.WorkStep step = work.Next(state.Work, new Work.WorkFacts(
+                hasTarget: !state.StepTarget.IsNone(),
+                arrived: arrived,
+                carrying: FirstMatching(bag, job.ItemFilters) != null,
+                stockLimitReached: LimitReached(colony, job),
+                hasTool: HasRequiredTool(bag, work.RequiredTool)));
+
+            // The phase is where the decision landed, not where the villager set out from:
+            // transitions skip through states whose outcome already holds, and a job that
+            // collects twice in a cycle would otherwise be told the wrong half.
+            Work.WorkContext context = new Work.WorkContext(villager, ai, bag, colony, job, target,
+                step.From);
+            switch (step.Action)
+            {
+                case Work.WorkAction.Yield:
+                    return JobOutcomes.Skipped(state, RequirementMessage(work, bag), out activity);
+
+                case Work.WorkAction.Complete:
+                    return JobOutcomes.Completed(state, "job cycle complete", out activity);
+
+                case Work.WorkAction.ChooseSource:
+                    return Record(state, step, work.ChooseSource(context, out activity));
+
+                case Work.WorkAction.ChooseTarget:
+                    return Record(state, step, work.ChooseTarget(context, out activity));
+
+                case Work.WorkAction.Move:
+                    return Record(state, step, Walk(villager, ai, state,
+                        job.StopDistance, target, out _, out activity));
+
+                // Standing by holds the villager in the waiting state; only something having
+                // appeared moves it on.
+                case Work.WorkAction.Wait:
+                    return Record(state, step, AwaitProduce(context, out bool appeared, out activity),
+                        appeared);
+            }
+
+            // The rest act on the target, so one that has not loaded is worth waiting for
+            // rather than failing: its zone may still be streaming in.
+            if (target == null)
+            {
+                activity = "waiting for target to load";
+                return JobResult.Running;
+            }
+            switch (step.Action)
+            {
+                case Work.WorkAction.Collect: return Record(state, step, work.Collect(context, out activity));
+                case Work.WorkAction.Deliver: return Record(state, step, work.Deliver(context, out activity));
+                default: return JobOutcomes.Skipped(state, "job cannot run", out activity);
+            }
+        }
+
+        /// <summary>
+        ///     Records the next state when a step made progress. A leaf reports Completed to
+        ///     mean its own step finished, which is not the job being done, so it becomes
+        ///     Running and only the job's own completion ends a cycle.
+        /// </summary>
+        private static JobResult Record(VillagerState state, Work.WorkStep step, JobResult result,
+            bool advance = true)
+        {
+            if (result != JobResult.Running && result != JobResult.Completed) return result;
+            if (advance) state.SetWork(step.Next);
+            return JobResult.Running;
+        }
+
+        /// <summary>True when the bag holds a tool that can do the work this job needs.</summary>
+        private static bool HasRequiredTool(Inventory bag, Work.ToolRequirement required)
+        {
+            if (required == Work.ToolRequirement.None) return true;
+            if (bag == null) return false;
+            foreach (ItemDrop.ItemData item in bag.GetAllItems())
+            {
+                if (item == null || item.m_shared == null) continue;
+                // Classified by what the tool can do, not by its category: axes and pickaxes
+                // are weapons in the game's own taxonomy, and only hammers and hoes are tools.
+                HitData.DamageTypes damage = item.GetDamage();
+                if (required == Work.ToolRequirement.Axe && damage.m_chop > 0f) return true;
+                if (required == Work.ToolRequirement.Pickaxe && damage.m_pickaxe > 0f) return true;
+            }
+            return false;
+        }
+
+        /// <summary>Says why a job yielded, so a missing tool is visible rather than mysterious.</summary>
+        private static string RequirementMessage(Work.IColonyWork work, Inventory bag) =>
+            HasRequiredTool(bag, work.RequiredTool)
+                ? "nothing to do"
+                : "needs " + (work.RequiredTool == Work.ToolRequirement.Axe ? "an axe" : "a pickaxe");
+
         /// <summary>Items the piece at this cursor works with, falling back to the job's.</summary>
         private static List<string> StepFilters(ColonyJobConfig job, int cursor) =>
             PieceSettings.Filters(job, PieceAt(job, cursor));
@@ -309,6 +489,22 @@ namespace Kukolony.Jobs
         private static JobResult Walk(Villager villager, MonsterAI ai, VillagerState state,
             float stopDistance, GameObject target, int next, out string activity)
         {
+            JobResult result = Walk(villager, ai, state, stopDistance, target, out bool arrived,
+                out activity);
+            // The cursor moves on arrival only. Walking is progress, but it is not a step the
+            // pipeline has finished, and advancing early would step over the piece that acts.
+            if (arrived) state.SetStepCursor(next);
+            return result;
+        }
+
+        /// <summary>
+        ///     Walking itself, with nowhere to record progress. Jobs that own their sequencing
+        ///     keep that record in their own terms rather than in a pipeline cursor.
+        /// </summary>
+        private static JobResult Walk(Villager villager, MonsterAI ai, VillagerState state,
+            float stopDistance, GameObject target, out bool arrived, out string activity)
+        {
+            arrived = false;
             if (target == null)
             {
                 activity = "waiting for target to load";
@@ -327,7 +523,7 @@ namespace Kukolony.Jobs
                 activity = "path failed";
                 return JobResult.Failed;
             }
-            state.SetStepCursor(next);
+            arrived = true;
             activity = "arrived at " + TargetName(target);
             return JobResult.Running;
         }
