@@ -168,8 +168,36 @@ namespace Kukolony.Debug
             // early leaves ones that were never registered, and those are exactly the ones
             // that pile up in the world.
             foreach (ZDO villager in FindAll(Villagers.VillagerPrefab.PrefabName)) { Destroy(villager.m_uid); destroyed++; }
+
+            // And everything else a run puts in the world. Cleaning only what a colony had
+            // registered left every chest, kiln and dropped log a scenario ever spawned
+            // standing where it fell - after enough runs the benchmark world is a junkyard,
+            // and a check that finds a leftover chest with room in it passes for the wrong
+            // reason. Destroying by prefab is safe here only because this is gated to the
+            // dedicated benchmark world.
+            foreach (string prefab in Fixtures)
+                foreach (ZDO fixture in FindAll(prefab)) { Destroy(fixture.m_uid); destroyed++; }
             return destroyed;
         }
+
+        /// <summary>
+        ///     Every prefab a scenario spawns. Anything a run creates belongs here, or it
+        ///     accumulates: this list is the difference between a clean world and a junkyard.
+        /// </summary>
+        private static readonly string[] Fixtures =
+        {
+            // Structures
+            "piece_chest_wood", "fire_pit", "smelter", "charcoal_kiln",
+            "piece_cookingstation", "fermenter", "piece_beehive", "Cart",
+            // Items left lying about by pickup, drop and felling checks
+            "Wood", "Flint", "Coal", "CopperOre", "RawMeat", "Honey",
+            "AxeStone", "ArmorLeatherChest",
+            // Felled trunks. The trees themselves are world scenery and are deliberately
+            // not on this list - they share prefabs with everything the world generated.
+            "beech_log", "beech_log_half", "birch_log", "birch_log_half",
+            "fir_log", "fir_log_half", "oak_log", "oak_log_half",
+            "AshlandsTree1_log", "AshlandsTree1_log_half"
+        };
 
         /// <summary>Every ZDO of a prefab currently known to this peer.</summary>
         private static List<ZDO> FindAll(string prefabName)
