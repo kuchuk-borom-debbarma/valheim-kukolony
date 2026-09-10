@@ -258,197 +258,129 @@ tools are given the same way they are today.
 
 ### How to read this
 
-Phases, not sprints. **Each one ends with something playable** — a state you could load a
-world into and enjoy, not a state where half a feature exists. Nothing is scheduled; the
-order is what depends on what, and what earns the most feeling per unit of work.
+Phases, not sprints. **Each ends with something playable** — a state you could load a world
+into and enjoy, not a state where half a feature exists. Nothing is scheduled; the order is
+what depends on what.
 
-Every phase carries the same bar as everything else here: the deterministic checks, a
+Every phase carries the same bar as the rest of this project: deterministic checks, a
 warning-free build, an in-game run that passes twice, and screenshots looked at rather than
 merely captured. A phase is not done because the code exists.
 
-**What already exists is treated as material, not as a plan.** The engine underneath is
-sound and was expensive to get right, so it gets reused; the features are whatever this
-document says, and anything that disagrees loses. See *Salvage* below.
+### Restarting, and what that means
 
-### Salvage
+**The features are rebuilt from this document, not evolved from what runs today.** What
+exists was built to a different plan; morphing it would mean carrying that plan's shape
+around forever, and the shape is the thing being changed.
 
-Kept because it is correct and hard-won, regardless of what changes above it:
+**The engine is salvaged, because it is right and was expensive.** Concretely:
 
-- **Ownership discipline** — claim before writing, everywhere.
-- **The pure decision core** — job sequencing as a function of an enum and booleans, verified
-  in about a second instead of only in a four-minute game run.
-- **Keep-alive** — the reason work off-screen is real, and the thing the previous attempts
-  never built.
-- **The benchmark harness** — two-phase run, screenshots, paired controls, fixture purge.
-- **Registration and capability probing** — structures as bags of components.
-- **Appearance** — villagers look like people, dressed and styled from the game's own data.
-- **Persistence** — versioned ZDO records, durable references, and everything measured about
-  what survives a save.
+- Ownership discipline, and everything measured about what survives a save.
+- The pure decision core — sequencing as a function of an enum and booleans, so a work cycle
+  is verified in a second rather than in a four-minute game run.
+- Keep-alive: the reason off-screen work is real, and what both previous attempts lacked.
+- The benchmark harness: two-phase run, paired controls, screenshots, fixture purge.
+- Capability probing — structures as bags of components.
+- Appearance: villagers who look like people, dressed and styled from the game's own data.
 
-Rewritten to match this document rather than preserved: how jobs are configured, what the
-screen looks like, and how work finds its destination.
+**Existing work that is not yet wanted stays in the code, unexposed.** Chopping, work areas,
+outfits and equipment all work. None are wired into the new design until their turn comes.
+Deleting them would throw away measurements — tool tiers, the two-pass tree, the ownership
+claim before damage — that were expensive to obtain and are not written down anywhere else.
+
+### Every job is defined before it is built
+
+Jobs are not ported. Each is written down first in the same two terms:
+
+- **The work** — what it actually does, step by step, and what makes a cycle finish.
+- **The equipment** — what a villager must be carrying for it to be possible at all.
+
+Then it is built. Going one at a time is deliberate: the last job list grew by analogy until
+seven jobs shared settings none of them used.
+
+### Building for a settlement, not a household
+
+There is no population cap, and the target is high. That does **not** mean building a
+scheduler for a hundred villagers before there is one villager — it means **not choosing
+anything that will have to be thrown away**:
+
+- No per-tick scan whose cost grows with the settlement. Anything that looks through every
+  structure, every container or every loaded object is cached, indexed, or amortised across
+  frames — from the first version, because retrofitting it means rewriting every job.
+- **Answers, not searches.** "Which container takes wood" is a lookup the settlement
+  maintains, not a walk over every chest performed by every villager.
+- Work is claimed, so two hundred villagers do not converge on one tree.
+- Zones kept alive are bounded and prioritised; villagers are cheap, loaded terrain is not.
+- Anything the screen lists is paged and filtered, because a list of a hundred is not a list.
+
+**Written for multiplayer, not tested at scale.** Every write claims ownership first and no
+peer writes what it does not own — that discipline is free to keep and expensive to add
+later. It is not promised, and it is not tested with a second player, until someone asks.
 
 ---
 
-### Phase 1 — Somewhere to live
+### Phase 1 — The core system
 
-*A place, with people in it, doing one useful thing.*
+*A colony, things registered to it, people in it, and the jobs that matter — working.*
 
-The smallest thing that is recognisably the vision rather than a demo. Everything after this
-adds to a settlement that already exists; nothing after this has to invent one.
+Everything else in the mod is an addition to this. Nothing here is a placeholder.
 
 **Build**
 
-- The colony piece, its radius, and naming.
-- The colony screen: one hotkey, opens anywhere, contextual on what is being looked at.
-- Registration of **storage**, with its settings: what belongs in this container.
-- Spawning villagers from the screen; naming them.
-- One job — **put things where they belong** — driven entirely by what containers say.
-- Idling that does not look like a crash: villagers loiter around the hearth rather than
-  standing rigid.
+- **The colony piece**: placed, named, with a radius that is the settlement.
+- **The colony screen**: one hotkey, opens anywhere, contextual on what is being looked at.
+  Switch colonies, name them, register what you are looking at, spawn and name villagers.
+- **Registration by component**, with the settings living on the structure:
+  - **Storage** — what belongs in this container.
+  - **Processing** — what to keep this smelter or kiln fed with.
+- **Villagers**: spawned from the screen, belonging to a colony, doing their job cycle.
+- **The core jobs**, each specified before it is written, each driven by what structures say
+  rather than by its own configuration.
+- **The indexes that make it scale**, built in from the start rather than added later.
 
-**Done when** you place a hearth, register a chest as holding wood, spawn two villagers, drop
-wood on the ground, and it ends up in the chest without anyone configuring a destination —
-and the villagers then behave like people waiting rather than statues.
+**Done when** you place a hearth, register a chest as holding wood and a smelter as wanting
+coal, spawn villagers, and the settlement runs: wood is put away, the smelter stays fed, and
+nothing anywhere was told a destination.
 
-**Risk.** The contextual screen is the piece with no precedent in the current code. Everything
-else is a reshaping of something that already runs.
+**Risks.** The contextual screen has no precedent in the existing code. And the settlement
+index — the thing that answers "where does wood go" — is the piece that everything else
+leans on, so it is the one worth getting right slowly.
 
 ---
 
-### Phase 2 — They keep themselves
+### Phase 2 — A place that lives
 
 *The settlement stops being a machine with names on it.*
 
-Deliberately second, ahead of more work types. A villager that tires, walks home and sleeps
-does more for "this place is inhabited" than a third kind of job ever will, and energy is the
-safest need to build first because it is self-resolving.
-
 **Build**
 
-- Energy: spent by working, recovered by resting.
-- Beds as a registered component, assigned to one villager.
-- Sleeping properly — the animation, in the bed, at the right time.
-- Coming home from wherever they were.
-- No bed: idling by the colony piece and recovering slowly, so nothing can deadlock.
+- Energy, beds, and sleeping properly — with the animation, in the bed, having walked home.
+- Ambient life: day and night meaning something, sitting by fires, sheltering from rain.
+- Food: eating, hunger that degrades rather than kills, cooking as work.
 
-**Done when** a villager works until tired, walks home across the settlement, sleeps, wakes,
-and goes back to work — and one without a bed does the same, worse, without ever getting
-stuck.
-
-**Risk.** Sleeping is an animation problem, and animation on a cloned rig is asset data. It
-gets probed before it gets designed.
+**Done when** you can stand in your village at dusk and it looks like somewhere people live,
+with nobody doing anything useful.
 
 ---
 
-### Phase 3 — The settlement does work
-
-*More than one kind of work, and somewhere for everything to go.*
-
-This is where the central claim of the design gets tested: that structures saying what they
-want is enough, and jobs need almost no configuration.
-
-**Build**
-
-- **Processing** as a registered component: smelters, kilns and relatives, configured with
-  what to keep them fed.
-- A job that keeps processing fed, deriving everything from the structures.
-- The **junk area** component, and the three-stage answer to work with nowhere to go: refuse
-  to start, fall back to junk, drop as a last resort.
-- Job presets, so a settlement of a dozen is not a dozen configurations.
-
-**Done when** registering a smelter and saying "coal" is the entire configuration required
-for it to stay fed forever, and a full settlement degrades visibly instead of stalling
-silently.
-
-**Risk.** The pre-check ("can I finish this before I start?") is the part most likely to be
-subtly wrong, because it has to be right without being expensive.
-
----
-
-### Phase 4 — Reach
+### Phase 3 — Reach
 
 *The settlement stops being one circle.*
 
 **Build**
 
-- **Work areas**: placed, with their own radius, registered, belonging to a colony.
-- Jobs selecting several areas; the colony always included.
-- Gathering — chopping first, since it exercises discovery, ownership, tool requirements and
-  the two-pass tree all at once.
-- Tools: villagers need an axe, and there has to be a way to give them one.
+- Work areas: placed, with their own radius, registered, several selectable per job.
+- Gathering, starting with chopping — the code exists and waits here for its turn.
+- Equipment as a real requirement: an axe a villager must be given before it can chop.
 
-**Done when** you place an area in a forest three hundred metres out, and wood from it ends
-up in the settlement without you doing anything else — and a chest placed in that forest
-keeps its wood out there instead.
-
-**Risk.** Travel cost. If energy drains faster than a round trip, distant areas are a trap
-rather than a trade, and that is a number that can only be found by playing it.
-
----
-
-### Phase 5 — A place that feels lived in
-
-*The phase that is the actual point.*
-
-Everything before this makes a settlement that works. This makes one worth standing in.
-
-**Build**
-
-- Day and night meaning something: sleeping at night, working by day.
-- Ambient behaviour — sitting by fires, sheltering from rain, standing about together.
-- Villagers using the settlement's own furniture rather than ignoring it.
-- The colony screen saying how the place is doing, in words a person would use.
-
-**Done when** you can stand in your own village at dusk and it looks like somewhere people
-live, with nobody doing anything useful.
-
----
-
-### Phase 6 — Food
-
-*The first need with a supply chain, and the first that can genuinely go wrong.*
-
-Deliberately last of the needs. Unlike energy, it can deadlock — which is exactly why it
-waits until the settlement is otherwise trustworthy and the failure is visible rather than
-mysterious.
-
-**Build**
-
-- Villagers eating, from somewhere the settlement stocks.
-- Hunger with teeth that degrade rather than kill: slower, then unwilling, and saying so.
-- Cooking as work, so food is something the settlement makes rather than something you feed
-  it.
-
-**Risk.** This is where "keeps going while you are away" and "they are people who eat" collide.
-It is written down in *The tension to resolve first* and it does not get built until that is
-settled.
+**Done when** an area placed in a forest three hundred metres out feeds the settlement, and a
+chest placed in that forest keeps its wood out there instead.
 
 ---
 
 ### Not scheduled
 
-Wanted, but not until the above is real: multiple colonies as a first-class thing, defence,
-farming, animals, crafting at stations, repair.
-
----
-
-### Assumptions in this ordering
-
-Marked because they are guesses standing in for answers, and any of them could reorder the
-work. Correct them and the roadmap changes.
-
-- **Defence is not in it.** Asked three times, unanswered, so treated as out of scope. If a
-  settlement must survive a boar, that is a phase of its own and it belongs after phase 4.
-- **A handful of villagers**, not thirty. Scheduling stays simple, per-villager scans stay
-  affordable. Designed not to preclude more, not built for it.
-- **Energy degrades rather than blocks** — slower, then unwilling, always saying why.
-- **Single-player first.** The ownership discipline is kept because it is already written and
-  correct; it is not promised or tested until someone asks for multiplayer.
-- **Overlapping work areas are a union**, because that is what a player drawing two circles
-  most likely means.
-- **Personal use before release.** No packaging, no compatibility work, no Thunderstore, until
-  the thing is worth other people having.
+Defence — **decided against**. Farming, animals, crafting at stations, repair, and multiple
+colonies as a first-class idea, all after the above is real.
 
 ## Ground rules
 
