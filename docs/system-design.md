@@ -75,87 +75,97 @@ what this mod actually is, so it is question 1.
 
 ## Core objects
 
-The things the whole design is built out of. Defined one at a time, deliberately, before
-anything is built on top of them.
+Defined one at a time, deliberately, before anything is built on them.
 
 ### The colony piece
 
 A buildable piece placed in the world. It **is** the colony: there is no colony without one,
-and everything a colony owns is owned relative to this.
+and everything a colony owns is owned relative to this. Worth being a physical thing rather
+than dissolving into "wherever you registered stuff", because the vision is a *place* — a
+settlement needs a centre people gather to, return to, and are counted from.
 
-It has a **radius** — the settlement's edge, and the world its people concern themselves with.
+It has a **radius**: the settlement's edge, and the world its people concern themselves with.
 
-Interacting with it opens the colony screen. From there: name the colony, and see how it is
-doing. What "how it is doing" means is decided later.
+### The colony screen
 
-Worth keeping rather than dissolving into "wherever you registered things", because the
-vision is a *place*. A settlement needs a centre — somewhere people gather to, return to, and
-are counted from. A colony that is only a scattering of registered chests is a spreadsheet.
+One screen, opened by one hotkey, from anywhere. Not tied to standing at the hearth, which
+would only punish a player for being elsewhere.
 
-*Open:* whether the radius is fixed, configurable, or grows; overlapping colonies; more than
-one per player.
+It is **contextual**: what it offers depends on what the player was looking at when it
+opened. Looking at an unregistered structure adds the option to register it; looking at
+nothing offers management only.
 
-### The tool
+*There is no separate tool.* A held item was considered, to give pointing-at-things a set of
+verbs. The contextual screen buys the same thing without an item to craft, lose, or explain,
+so the item is not worth its weight.
 
-An equippable item, held in the hand.
+From the screen:
 
-**Its job is to buy a verb space, not a hotkey.** A single global key can only ever mean one
-thing. Holding a tool puts the player in a mode where pointing at things is meaningful, the
-game can show a hint bar for it, and every verb the settlement needs has somewhere to live:
+- switch between colonies, when there is more than one
+- name the colony
+- register what the player is looking at
+- spawn villagers into the colony currently selected
+- name villagers, set their job cycle, assign presets
+- assign a villager a bed
 
-- point at a structure → make it part of the colony, and configure it
-- point at a villager → see them, assign them
-- point at the ground → mark out an area
-- point at something already registered → change it, or remove it
+### Registration
 
-Without the tool each of those needs its own global key, or a menu that cannot know what you
-are looking at. That is the whole argument for it; if the verb list stays at one, the tool is
-ceremony and should go.
+A structure joins the colony by being **looked at** and registered from the screen.
 
-**The colony screen is not the tool, and is not the piece.** It opens from anywhere. Tying it
-to walking up to the hearth punishes the player for the crime of being elsewhere.
+**Only structures with a component the colony understands may be registered.** The list of
+understood components is the whole of what a colony can use, and growing it is how the mod
+grows. To begin with:
 
-*Open:* how it is obtained; whether it works outside a colony radius.
+- **Storage** — a container. Configured with what belongs in it.
+- **Processing** — a smelter, kiln and their relatives. Configured with what to keep it fed.
 
-### Registration, and why it is not a second radius
+A structure is a bag of capabilities, not a kind of building: whatever components it has, it
+gets those settings. Nothing enumerates kinds of building, and a new capability is a new
+entry rather than a new branch.
 
-The objection — *"we have a radius and then we also have registration, that is two gates"* —
-is right if registration only answers **is this in the colony**. Then it is a permission list
-duplicating a circle, and it should go.
+**Registration is where a structure's settings live.** That is why it is not a second radius:
+a radius can say what the settlement reaches, but nothing about a radius can say what a chest
+is *for*. Membership is a side effect of having settings.
 
-It is not that. Registration is **where a structure's settings live**.
+### Structure settings drive the work
 
-Nothing about a radius can tell you *what this chest is for*. The moment a container can say
-"wood goes here" and a smelter can say "keep this fed with coal", every structure needs a
-record of its own, and that record is registration. Membership is a side effect of having
-settings, not the point of it.
+Decided: **structures say where things belong; jobs say what kind of work is done.**
 
-So the two answer different questions:
+A hauling job is not told where to put wood. It picks wood up and asks the settlement where
+wood goes — and a container that was configured to hold wood answers. A processing job does
+not need a list of smelters; it asks which registered smelters want feeding.
 
-- **Radius** — what the settlement *reaches*. Its edge, and the villagers' world.
-- **Registration** — what the settlement *uses*, and *how*.
+This is the simplification the whole design rests on. Configuration lives on the physical
+thing the player is already looking at, and a job carries almost nothing.
 
-A structure that drifts out of radius is not deregistered; it goes dormant and says so, and
-comes back when the settlement reaches it again.
+### Villagers
 
-### Structures are configured by component
+Spawned from the screen, into the selected colony. Not by a hotkey — spawning a person is a
+deliberate act, not a gesture.
 
-A structure is not a *kind of thing*, it is a bag of capabilities, and each capability brings
-its own settings.
+Each has a name the player may change, and a **job cycle**: an ordered list of work it moves
+through. Jobs carry only what they genuinely need — chopping needs an axe, and perhaps what
+kind of wood — because where things go is the structures' business now.
 
-- has a **Container** → what is stored here
-- has a **Smelter** → what it is kept fed with
-- has a **Fireplace**, a **CookingStation**, a **Beehive** → whatever each of those needs
+**Presets** are named job configurations. Assigning work to a villager means assigning a job
+and a preset, so a settlement of a dozen people is not a dozen separate configurations.
 
-A chest that is also something else gets both sets. Nothing has to enumerate kinds of
-building, and supporting a new one is a new capability rather than a new branch — the same
-shape jobs and station protocols already use.
+### Beds, and rest
 
-**This has a consequence worth deciding deliberately.** Once a chest can say "wood goes
-here", a hauling job no longer needs to be told where to put wood; it can ask the settlement.
-Structure settings could absorb most of what job configuration does today, which would leave
-jobs saying *what kind of work* and structures saying *where things belong*. That is a
-simpler model, and a different one. See question 6.
+A bed is a registered structure like any other, assigned to one villager.
+
+Work costs **energy**. A tired villager goes to its bed and sleeps — properly, with the
+animation — and comes back rested.
+
+Energy is a good first need precisely because it is **self-resolving**: a villager can always
+fix it by itself, given a bed. Nothing has to be supplied, so a settlement left alone for a
+week cannot deadlock on it. Food, which needs a supply chain, is the harder case and is not
+being taken on yet.
+
+### Clothing and equipment
+
+The system stays; it is not used for now. Villagers keep the clothes they are born in, and
+tools are given the same way they are today.
 
 ---
 
@@ -193,7 +203,20 @@ lie.
 
 ## Decisions
 
-Settled, with the reason. Filled in as we go.
+Settled, with the reason.
+
+- **The colony is a placed piece with a radius.** The vision is a place; a place has a centre.
+- **One screen, one hotkey, opened from anywhere, contextual on what you are looking at.**
+- **No held tool.** A contextual screen buys the same verbs without an item to craft or lose.
+- **Registration is per-component, and is where a structure's settings live.** Not a second
+  radius: a radius cannot say what a chest is for.
+- **Structure settings drive the work.** Structures say where things belong; jobs say what
+  kind of work is done. A haul job asks the settlement where wood goes.
+- **Villagers are spawned from the screen**, and run an ordered **job cycle** with named
+  presets.
+- **Energy first, food later.** Energy is self-resolving given a bed, so a settlement left
+  alone cannot deadlock on it.
+- **Clothing and equipment stay in the code, unused for now.**
 
 ---
 
@@ -201,49 +224,40 @@ Settled, with the reason. Filled in as we go.
 
 Numbered so we can refer back.
 
-### 1. Do needs have teeth, and how sharp?
+### 1. What does "invalid" mean, and what does removal cost?
 
-If a villager is not fed, what happens? Options, in order of how much they can ruin a week
-away: nothing but a visible complaint; works slower; stops working; leaves; dies. The answer
-decides whether the settlement is something you tend or something that punishes you for
-leaving, and everything else about food follows from it.
+Stated: a structure out of radius or destroyed becomes invalid and is removed.
 
-### 2. Where does food come from?
+**Unloaded is not destroyed, and the two look identical.** A ZDO for a chest in a zone nobody
+is standing in cannot be resolved, exactly like one that was smashed. If "cannot resolve it"
+means "remove the record", then walking away from an outpost silently deletes its
+configuration, and it comes back empty. This has already bitten this project once, in a
+persistence check that failed for four runs because an unloaded chest read as a missing one.
 
-The player stocks a larder and villagers take from it; or villagers cook it themselves from
-what the colony has; or villagers eventually farm it. Each is a different amount of machinery
-and a different failure mode when the chain breaks.
+So: what actually justifies removal? Options are that a structure is removed only when its
+ZDO is *known* destroyed, or only when the player says so, or that out-of-radius means
+dormant-and-visible rather than gone.
 
-### 3. What does "doing their things" mean, concretely?
+### 2. What happens to work with nowhere to go?
 
-Ambient life is what makes a place feel inhabited, and none of it is work: sitting by the
-fire, standing about, sleeping at night, going indoors in the rain. Cheap to fake, and it may
-matter more to the feeling of a settlement than any job does. Related: does a settlement need
-**homes** — beds a villager belongs to and returns to?
+If a villager picks up wood and **no** registered container claims wood: does it fall back to
+any container with room, drop it, or refuse to pick it up in the first place? "Nothing
+happens" is the answer the settlement must never give silently.
+
+### 3. What happens to a villager with no bed?
+
+Energy is self-resolving *given a bed*. Without one: never tires, tires and sleeps rough,
+tires and stops working, or cannot be spawned at all. This is the "teeth" question in its
+smallest and safest form.
 
 ### 4. Does a settlement have to survive being attacked?
 
-A village of people who stand still while a boar kills them is not a village. But combat is a
-boundary I drew on purpose, and the previous mod's own notes say working villagers mostly
-failed to defend themselves because the work loop starved the combat AI. Options: no defence
-at all; villagers flee indoors and the player deals with it; villagers defend themselves but
-never seek a fight.
-
-### 6. Do structure settings drive the work, or only constrain it?
-
-Once a chest can say "wood goes here":
-
-- **Structures drive.** A haul job is told nothing about destinations; it asks where wood
-  belongs. Configuration lives on the physical thing, which is where a player is already
-  looking. Fewer settings, but "why did it go *there*" is answered somewhere other than
-  the job.
-- **Structures constrain.** Jobs still name a destination; a structure's settings only rule
-  places out. More knobs, more explicit, more duplication.
-
-This decides how much of the current job configuration survives.
+A village of people who stand still while a boar kills them is not a village. But the
+previous mod's own notes record that working villagers mostly failed to defend themselves,
+because the work loop starved the combat AI. Options: no defence; flee indoors; defend
+themselves but never seek a fight.
 
 ### 5. How far does the settlement extend?
 
-Chopping already sends villagers well beyond the hearth. Is the settlement a **place** with an
-edge, or a radius that follows the work? This decides whether "in the village" is a meaningful
-phrase.
+Chopping sends villagers beyond the hearth. Is the radius the edge of *everything*, or the
+edge of what can be *registered*, with gathering allowed to range further?
