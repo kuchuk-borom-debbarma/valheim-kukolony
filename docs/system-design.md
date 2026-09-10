@@ -177,8 +177,7 @@ might name three separate woods.
 told to, so a job with nothing selected still works around home. Areas are added reach, never
 a replacement for it, and there is no way to configure a job into having nowhere to work.
 
-*Open:* what happens when areas overlap; whether a villager assigned far away should sleep
-out there.
+*Open:* what happens when areas overlap.
 
 ### Which decides what: places versus things
 
@@ -230,6 +229,15 @@ A bed is a registered structure like any other, assigned to one villager.
 
 Work costs **energy**. A tired villager goes to its bed and sleeps — properly, with the
 animation — and comes back rested.
+
+**A villager always comes home to sleep.** Whatever it was doing and wherever it was doing
+it, a tired villager walks back to its own bed. Home is a place it returns to, which is what
+makes it home rather than a spawn point, and it keeps the settlement the centre of a
+villager's life even when its work is somewhere else.
+
+This gives distance a price. An outpost three hundred metres out costs a round trip every
+time somebody tires, so placing one far away is a trade rather than a free win. That is the
+right shape: the player chose the distance, and the cost is legible rather than hidden.
 
 **A bed is an upgrade, not a requirement.** A villager without one goes and idles by the
 colony piece and recovers there — far more slowly than in a bed, but it does recover. So a
@@ -296,6 +304,8 @@ Settled, with the reason.
 - **Clothing and equipment stay in the code, unused for now.**
 - **A job refuses to start rather than stranding its result**, falls back to a junk area, and
   drops on the ground only as a last resort. Nothing is destroyed, nothing is held silently.
+- **A villager always comes home to sleep**, from wherever it was working. Distance to an
+  outpost costs a round trip: a legible price the player chose.
 - **A bed is an upgrade, not a requirement.** No bed means slow recovery idling by the colony
   piece, so a settlement cannot deadlock for want of furniture.
 - **Areas are neutral places; jobs point at them, and may point at several.** The colony is
