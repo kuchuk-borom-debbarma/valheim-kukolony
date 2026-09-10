@@ -37,11 +37,22 @@ registration would look like data loss.
 Villagers only. Each row has a selection toggle, name, current activity, and Details.
 Activity comes from the loaded villager when it exists and falls back to the persisted
 runtime phase when it does not, so the roster stays meaningful outside loaded zones. A job
-selector plus "Assign selected" applies one job to every checked villager at once. The
-debug spawn button appears only when `DebugSpawnEnabled` is set.
+selector plus "Assign selected" applies one job to every checked villager at once.
+**+ New villager** places a villager on snapped ground beside the hearth and enrols it
+immediately — this is how a colony is populated, and it is not gated behind any debug flag.
 
 Details shows the villager's queue in order with the active entry highlighted, one add
-button per configured job, and Clear queue. A queue entry whose job no longer exists renders
+button per configured job, Clear queue, and **Remove villager**.
+
+Removal is a two-step inline button — it re-labels to "Confirm remove?" and only acts on a
+second click. It is deliberately not a modal dialog: a Valheim modal covers the panel, and
+the benchmark's UI capture cannot photograph the panel behind one. The armed state is
+cleared whenever the selected member changes or the tab switches, so a stale confirm can
+never delete the wrong villager.
+
+Removing a villager drops whatever it was carrying rather than destroying it. A villager
+outside loaded range has no live bag to read, so its contents are decoded from its ZDO and
+dropped at the hearth instead of at its own position — items move, but none are lost. A queue entry whose job no longer exists renders
 as `(missing job)` rather than being hidden — the engine bypasses it, and hiding it would
 make a partly broken queue look correct.
 

@@ -96,6 +96,9 @@ namespace Kukolony.Colonies
             ZDO memberZdo = ZDOMan.instance?.GetZDO(member);
             if (memberZdo != null && ColonyMembership.BelongsTo(memberZdo, Id))
             {
+                // The back-pointer lives on the member, so the member must be ours to write
+                // as well; a non-owner write lands locally and is lost on the next sync.
+                memberZdo.SetOwner(ZDOMan.GetSessionID());
                 ColonyMembership.SetColony(memberZdo, ZDOID.None);
             }
 

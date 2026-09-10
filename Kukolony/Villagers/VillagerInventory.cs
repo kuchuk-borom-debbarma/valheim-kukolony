@@ -26,9 +26,12 @@ namespace Kukolony.Villagers
     /// </summary>
     internal static class VillagerInventory
     {
-        private const string HolderName = "KukolonyBag";
-        private const int Width = 6;
-        private const int Height = 4;
+        internal const string HolderName = "KukolonyBag";
+
+        // Internal so an unloaded villager's bag can be decoded from its ZDO against the
+        // same grid it was saved with; a mismatched size silently drops items.
+        internal const int Width = 6;
+        internal const int Height = 4;
 
         /// <summary>
         ///     Attaches the bag if it is not already there.

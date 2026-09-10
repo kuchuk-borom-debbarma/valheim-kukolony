@@ -107,6 +107,9 @@ namespace Kukolony.Debug
             else panel.ShowMemberDetailForTest(0);
             yield return new WaitForSecondsRealtime(1f);
             yield return Capture("colony-member-detail.png");
+            panel.ShowRemoveConfirmForTest();
+            yield return new WaitForSecondsRealtime(1f);
+            yield return Capture("colony-member-remove-confirm.png");
             panel.ShowTabForTest("Jobs");
             yield return new WaitForSecondsRealtime(.5f);
             yield return Capture("colony-jobs.png");

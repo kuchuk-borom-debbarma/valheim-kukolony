@@ -35,7 +35,8 @@ The configurable `ColonyPickerHotkey` defaults to `C`. It opens a searchable col
 picker; direct hearth interaction is the shortcut. The panel has Structures, Members, and
 Jobs tabs with search/filter/sort/pagination, structure rename/removal, member detail and
 multi-assignment, job editing/target selection, and portable/local preset save/application.
-Debug spawning is hidden unless `DebugSpawnEnabled` is true.
+Villagers are added from the Members tab and removed from a member's detail view behind a
+two-step confirm; removal drops the villager's bag rather than destroying it.
 
 ## Toolchain
 

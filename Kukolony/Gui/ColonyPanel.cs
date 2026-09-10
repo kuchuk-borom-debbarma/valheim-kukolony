@@ -25,6 +25,8 @@ namespace Kukolony.Gui
         private StructureSort _sort;
         private StructureCapability _capabilityFilter;
         private ZDOID _selectedMember = ZDOID.None;
+        /// <summary>Villager awaiting a second click to confirm removal; never survives navigation.</summary>
+        private ZDOID _pendingRemoval = ZDOID.None;
         private readonly HashSet<ZDOID> _selectedMembers = new HashSet<ZDOID>();
         private int _memberJobIndex;
         private ColonyJobConfig _selectedJob;
@@ -75,6 +77,7 @@ namespace Kukolony.Gui
             colony.EnsureNamed();
             _name.text = colony.State.Name;
             _tab = Tab.Structures; _page = 0; _search = string.Empty;
+            _selectedMember = ZDOID.None; _pendingRemoval = ZDOID.None;
             _root.SetActive(true);
             Block(true);
             Refresh();
@@ -83,7 +86,7 @@ namespace Kukolony.Gui
         internal void Close()
         {
             if (_root != null) _root.SetActive(false);
-            _colony = null; Block(false);
+            _colony = null; _pendingRemoval = ZDOID.None; Block(false);
         }
 
         internal void ShowTabForTest(string tab)
@@ -95,7 +98,7 @@ namespace Kukolony.Gui
         {
             List<ZDOID> members = _colony?.State.GetMembers(ColonyMemberKind.Villager);
             if (members != null && index >= 0 && index < members.Count)
-            { _selectedMember = members[index]; _tab = Tab.Members; Refresh(); }
+            { _selectedMember = members[index]; _pendingRemoval = ZDOID.None; _tab = Tab.Members; Refresh(); }
         }
 
         /// <summary>
@@ -106,7 +109,19 @@ namespace Kukolony.Gui
         {
             List<ZDOID> members = _colony?.State.GetMembers(ColonyMemberKind.Villager);
             if (members != null && members.Contains(member))
-            { _selectedMember = member; _tab = Tab.Members; Refresh(); }
+            { _selectedMember = member; _pendingRemoval = ZDOID.None; _tab = Tab.Members; Refresh(); }
+        }
+
+        /// <summary>
+        ///     Arms the inline remove confirmation so it can be photographed. Deliberately
+        ///     does not remove anything: the UI scenario registers chest fixtures as members,
+        ///     and executing here would destroy them mid-run and corrupt later captures.
+        /// </summary>
+        internal void ShowRemoveConfirmForTest()
+        {
+            if (_selectedMember.IsNone()) return;
+            _pendingRemoval = _selectedMember;
+            Refresh();
         }
 
         internal void ShowJobForTest(int index)
@@ -129,7 +144,7 @@ namespace Kukolony.Gui
         private void Block(bool value) { if (_blocked == value) return; _blocked = value; GUIManager.BlockInput(value); }
         private void SetTab(Tab tab)
         {
-            _tab = tab; _page = 0;
+            _tab = tab; _page = 0; _pendingRemoval = ZDOID.None;
             if (tab != Tab.Members) _selectedMember = ZDOID.None;
             if (tab != Tab.Jobs) { _selectedJob = null; _showPresets = false; _showTargetPicker = false; }
             Refresh();
@@ -199,7 +214,8 @@ namespace Kukolony.Gui
                     () => { if (!_selectedMembers.Add(id)) _selectedMembers.Remove(id); Refresh(); });
                 TextAt(_content.transform, ColonyAssignments.NameOf(id), -210, -210-row*48, 16, 190, TextAnchor.MiddleLeft);
                 TextAt(_content.transform, ColonyAssignments.DescribeActivity(id), 40, -210-row*48, 14, 230, TextAnchor.MiddleLeft, Color.gray);
-                AddButton(_content.transform, "Details", 300, -210-row*48, 120, () => { _selectedMember=id; Refresh(); });
+                AddButton(_content.transform, "Details", 300, -210-row*48, 120,
+                    () => { _selectedMember=id; _pendingRemoval=ZDOID.None; Refresh(); });
             }
             List<ColonyJobConfig> jobs = _colony.State.GetEffectiveJobs();
             if (jobs.Count > 0)
@@ -210,8 +226,8 @@ namespace Kukolony.Gui
                 AddButton(_content.transform, "Assign selected (" + _selectedMembers.Count + ")", 130, -520, 220,
                     () => { foreach (ZDOID member in _selectedMembers) ColonyAssignments.AppendJob(member, jobs[_memberJobIndex].Id); Refresh(); });
             }
-            if (ModConfig.DebugSpawnEnabled.Value)
-                AddButton(_content.transform, "+ Debug villager", 275, -570, 180, SpawnVillager);
+            AddButton(_content.transform, "+ New villager", 275, -570, 180, () =>
+            { VillagerLifecycle.Spawn(_colony); Refresh(); });
             Pager(members.Count);
         }
 
@@ -219,7 +235,16 @@ namespace Kukolony.Gui
         {
             ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(_selectedMember) : null;
             VillagerState state = new VillagerState(zdo);
-            AddButton(_content.transform, "← Members", -315, -160, 140, () => { _selectedMember=ZDOID.None; Refresh(); });
+            AddButton(_content.transform, "← Members", -315, -160, 140,
+                () => { _selectedMember=ZDOID.None; _pendingRemoval=ZDOID.None; Refresh(); });
+            bool confirming = _pendingRemoval == _selectedMember;
+            ZDOID removing = _selectedMember;
+            AddButton(_content.transform, confirming ? "Confirm remove?" : "Remove villager", 300, -160, 160, () =>
+            {
+                if (!confirming) { _pendingRemoval = removing; Refresh(); return; }
+                VillagerLifecycle.Remove(_colony, removing);
+                _pendingRemoval = ZDOID.None; _selectedMember = ZDOID.None; Refresh();
+            });
             TextAt(_content.transform, ColonyAssignments.NameOf(_selectedMember), -20, -160, 22, 400, TextAnchor.MiddleLeft);
             LeftTextAt(_content.transform, "Current activity: " + ColonyAssignments.DescribeActivity(_selectedMember),
                 -210, 15, 560, Color.gray);
@@ -393,14 +418,6 @@ namespace Kukolony.Gui
             AddButton(_content.transform, "›", 65, -600, 50, () => { _page=Mathf.Min(pages-1,_page+1); Refresh(); });
         }
 
-        private void SpawnVillager()
-        {
-            GameObject prefab=ZNetScene.instance?.GetPrefab(VillagerPrefab.PrefabName);
-            if (prefab == null) return;
-            GameObject spawned=Instantiate(prefab,_colony.transform.position+_colony.transform.forward*3f+Vector3.up,Quaternion.identity);
-            if (spawned != null && spawned.TryGetComponent(out ZNetView view)) _colony.Register(ColonyMemberKind.Villager,view);
-            Refresh();
-        }
 
         private static IEnumerable<Transform> Children(Transform parent) { foreach(Transform child in parent) yield return child; }
         private static string Short(string value,int length) => value.Length<=length ? value : value.Substring(0,length-1)+"…";

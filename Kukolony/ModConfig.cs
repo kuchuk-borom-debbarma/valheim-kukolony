@@ -136,7 +136,9 @@ namespace Kukolony
                 "9 - Development",
                 nameof(DebugSpawnEnabled),
                 false,
-                "Enable the Ctrl+Shift+K hotkey that spawns a villager in front of you. Development aid.");
+                "Enable the Ctrl+Shift+K hotkey that spawns a colony-less villager in front of you. "
+                + "Development aid for the unassigned-villager path; players add villagers "
+                + "from the hearth's Members tab, which this does not affect.");
 
             ColonyPickerHotkey = config.Bind(
                 "1 - Colony", nameof(ColonyPickerHotkey), KeyCode.C,

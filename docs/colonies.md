@@ -23,6 +23,12 @@ colony ZDO and the colony ID to the villager ZDO, after claiming both objects. C
 stations, beds, and work posts are not member kinds; structures use the registry and beds
 have no assignment role.
 
+Villagers are created from the hearth's Members tab and removed from a member's detail
+view. Registration writes both directions; removal spills the villager's bag, clears both
+directions, and destroys its ZDO. Because the bag persists through the villager's own ZDO,
+removal cannot leave an orphaned container behind — but it must drop before destroying, or
+the contents would go with it.
+
 The colony registry can discover hearth ZDOs without instantiating them. This supports
 keep-alive planning and persistence inspection while normal UI operations use a loaded
 hearth instance.

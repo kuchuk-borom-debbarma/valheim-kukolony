@@ -1,0 +1,196 @@
+using System.Collections.Generic;
+using Kukolony.Colonies;
+using Kukolony.Core;
+using UnityEngine;
+
+namespace Kukolony.Villagers
+{
+    /// <summary>
+    ///     Creating and removing colony villagers.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         This lives in Villagers rather than in ColonyOperations because Colonies knows
+    ///         nothing about villagers and must keep it that way; the dependency already runs
+    ///         Villagers to Colonies. Keeping it out of the panel is what lets the benchmark
+    ///         exercise the same code a player does.
+    ///     </para>
+    ///     <para>
+    ///         A spawned villager names, dresses, tames and equips itself on its first owned AI
+    ///         tick, so this only has to place it and register it. The one thing placement must
+    ///         get right is the ground: a villager's home is taken from where it stands on that
+    ///         first tick, so a bad spawn point is permanent.
+    ///     </para>
+    /// </remarks>
+    internal static class VillagerLifecycle
+    {
+        /// <summary>
+        ///     Places a villager next to the hearth and enrols it in the colony. Returns null
+        ///     when the colony, the scene or the prefab is unavailable, or when registration
+        ///     fails; a villager with no colony can never work, so it is destroyed rather than
+        ///     left wandering.
+        /// </summary>
+        internal static Villager Spawn(Colony colony)
+        {
+            if (colony == null || ZNetScene.instance == null) return null;
+
+            GameObject prefab = ZNetScene.instance.GetPrefab(VillagerPrefab.PrefabName);
+            if (prefab == null)
+            {
+                Log.Error($"Cannot spawn - prefab '{VillagerPrefab.PrefabName}' is not registered.");
+                return null;
+            }
+
+            Vector3 position = SpawnPoint(colony);
+
+            // Instantiate directly rather than ZNetScene.SpawnObject, which broadcasts an
+            // RPC to everyone. ZNetView.Awake creates the ZDO and we become its owner.
+            GameObject spawned = Object.Instantiate(prefab, position, Quaternion.identity);
+            if (spawned == null) return null;
+
+            if (!spawned.TryGetComponent(out ZNetView view) || !view.IsValid() ||
+                !colony.Register(ColonyMemberKind.Villager, view))
+            {
+                Log.Error("Spawned villager could not join the colony; removing it.");
+                ZNetScene.instance.Destroy(spawned);
+                return null;
+            }
+
+            Log.Info($"Villager spawned for colony '{colony.State.Name}'");
+            return spawned.TryGetComponent(out Villager villager) ? villager : null;
+        }
+
+        /// <summary>
+        ///     Removes a villager from the colony and destroys it, dropping whatever it was
+        ///     carrying. Returns false when the villager is not a member of this colony.
+        /// </summary>
+        /// <remarks>
+        ///     A villager outside loaded range has no live Container to read, so its bag is
+        ///     decoded straight from its ZDO and dropped at the hearth instead. Removal still
+        ///     succeeds either way: refusing would strand the villager, and destroying it
+        ///     silently would eat whatever it was hauling.
+        /// </remarks>
+        internal static bool Remove(Colony colony, ZDOID villager)
+        {
+            if (colony == null || villager.IsNone() || ZDOMan.instance == null) return false;
+            if (!colony.State.GetMembers(ColonyMemberKind.Villager).Contains(villager)) return false;
+
+            ZDO zdo = ZDOMan.instance.GetZDO(villager);
+            if (zdo == null || !zdo.IsValid()) return false;
+
+            GameObject instance = ZNetScene.instance != null
+                ? ZNetScene.instance.FindInstance(villager)
+                : null;
+
+            // Claim up front: the bag write, the back-pointer clear inside Unregister, and
+            // DestroyZDO all write this ZDO, and a non-owner write is discarded on sync.
+            zdo.SetOwner(ZDOMan.GetSessionID());
+
+            if (instance != null) DropLoadedBag(instance);
+            else DropStoredBag(zdo, colony.transform.position);
+
+            colony.Unregister(ColonyMemberKind.Villager, villager);
+
+            if (instance != null) ZNetScene.instance.Destroy(instance);
+            else
+            {
+                // DestroyZDO is a silent no-op for a non-owner, so claim it first or the
+                // villager survives with its membership already cleared.
+                ZDOMan.instance.DestroyZDO(zdo);
+            }
+
+            Log.Info($"Villager removed from colony '{colony.State.Name}'");
+            return true;
+        }
+
+        /// <summary>
+        ///     Harness hook for the stored-bag recovery branch. A genuinely unloaded villager
+        ///     cannot be faked in-process: destroying the GameObject leaves a stale ZNetScene
+        ///     instance entry, and vanilla's OnZDODestroyed dereferences it without a null
+        ///     guard, which is a state a real unload never produces. The branch selection is a
+        ///     null check; this exposes the half that can actually lose items.
+        /// </summary>
+        internal static void TestRecoverStoredBag(ZDO zdo, Vector3 origin) => DropStoredBag(zdo, origin);
+
+        /// <summary>
+        ///     Ground-snapped point in front of the hearth, and the villager's future home.
+        ///     Uses the reporting overload rather than the plain one: the plain
+        ///     <c>GetSolidHeight(Vector3)</c> silently returns the input height when the ray
+        ///     misses, which would place a villager in mid-air with no way to tell. This
+        ///     overload also rejects colliders with a rigidbody, so a villager cannot be
+        ///     snapped onto a cart, a boat, or another creature. Falls back to the hearth,
+        ///     which is on real ground by definition.
+        /// </summary>
+        private static Vector3 SpawnPoint(Colony colony)
+        {
+            Vector3 hearth = colony.transform.position;
+            Vector3 position = hearth + colony.transform.forward * 3f;
+            if (ZoneSystem.instance != null &&
+                ZoneSystem.instance.GetSolidHeight(position, out float ground))
+            {
+                position.y = ground + .2f;
+                return position;
+            }
+            return hearth;
+        }
+
+        /// <summary>Spills a loaded villager's bag where it stands.</summary>
+        private static void DropLoadedBag(GameObject instance)
+        {
+            Transform holder = instance.transform.Find(VillagerInventory.HolderName);
+            if (holder == null || !holder.TryGetComponent(out Container container)) return;
+            if (instance.TryGetComponent(out ZNetView view) && view.IsValid()) view.ClaimOwnership();
+
+            Inventory inventory = container.GetInventory();
+            if (inventory == null) return;
+            Drop(inventory, instance.transform.position);
+            container.Save();
+        }
+
+        /// <summary>
+        ///     Spills an unloaded villager's bag at the hearth, decoding it from the ZDO the
+        ///     bag persists through, then clearing the record so it cannot be recovered twice.
+        /// </summary>
+        private static void DropStoredBag(ZDO zdo, Vector3 origin)
+        {
+            string encoded = zdo.GetString(ZDOVars.s_items, string.Empty);
+            if (string.IsNullOrEmpty(encoded)) return;
+
+            // Inventory.Load resolves every item through ObjectDB; without it the decode
+            // yields items with no drop prefab and the contents would vanish silently.
+            if (ObjectDB.instance == null)
+            {
+                Log.Warning("[villager] cannot recover a stored bag before ObjectDB is ready");
+                return;
+            }
+
+            Inventory inventory = new Inventory("bag", null, VillagerInventory.Width, VillagerInventory.Height);
+            try { inventory.Load(new ZPackage(encoded)); }
+            catch (System.Exception e)
+            {
+                Log.Warning("[villager] unreadable bag on removal: " + e.Message);
+                return;
+            }
+
+            Drop(inventory, origin);
+            zdo.Set(ZDOVars.s_items, string.Empty);
+        }
+
+        /// <summary>
+        ///     Scatters an inventory as item drops, matching how vanilla empties a destroyed
+        ///     container. Amount zero keeps each stack whole.
+        /// </summary>
+        private static void Drop(Inventory inventory, Vector3 origin)
+        {
+            List<ItemDrop.ItemData> items = inventory.GetAllItems();
+            if (items.Count == 0) return;
+            foreach (ItemDrop.ItemData item in items)
+            {
+                if (item == null || item.m_dropPrefab == null) continue;
+                Vector3 at = origin + Vector3.up * .5f + Random.insideUnitSphere * .3f;
+                ItemDrop.DropItem(item, 0, at, Quaternion.Euler(0f, Random.Range(0, 360), 0f));
+            }
+            inventory.RemoveAll();
+        }
+    }
+}

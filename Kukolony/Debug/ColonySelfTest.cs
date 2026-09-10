@@ -126,8 +126,10 @@ namespace Kukolony.Debug
 
             Core.Log.Info("[Benchmark] villager spawn begin");
             Villager villager = Spawn<Villager>(VillagerPrefab.PrefabName, origin + Vector3.back * 4f);
-            // A real player-model rig initializes over several frames. Do not touch its
-            // ZDO until the production network component reports ready.
+            // ZNetView.Awake creates the ZDO synchronously, so this normally exits on the
+            // first check. Kept as a cheap guard against a prefab whose network component
+            // is disabled or destroyed, which would otherwise fail further down as a
+            // confusing null rather than here.
             int readinessChecks = 0;
             while (villager != null && readinessChecks++ < 40)
             {
@@ -164,6 +166,7 @@ namespace Kukolony.Debug
             if (villager != null && view != null)
                 yield return CheckConcreteExecutors(report, colony, villager, origin);
             CheckPairedControls(report, colony, villager, origin, chestRecord.Id);
+            yield return CheckLifecycle(report, colony, origin);
             CheckStationContracts(report);
             report.Check(Enum.GetValues(typeof(ColonyJobType)).Length == 7, "concrete job catalog is complete");
 
@@ -299,6 +302,128 @@ namespace Kukolony.Debug
             if (colony == null || !colony.TryGetComponent(out ZNetView view) || !view.IsValid()) return ZDOID.None;
             return Core.PersistentZdoReference.Resolve(
                 view.GetZDO().GetString(PrimaryMemberKey, string.Empty));
+        }
+
+        /// <summary>
+        ///     Covers the production spawn and remove path a player drives from the hearth.
+        ///     Every positive claim is paired with a control, because both operations can look
+        ///     like they worked while doing nothing: a spawn that never registers, or a remove
+        ///     that destroys the villager and quietly eats what it carried.
+        /// </summary>
+        private static IEnumerator CheckLifecycle(TestReport report, Colony colony, Vector3 origin)
+        {
+            int beforeSpawn = FindVillagerZdos().Count;
+            report.Check(VillagerLifecycle.Spawn(null) == null && FindVillagerZdos().Count == beforeSpawn,
+                "spawn refuses without a colony and creates no villager");
+
+            Villager born = VillagerLifecycle.Spawn(colony);
+            ZNetView bornView = born != null && born.TryGetComponent(out ZNetView found) ? found : null;
+            report.Check(born != null && bornView != null && bornView.IsValid() && bornView.GetZDO() != null,
+                "hearth spawn produces a network-valid villager in the same frame");
+            if (bornView == null) yield break;
+
+            ZDOID bornId = bornView.GetZDO().m_uid;
+            report.Check(colony.State.GetMembers(ColonyMemberKind.Villager).Contains(bornId) &&
+                         ColonyMembership.BelongsTo(bornView.GetZDO(), colony.Id),
+                "hearth spawn registers membership in both directions");
+            report.Check(ZoneSystem.instance != null &&
+                         ZoneSystem.instance.GetSolidHeight(born.transform.position, out float ground) &&
+                         born.transform.position.y >= ground - .5f,
+                "hearth spawn places the villager on solid ground");
+            yield return null;
+
+            Container bag = VillagerInventory.Attach(born.gameObject, bornView);
+            Add(bag.GetInventory(), "Wood");
+            Add(bag.GetInventory(), "Wood");
+            Vector3 where = born.transform.position;
+            int woodBefore = LooseCount("Wood", where);
+            yield return new WaitForSecondsRealtime(.2f);
+
+            bool removed = VillagerLifecycle.Remove(colony, bornId);
+            yield return new WaitForSecondsRealtime(.3f);
+            report.Check(removed && !colony.State.GetMembers(ColonyMemberKind.Villager).Contains(bornId),
+                "removing a villager drops it from colony membership");
+            report.Check(ZDOMan.instance.GetZDO(bornId) == null &&
+                         ZNetScene.instance.FindInstance(bornId) == null,
+                "removing a villager destroys its ZDO and scene instance");
+            report.Check(LooseCount("Wood", where) == woodBefore + 2,
+                "removing a villager drops its carried items on the ground");
+
+            // Control: an empty villager must destroy cleanly and drop nothing, proving the
+            // drops above came from the bag rather than from removal itself.
+            Villager emptied = VillagerLifecycle.Spawn(colony);
+            if (emptied != null && emptied.TryGetComponent(out ZNetView emptyView) && emptyView.IsValid())
+            {
+                ZDOID emptyId = emptyView.GetZDO().m_uid;
+                Vector3 emptyAt = emptied.transform.position;
+                int anyBefore = LooseCount(string.Empty, emptyAt);
+                yield return new WaitForSecondsRealtime(.2f);
+                bool emptyRemoved = VillagerLifecycle.Remove(colony, emptyId);
+                yield return new WaitForSecondsRealtime(.3f);
+                report.Check(emptyRemoved && ZDOMan.instance.GetZDO(emptyId) == null &&
+                             LooseCount(string.Empty, emptyAt) == anyBefore,
+                    "removing an empty villager destroys it and creates no drops");
+            }
+
+            // The stored-bag branch, exercised directly. It cannot be reached by faking an
+            // unloaded villager: destroying the GameObject leaves a stale ZNetScene instance
+            // entry that vanilla's OnZDODestroyed dereferences without a guard, which a real
+            // unload never produces. The ZDO record is seeded here rather than through
+            // Container.Save so this proves the decode-drop-clear logic itself, independent
+            // of when the live container chooses to flush.
+            Villager stored = VillagerLifecycle.Spawn(colony);
+            if (stored != null && stored.TryGetComponent(out ZNetView storedView) && storedView.IsValid())
+            {
+                ZDO storedZdo = storedView.GetZDO();
+                Inventory seed = new Inventory("bag", null, VillagerInventory.Width, VillagerInventory.Height);
+                Add(seed, "Coal");
+                ZPackage seeded = new ZPackage();
+                seed.Save(seeded);
+                storedZdo.Set(ZDOVars.s_items, seeded.GetBase64());
+
+                Vector3 hearth = colony.transform.position;
+                int coalBefore = LooseCount("Coal", hearth);
+                report.Check(seed.GetAllItems().Count == 1 &&
+                             !string.IsNullOrEmpty(storedZdo.GetString(ZDOVars.s_items, string.Empty)),
+                    "control: a stored bag record is present before recovery");
+
+                VillagerLifecycle.TestRecoverStoredBag(storedZdo, hearth);
+                yield return new WaitForSecondsRealtime(.3f);
+                report.Check(LooseCount("Coal", hearth) == coalBefore + 1,
+                    "an out-of-range villager's bag is recovered from its ZDO at the hearth");
+                report.Check(string.IsNullOrEmpty(storedZdo.GetString(ZDOVars.s_items, string.Empty)),
+                    "recovered bag is cleared so it cannot be claimed twice");
+
+                VillagerLifecycle.Remove(colony, storedZdo.m_uid);
+                yield return new WaitForSecondsRealtime(.2f);
+            }
+
+            // Control: an unregistered villager is not ours to destroy.
+            Villager stranger = Spawn<Villager>(VillagerPrefab.PrefabName, origin + Vector3.left * 14f);
+            if (stranger != null && stranger.TryGetComponent(out ZNetView strangerView) && strangerView.IsValid())
+            {
+                ZDOID strangerId = strangerView.GetZDO().m_uid;
+                report.Check(!VillagerLifecycle.Remove(colony, strangerId) &&
+                             ZDOMan.instance.GetZDO(strangerId) != null,
+                    "remove refuses a non-member and leaves it alive");
+                ZNetScene.instance.Destroy(stranger.gameObject);
+            }
+        }
+
+        /// <summary>
+        ///     Loose item drops of a prefab near a point; an empty name counts every drop.
+        ///     Used to prove removal spilled a bag rather than destroying it.
+        /// </summary>
+        private static int LooseCount(string prefabName, Vector3 near)
+        {
+            int count = 0;
+            foreach (ItemDrop drop in ItemDrop.s_instances)
+            {
+                if (drop == null || Vector3.Distance(drop.transform.position, near) > 4f) continue;
+                if (prefabName.Length != 0 && Utils.GetPrefabName(drop.gameObject) != prefabName) continue;
+                count += drop.m_itemData != null ? drop.m_itemData.m_stack : 1;
+            }
+            return count;
         }
 
         /// <summary>

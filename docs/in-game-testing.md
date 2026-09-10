@@ -52,6 +52,10 @@ The run directory contains `benchmark-create.log`, `benchmark-reload.log`,
 logs, and `failure.txt` on errors. The terminal marker is
 `BENCHMARK TERMINAL <create|reload> <PASS|FAIL> run=<id>`.
 
+The UI phase arms the remove confirmation but never executes it: that phase registers chest
+fixtures as colony members, so an executing seam would destroy them mid-run. Removal itself
+is proven in the functional phase against real villagers.
+
 The screenshot manifest records filename, dimensions, and capture time. Passing requires
 both reports, every required PNG, and visual inspection for clipping, overlap, stale
 content, readability, pipeline order, validation feedback, and pagination.

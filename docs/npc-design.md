@@ -26,6 +26,19 @@ full Player prefab and transplanting 219 inherited fields created a hybrid objec
 Awake/lifecycle assumptions could freeze Unity. `ComponentTransplant` and that design were
 deleted.
 
+## Creation and removal
+
+Players add villagers from the hearth and remove them from the member detail view;
+`VillagerLifecycle` owns both. It lives in `Villagers` rather than alongside the other
+colony operations because `Colonies` knows nothing about villagers and must stay that way.
+
+A spawner only places and registers. Name, appearance, taming and bag all self-initialise on
+the first owned AI tick. Placement is the one thing it must get right: a villager's home is
+taken from where it stands on that tick, so the spawn point is permanent. Ground snapping
+uses the reporting `GetSolidHeight` overload — the plain one returns the input height on a
+miss, which would strand a villager in mid-air, and the reporting form also refuses
+colliders with a rigidbody so a villager cannot spawn onto a cart or a boat.
+
 ## Production prefab
 
 `VillagerPrefab` clones `FallenWarrior`, removes only event dialogue/name/drop behaviours,
