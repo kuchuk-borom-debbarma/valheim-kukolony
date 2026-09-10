@@ -224,6 +224,8 @@ namespace Kukolony.Debug
                              !villager.StepTarget.IsNone(), "active target and runtime progress survived save and relaunch");
                 report.Check(StoredBagCount(zdo, "Coal") == 3,
                     "villager bag contents survived save and relaunch");
+                report.Check(villager.StepCursor == 3,
+                    "villager pipeline cursor survived save and relaunch");
             }
             CheckStationContracts(report);
             LastPassed = report.Print();
@@ -247,6 +249,9 @@ namespace Kukolony.Debug
             persisted.SetQueueProgress(7);
             persisted.SetRuntimePhase("acceptance-persisted");
             persisted.SetStepTarget(target.Id);
+            // Nothing reads the cursor for behaviour yet. Proving it round-trips a real save
+            // now means the walker can rely on it later without a second in-game run.
+            persisted.SetStepCursor(3);
 
             // Fill the bag here rather than earlier so no job tick can spend it before the
             // save; the queue above is deliberately unresolvable, so this villager idles.
@@ -327,6 +332,8 @@ namespace Kukolony.Debug
         /// </summary>
         private static IEnumerator CheckLifecycle(TestReport report, Colony colony, Vector3 origin)
         {
+            CheckResetSemantics(report, colony);
+
             int beforeSpawn = FindVillagerZdos().Count;
             report.Check(VillagerLifecycle.Spawn(null) == null && FindVillagerZdos().Count == beforeSpawn,
                 "spawn refuses without a colony and creates no villager");
@@ -441,6 +448,30 @@ namespace Kukolony.Debug
                     "remove refuses a non-member and leaves it alive");
                 ZNetScene.instance.Destroy(stranger.gameObject);
             }
+        }
+
+        /// <summary>
+        ///     The two resets differ in exactly one way, and the whole piece cursor depends on
+        ///     it: releasing a target keeps a villager's place in its pipeline, abandoning the
+        ///     job loses it. Asserted together so neither can quietly become the other.
+        /// </summary>
+        private static void CheckResetSemantics(TestReport report, Colony colony)
+        {
+            Villager subject = VillagerLifecycle.Spawn(colony);
+            if (subject == null || !subject.TryGetComponent(out ZNetView view) || !view.IsValid()) return;
+            VillagerState state = subject.State;
+
+            state.SetStepCursor(4);
+            state.ClearTarget();
+            bool keptOnClear = state.StepCursor == 4;
+
+            state.ResetJob();
+            bool droppedOnReset = state.StepCursor == 0;
+
+            report.Check(keptOnClear && droppedOnReset,
+                "releasing a target keeps the pipeline cursor and abandoning the job clears it",
+                $"afterClear={(keptOnClear ? 4 : -1)} afterReset={state.StepCursor}");
+            VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
         }
 
         /// <summary>

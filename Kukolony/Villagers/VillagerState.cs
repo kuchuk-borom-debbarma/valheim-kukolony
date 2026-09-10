@@ -35,6 +35,7 @@ namespace Kukolony.Villagers
         private static readonly int QueueAttemptKey = "kukolony.queue.attempt".GetStableHashCode();
         private static readonly int QueueProgressKey = "kukolony.queue.progress".GetStableHashCode();
         private static readonly int RuntimePhaseKey = "kukolony.queue.phase".GetStableHashCode();
+        private static readonly int StepCursorKey = "kukolony.step.cursor.v1".GetStableHashCode();
 
         private readonly ZDO _zdo;
 
@@ -93,13 +94,44 @@ namespace Kukolony.Villagers
         internal void SetQueueAttempt(int attempt) => _zdo.Set(QueueAttemptKey, attempt);
         internal void SetQueueProgress(int progress) => _zdo.Set(QueueProgressKey, progress);
         internal void SetRuntimePhase(string phase) => _zdo.Set(RuntimePhaseKey, phase ?? string.Empty);
-        internal void ResetRuntime()
+
+        /// <summary>
+        ///     How far through its job's piece list this villager has got.
+        /// </summary>
+        /// <remarks>
+        ///     Deliberately its own key rather than another meaning packed into
+        ///     <see cref="QueueProgress"/>, which already carries four. Zero means the start
+        ///     of the pipeline, which is what every existing save reads and is always a safe
+        ///     place to resume from, so no villager state needed versioning to add this.
+        /// </remarks>
+        internal int StepCursor => _zdo?.GetInt(StepCursorKey, 0) ?? 0;
+
+        internal void SetStepCursor(int index) => _zdo.Set(StepCursorKey, index < 0 ? 0 : index);
+        /// <summary>
+        ///     Releases the current target only. The pipeline cursor survives, so a step that
+        ///     finished with its target resumes at the next piece rather than starting the
+        ///     job again.
+        /// </summary>
+        internal void ClearTarget()
         {
-            SetQueueProgress(0);
             SetRuntimePhase(string.Empty);
             SetStepTarget(ZDOID.None);
             SetActiveItem(string.Empty);
         }
+
+        /// <summary>
+        ///     Abandons the whole cycle: target, phase, carried-item note, sub-state and
+        ///     cursor. This is what every failure and every queue advance wants.
+        /// </summary>
+        internal void ResetJob()
+        {
+            ClearTarget();
+            SetQueueProgress(0);
+            SetStepCursor(0);
+        }
+
+        /// <summary>Existing name for <see cref="ResetJob"/>, kept while callers migrate.</summary>
+        internal void ResetRuntime() => ResetJob();
 
         /// <summary>
         ///     Net time this villager took its current target, used to expire claims held
