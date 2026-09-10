@@ -15,12 +15,10 @@ namespace Kukolony.Jobs.Work
     ///         never learns what a smelter is.
     ///     </para>
     ///     <para>
-    ///         So this is one class configured five ways rather than five near-identical files.
-    ///         Anything that later needs to behave differently can override a single method,
-    ///         which is cheaper than the duplication would have been to unpick.
+    ///         So this is one class configured four ways rather than four near-identical files.
     ///     </para>
     /// </remarks>
-    internal class StationWork : IColonyWork
+    internal class StationWork : ColonyWork
     {
         internal StationWork(ColonyJobType type, StructureCapability capability)
         {
@@ -28,25 +26,22 @@ namespace Kukolony.Jobs.Work
             TargetCapability = capability;
         }
 
-        public ColonyJobType Type { get; }
-        public ToolRequirement RequiredTool => ToolRequirement.None;
-        public StructureCapability TargetCapability { get; }
+        public override ColonyJobType Type { get; }
+        public override StructureCapability TargetCapability { get; }
 
         /// <summary>
         ///     No destination: the load goes into the station, which is chosen by capability
         ///     rather than by a container setting.
         /// </summary>
-        public virtual JobSetting Settings => JobSetting.Source;
+        public override JobSetting Settings => JobSetting.Source;
 
-        public virtual WorkStep Next(WorkState state, WorkFacts facts) => FetchAndDeliver.Next(state, facts);
-
-        public virtual JobResult ChooseSource(WorkContext context, out string activity) =>
+        public override JobResult ChooseSource(WorkContext context, out string activity) =>
             ColonyJobEngine.ChooseStockedContainer(context, out activity);
 
-        public virtual JobResult Collect(WorkContext context, out string activity) =>
+        public override JobResult Collect(WorkContext context, out string activity) =>
             ColonyJobEngine.TakeFromTarget(context, out activity);
 
-        public virtual JobResult ChooseTarget(WorkContext context, out string activity) =>
+        public override JobResult ChooseTarget(WorkContext context, out string activity) =>
             ColonyJobEngine.ChooseStation(context, TargetCapability, out activity);
 
         /// <summary>
@@ -54,7 +49,7 @@ namespace Kukolony.Jobs.Work
         ///     - a smelter reads its own fuel definition to tell fuel from ore - so this does
         ///     not inspect the target.
         /// </summary>
-        public virtual JobResult Deliver(WorkContext context, out string activity) =>
+        public override JobResult Deliver(WorkContext context, out string activity) =>
             ColonyJobEngine.OperateTarget(context, TargetCapability, out activity);
     }
 }

@@ -52,9 +52,9 @@ The run directory contains `benchmark-create.log`, `benchmark-reload.log`,
 logs, and `failure.txt` on errors. The terminal marker is
 `BENCHMARK TERMINAL <create|reload> <PASS|FAIL> run=<id>`.
 
-Eleven screenshots are required, covering the panel, structures, members and their detail
-and removal screens, jobs and one job's settings, the structure picker, preset application,
-and the colony picker.
+Thirteen screenshots are required, covering the panel, structures, members and their detail
+and removal screens, the outfit list and one outfit's slots, jobs and one job's settings, the
+structure picker, preset application, and the colony picker.
 
 The UI phase arms the remove confirmation but never executes it: that phase registers chest
 fixtures as colony members, so an executing seam would destroy them mid-run. Removal itself

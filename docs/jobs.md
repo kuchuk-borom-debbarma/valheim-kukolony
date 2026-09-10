@@ -51,6 +51,11 @@ Choosing a destination checks that it can take the load. Picking the first eligi
 and discovering it is full on arrival fails the job after a walk, which is a worse answer
 than choosing another one.
 
+Fetching an outfit is the one job whose destination is the villager itself, so it ends when
+the item is in the bag rather than when it has been carried somewhere. Putting it on is not
+a step: what a villager shows is a mirror of what it holds. See
+[npc-design.md](npc-design.md).
+
 A job that needs a tool says so, and refuses to start without it rather than working by
 fiat. Tools are classified by the damage they can do — an axe chops, a pickaxe mines —
 because axes and pickaxes are weapons in the game's own taxonomy and only hammers and hoes

@@ -33,6 +33,9 @@ namespace Kukolony.Gui
         private ColonyJobConfig _selectedJob;
         private bool _showPresets;
         private bool _showTargetPicker;
+        /// <summary>Outfit being edited, or -1 for the outfit list. Cleared on every navigation.</summary>
+        private int _selectedOutfit = -1;
+        private bool _showOutfits;
         private bool _blocked;
 
         internal bool IsOpen => _root != null && _root.activeSelf;
@@ -125,6 +128,25 @@ namespace Kukolony.Gui
             Refresh();
         }
 
+        /// <summary>Opens the outfit list for UI evidence.</summary>
+        internal void ShowOutfitsForTest()
+        {
+            _tab = Tab.Members;
+            _selectedMember = ZDOID.None;
+            _showOutfits = true;
+            _selectedOutfit = -1;
+            _page = 0;
+            Refresh();
+        }
+
+        /// <summary>Opens one outfit's slots. Changes nothing; the capture is the subject.</summary>
+        internal void ShowOutfitCardForTest()
+        {
+            ShowOutfitsForTest();
+            _selectedOutfit = 0;
+            Refresh();
+        }
+
         internal void ShowJobForTest(int index)
         {
             List<ColonyJobConfig> jobs = _colony?.State.GetEffectiveJobs();
@@ -146,6 +168,7 @@ namespace Kukolony.Gui
         private void SetTab(Tab tab)
         {
             _tab = tab; _page = 0; _pendingRemoval = ZDOID.None; _showTargetPicker = false;
+            _showOutfits = false; _selectedOutfit = -1;
             if (tab != Tab.Members) _selectedMember = ZDOID.None;
             if (tab != Tab.Jobs) { _selectedJob = null; _showPresets = false; _showTargetPicker = false; }
             Refresh();
@@ -201,12 +224,15 @@ namespace Kukolony.Gui
         private void BuildMembers()
         {
             List<ZDOID> members = _colony.State.GetMembers(ColonyMemberKind.Villager);
+            if (_showOutfits) { BuildOutfits(); return; }
             if (!_selectedMember.IsNone())
             {
                 BuildMemberDetail(members);
                 return;
             }
             TextAt(_content.transform, "Villagers", -310, -160, 18, 180, TextAnchor.MiddleLeft);
+            AddButton(_content.transform, "Outfits", 300, -160, 130,
+                () => { _showOutfits = true; _selectedOutfit = -1; _page = 0; Refresh(); });
             for (int row = 0; row < Rows && _page*Rows+row < members.Count; row++)
             {
                 ZDOID id = members[_page*Rows+row];
@@ -248,9 +274,19 @@ namespace Kukolony.Gui
             });
             TextAt(_content.transform, ColonyAssignments.NameOf(_selectedMember), -20, -160, 22, 400, TextAnchor.MiddleLeft);
             LeftTextAt(_content.transform, "Current activity: " + ColonyAssignments.DescribeActivity(_selectedMember),
-                -210, 15, 560, Color.gray);
+                -210, 15, 440, Color.gray);
+            List<Outfit> outfits = _colony.State.GetEffectiveOutfits();
+            AddButton(_content.transform, "Outfit: " + Short(state.OutfitName.Length == 0 ? outfits[0].Name : state.OutfitName, 12),
+                290, -210, 200, () =>
+                {
+                    int at = outfits.FindIndex(o => o.Name == state.OutfitName);
+                    state.SetOutfitName(outfits[(at + 1 + outfits.Count) % outfits.Count].Name);
+                    Refresh();
+                });
             List<string> queue = state.GetQueue();
             LeftTextAt(_content.transform, "Queue", -255, 18, 160);
+            AddButton(_content.transform, "Clear queue", 300, -255, 130,
+                () => { ColonyAssignments.SetQueue(_selectedMember, new List<string>()); Refresh(); });
             List<ColonyJobConfig> jobs = _colony.State.GetEffectiveJobs();
             for (int i=0; i<queue.Count && i<6; i++)
             {
@@ -269,8 +305,6 @@ namespace Kukolony.Gui
                     -535 - row * 40, 155,
                     () => { ColonyAssignments.AppendJob(_selectedMember, captured.Id); Refresh(); });
             }
-            AddButton(_content.transform, "Clear queue", 300, -600, 130,
-                () => { ColonyAssignments.SetQueue(_selectedMember, new List<string>()); Refresh(); });
         }
 
         private void BuildJobs()
@@ -426,6 +460,97 @@ namespace Kukolony.Gui
         ///     player has renamed the job away from it; on a starter job the two are the same
         ///     string and printing both says nothing twice.
         /// </summary>
+        /// <summary>
+        ///     The colony's outfits, and the one being edited.
+        /// </summary>
+        /// <remarks>
+        ///     An outfit is a preference, so this edits names rather than items: nothing here
+        ///     moves anything, and naming a piece the colony does not own is allowed. The
+        ///     villagers go and find it, and go without until they do.
+        /// </remarks>
+        private void BuildOutfits()
+        {
+            List<Outfit> outfits = _colony.State.GetEffectiveOutfits();
+            if (_selectedOutfit >= 0 && _selectedOutfit < outfits.Count)
+            {
+                BuildOutfitCard(outfits, outfits[_selectedOutfit]);
+                return;
+            }
+            _selectedOutfit = -1;
+            AddButton(_content.transform, "← Villagers", -315, -160, 140,
+                () => { _showOutfits = false; _page = 0; Refresh(); });
+            TextAt(_content.transform, "Outfits", -55, -160, 20, 300, TextAnchor.MiddleLeft);
+            AddButton(_content.transform, "+ New outfit", 300, -160, 150, () =>
+            {
+                outfits.Add(new Outfit { Name = "Outfit " + (outfits.Count + 1) });
+                SaveOutfits(outfits);
+            });
+            int start = _page * Rows;
+            for (int row = 0; row < Rows && start + row < outfits.Count; row++)
+            {
+                int index = start + row;
+                Outfit outfit = outfits[index];
+                float y = -210 - row * 48;
+                TextAt(_content.transform, Short(outfit.Name, 22), -225, y, 16, 290, TextAnchor.MiddleLeft);
+                TextAt(_content.transform, Describe(outfit), 55, y, 13, 230, TextAnchor.MiddleLeft, Color.gray);
+                AddButton(_content.transform, "Edit", 300, y, 120, () => { _selectedOutfit = index; Refresh(); });
+            }
+            Pager(outfits.Count);
+            LeftTextAt(_content.transform, "Villagers fetch what their outfit names and go without until they do.",
+                -575, 14, 590, Color.gray);
+        }
+
+        private void BuildOutfitCard(List<Outfit> outfits, Outfit outfit)
+        {
+            AddButton(_content.transform, "← Outfits", -320, -160, 130,
+                () => { _selectedOutfit = -1; Refresh(); });
+            InputField name = InputAt(_content.transform, outfit.Name, -80, -160, 330);
+            name.onEndEdit.AddListener(value =>
+            { if (!string.IsNullOrWhiteSpace(value)) outfit.Name = value.Trim(); SaveOutfits(outfits); });
+            // The starter outfit is not stored until something is changed, so there is always
+            // one left to fall back to and nothing has to guard against an empty list.
+            AddButton(_content.transform, "Delete", 300, -160, 120, () =>
+            {
+                if (outfits.Count <= 1) return;
+                outfits.Remove(outfit);
+                _selectedOutfit = -1;
+                SaveOutfits(outfits);
+            });
+            for (int slot = 0; slot < Outfit.SlotCount; slot++)
+            {
+                int index = slot;
+                float y = -215 - slot * 48;
+                LeftTextAt(_content.transform, SlotLabel((OutfitSlot)slot), y, 15, 220);
+                InputField item = InputAt(_content.transform, outfit.Items[index] ?? string.Empty, 40, y, 330);
+                item.onEndEdit.AddListener(value =>
+                { outfit.Items[index] = (value ?? string.Empty).Trim(); SaveOutfits(outfits); });
+            }
+            LeftTextAt(_content.transform, "Item prefab names, such as ArmorLeatherChest or AxeFlint. Blank leaves the slot alone.",
+                -560, 14, 600, Color.gray);
+        }
+
+        private void SaveOutfits(List<Outfit> outfits) { _colony.State.SetOutfits(outfits); Refresh(); }
+
+        private static string SlotLabel(OutfitSlot slot)
+        {
+            switch (slot)
+            {
+                case OutfitSlot.Helmet: return "Head";
+                case OutfitSlot.Chest: return "Chest";
+                case OutfitSlot.Legs: return "Legs";
+                case OutfitSlot.Shoulder: return "Cape";
+                case OutfitSlot.Utility: return "Utility";
+                case OutfitSlot.RightHand: return "Right hand";
+                default: return "Left hand";
+            }
+        }
+
+        private static string Describe(Outfit outfit)
+        {
+            List<string> worn = outfit.Wanted();
+            return worn.Count == 0 ? "nothing set" : Short(string.Join(", ", worn.ToArray()), 30);
+        }
+
         /// <summary>
         ///     Which of the varying settings this job reads. Work the registry does not know
         ///     shows none of them rather than all of them - guessing would be the mistake this

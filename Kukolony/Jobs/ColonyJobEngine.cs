@@ -92,11 +92,23 @@ namespace Kukolony.Jobs
         // A job says what it wants done; these give it the existing executors unchanged, so
         // moving a job onto the new path changes how it is sequenced and not what it does.
 
+        /// <summary>Whether the bag holds any of these items. Empty means anything counts.</summary>
+        internal static bool HoldsWanted(Inventory bag, List<string> items) =>
+            FirstMatching(bag, items) != null;
+
         internal static JobResult ChooseLooseItem(Work.WorkContext c, out string activity) =>
             SelectLooseItem(c.Villager, c.Colony, c.Job, "pickup", out activity);
 
         internal static JobResult ChooseStockedContainer(Work.WorkContext c, out string activity) =>
-            SelectSource(c.Villager, c.Colony, c.Job, out activity);
+            ChooseStockedContainer(c, c.Job.ItemFilters, out activity);
+
+        /// <summary>
+        ///     The same, for work whose wanted items are not the job's own list. Equipping asks
+        ///     for what the villager's outfit is missing, which differs villager by villager.
+        /// </summary>
+        internal static JobResult ChooseStockedContainer(Work.WorkContext c, List<string> items,
+            out string activity) =>
+            SelectSource(c.Villager, c.Colony, c.Job, items, out activity);
 
         /// <summary>
         ///     Chooses where the load goes. Among the colony's containers it will only pick one
@@ -115,6 +127,10 @@ namespace Kukolony.Jobs
 
         internal static JobResult TakeFromTarget(Work.WorkContext c, out string activity) =>
             Acquire(c.Target, c.Bag, c.Job.ItemFilters, c.State, out activity);
+
+        internal static JobResult TakeFromTarget(Work.WorkContext c, List<string> items,
+            out string activity) =>
+            Acquire(c.Target, c.Bag, items, c.State, out activity);
 
         /// <summary>
         ///     Stores the carried item, or puts it down where the villager stands when the job
@@ -200,11 +216,12 @@ namespace Kukolony.Jobs
                           <= Mathf.Max(.5f, job.StopDistance);
             }
 
-            bool inPlace = job.DropOnGround && work.TargetCapability == StructureCapability.Container;
+            Work.WorkSubject subject = new Work.WorkSubject(villager, bag, colony, job);
+            bool inPlace = work.DeliversInPlace(subject);
             Work.WorkStep step = work.Next(state.Work, new Work.WorkFacts(
                 hasTarget: !state.StepTarget.IsNone(),
                 arrived: arrived,
-                carrying: FirstMatching(bag, job.ItemFilters) != null,
+                carrying: work.Carrying(subject),
                 stockLimitReached: LimitReached(colony, job),
                 hasTool: HasRequiredTool(bag, work.RequiredTool),
                 deliversInPlace: inPlace));
@@ -361,11 +378,10 @@ namespace Kukolony.Jobs
         }
 
         private static JobResult SelectSource(Villager villager, Colony colony,
-            ColonyJobConfig job, out string activity)
+            ColonyJobConfig job, List<string> filters, out string activity)
         {
             if (!job.Source.IsNone())
                 return SelectExplicitContainer(villager, colony, job.Source, "acquiring", out activity);
-            List<string> filters = job.ItemFilters;
             List<ZDOID> scope = job.SelectedStructures;
             TargetMode mode = job.Targets;
             bool reserve = job.Reservations;

@@ -39,6 +39,20 @@ namespace Kukolony.Jobs.Work
         WorkStep Next(WorkState state, WorkFacts facts);
 
         /// <summary>
+        ///     Whether the villager is holding something this job still has work to do with.
+        ///     Asked of the job rather than assumed, because "carrying" is not always "the bag
+        ///     holds a wanted item": a villager that has fetched its boots is carrying them
+        ///     until it puts them on, and still holds them afterwards.
+        /// </summary>
+        bool Carrying(WorkSubject subject);
+
+        /// <summary>
+        ///     Whether the load is used where the villager stands, so there is nothing to
+        ///     choose and nowhere to walk to.
+        /// </summary>
+        bool DeliversInPlace(WorkSubject subject);
+
+        /// <summary>
         ///     Chooses what to work on. Separated from delivery because a job that hauls looks
         ///     for an item on the ground while one that transfers looks in a container.
         /// </summary>
@@ -48,6 +62,27 @@ namespace Kukolony.Jobs.Work
         /// <summary>Chooses where the result goes, and puts it there.</summary>
         JobResult ChooseTarget(WorkContext context, out string activity);
         JobResult Deliver(WorkContext context, out string activity);
+    }
+
+    /// <summary>
+    ///     A villager and the job it is doing, without anything about where it has got to.
+    ///     Questions asked before the next step is chosen take this; questions asked while
+    ///     performing that step take the fuller <see cref="WorkContext"/>.
+    /// </summary>
+    internal readonly struct WorkSubject
+    {
+        internal WorkSubject(Villagers.Villager villager, Inventory bag, Colony colony, ColonyJobConfig job)
+        {
+            Villager = villager;
+            Bag = bag;
+            Colony = colony;
+            Job = job;
+        }
+
+        internal Villagers.Villager Villager { get; }
+        internal Inventory Bag { get; }
+        internal Colony Colony { get; }
+        internal ColonyJobConfig Job { get; }
     }
 
     /// <summary>The kind of tool a job needs, expressed as the damage it must be able to do.</summary>

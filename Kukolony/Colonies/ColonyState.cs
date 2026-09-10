@@ -16,6 +16,7 @@ namespace Kukolony.Colonies
         private static readonly int StructuresKey = "kukolony.colony.structures.v2".GetStableHashCode();
         private static readonly int JobsKey = "kukolony.colony.jobs.v2".GetStableHashCode();
         private static readonly int PresetsKey = "kukolony.colony.presets.v2".GetStableHashCode();
+        private static readonly int OutfitsKey = "kukolony.colony.outfits.v1".GetStableHashCode();
 
         private readonly ZDO _zdo;
 
@@ -91,6 +92,76 @@ namespace Kukolony.Colonies
         {
             List<ColonyJobConfig> jobs = GetJobs();
             return jobs.Count == 0 ? ColonyJobCatalog.CreateDefaults() : jobs;
+        }
+
+        /// <summary>Outfit record format. Slot count is written, so adding a slot stays readable.</summary>
+        private const int OutfitRecordVersion = 1;
+
+        /// <summary>
+        ///     Every outfit this colony defines. Villagers reference one by name, the way jobs
+        ///     are referenced by id, so dressing a dozen villagers alike is one edit.
+        /// </summary>
+        internal List<Villagers.Outfit> GetOutfits()
+        {
+            List<Villagers.Outfit> result = new List<Villagers.Outfit>();
+            string encoded = _zdo?.GetString(OutfitsKey, string.Empty) ?? string.Empty;
+            if (string.IsNullOrEmpty(encoded)) return result;
+            try
+            {
+                ZPackage p = new ZPackage(encoded);
+                int version = p.ReadInt();
+                if (version < 1 || version > OutfitRecordVersion) return result;
+                int count = p.ReadInt();
+                if (count < 0 || count > 256) throw new System.IO.InvalidDataException("invalid outfit count");
+                for (int i = 0; i < count; i++)
+                {
+                    Villagers.Outfit outfit = new Villagers.Outfit { Name = p.ReadString() };
+                    int slots = p.ReadInt();
+                    if (slots < 0 || slots > 64) throw new System.IO.InvalidDataException("invalid slot count");
+                    for (int slot = 0; slot < slots; slot++)
+                    {
+                        string item = p.ReadString();
+                        // A record written by a build with more slots than this one still
+                        // reads: the extra names are past the end and simply dropped.
+                        if (slot < Villagers.Outfit.SlotCount) outfit.Items[slot] = item;
+                    }
+                    result.Add(outfit);
+                }
+            }
+            catch (System.Exception e) { Core.Log.Warning("[colony] invalid outfit registry: " + e.Message); }
+            return result;
+        }
+
+        /// <summary>The colony's outfits, with the starter one when a player has defined none.</summary>
+        internal List<Villagers.Outfit> GetEffectiveOutfits()
+        {
+            List<Villagers.Outfit> outfits = GetOutfits();
+            if (outfits.Count == 0) outfits.Add(Villagers.Outfit.Everyday());
+            return outfits;
+        }
+
+        /// <summary>The outfit of this name, or the colony's first when there is no such name.</summary>
+        internal Villagers.Outfit GetOutfit(string name)
+        {
+            List<Villagers.Outfit> outfits = GetEffectiveOutfits();
+            foreach (Villagers.Outfit outfit in outfits)
+                if (outfit.Name == name) return outfit;
+            return outfits[0];
+        }
+
+        internal void SetOutfits(List<Villagers.Outfit> outfits)
+        {
+            ZPackage p = new ZPackage();
+            p.Write(OutfitRecordVersion);
+            p.Write(outfits.Count);
+            foreach (Villagers.Outfit outfit in outfits)
+            {
+                p.Write(outfit.Name ?? string.Empty);
+                p.Write(Villagers.Outfit.SlotCount);
+                for (int slot = 0; slot < Villagers.Outfit.SlotCount; slot++)
+                    p.Write(outfit.Items[slot] ?? string.Empty);
+            }
+            _zdo.Set(OutfitsKey, p.GetBase64());
         }
 
         internal List<JobPreset> GetPresets()

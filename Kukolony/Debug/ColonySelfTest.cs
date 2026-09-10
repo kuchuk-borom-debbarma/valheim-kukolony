@@ -104,9 +104,9 @@ namespace Kukolony.Debug
             jobs[0].Count = 2;
             jobs[0].StockLimit = 10;
             colony.State.SetJobs(jobs);
-            report.Check(colony.State.GetJobs().Count == 7, "all seven concrete job configurations persist");
-            report.Check(jobs.All(job => Jobs.Work.WorkRegistry.For(job.Type) != null),
-                "every starter job is work the colony knows how to do");
+            report.Check(colony.State.GetJobs().Count == ColonyJobCatalog.All.Length,
+                "a starter job for every kind of work persists",
+                $"saved={colony.State.GetJobs().Count} kinds={ColonyJobCatalog.All.Length}");
 
             ColonyOperations.SavePreset(colony, "portable", jobs[0], false);
             ColonyOperations.SavePreset(colony, "local", jobs[0], true);
@@ -165,11 +165,28 @@ namespace Kukolony.Debug
             yield return CheckTransferPipeline(report, colony);
             yield return CheckDestinationChoice(report, colony);
             yield return CheckDeclaredSettings(report, colony);
+            yield return CheckOutfit(report, colony);
             yield return CheckStationJob(report, colony);
             yield return CheckHiveJob(report, colony);
             CheckStationContracts(report);
             CheckStationProtocols(report, origin);
-            report.Check(Enum.GetValues(typeof(ColonyJobType)).Length == 7, "concrete job catalog is complete");
+            // Counting the catalogue against itself would prove nothing, so these ask what a
+            // complete catalogue actually means: every kind of work is implemented, has a
+            // starter job, and has a name of its own. A new job type that someone forgets to
+            // finish fails here rather than turning up in the panel under somebody else's name,
+            // which is what a plausible-looking fallback did the first time this was added.
+            report.Check(ColonyJobCatalog.All.All(type => Jobs.Work.WorkRegistry.For(type) != null),
+                "every job type is work the colony knows how to do");
+            report.Check(ColonyJobCatalog.CreateDefaults().Count == ColonyJobCatalog.All.Length,
+                "every job type has a starter job");
+            report.Check(ColonyJobCatalog.All.All(type => ColonyJobCatalog.DisplayName(type).Length > 0) &&
+                         ColonyJobCatalog.All.Select(ColonyJobCatalog.DisplayName).Distinct().Count()
+                         == ColonyJobCatalog.All.Length,
+                "every job type has a name of its own");
+            report.Check(ColonyJobCatalog.All.All(type => ColonyJobCatalog.Describe(type).Length > 0) &&
+                         ColonyJobCatalog.All.Select(ColonyJobCatalog.Describe).Distinct().Count()
+                         == ColonyJobCatalog.All.Length,
+                "every job type says what it does");
 
             // Write a non-trivial runtime snapshot last, immediately before the world is
             // saved, so run 2 proves every per-villager field came from disk.
@@ -201,7 +218,9 @@ namespace Kukolony.Debug
             report.Check(state.Name == PersistenceName, "colony name survived save and relaunch");
             report.Check(state.GetStructures().Any(r => r.Name == "Renamed storage"),
                 "registered structure and name survived save and relaunch");
-            report.Check(state.GetJobs().Count == 7, "job configurations survived save and relaunch");
+            report.Check(state.GetJobs().Count == ColonyJobCatalog.All.Length,
+                "job configurations survived save and relaunch",
+                $"loaded={state.GetJobs().Count} kinds={ColonyJobCatalog.All.Length}");
             report.Check(state.GetJobs().All(job => Jobs.Work.WorkRegistry.For(job.Type) != null),
                 "job types survived save and relaunch");
             report.Check(state.GetPresets().Count == 2, "portable and local presets survived save and relaunch");
@@ -765,6 +784,104 @@ namespace Kukolony.Debug
 
             if (dropped != null) ZNetScene.instance.Destroy(dropped);
             VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Proves a villager fetches what its outfit asks for and ends up wearing it.
+        /// </summary>
+        /// <remarks>
+        ///     Two claims, and the second is the one that can quietly be false. Fetching is
+        ///     ordinary work and shows up in the bag. Wearing goes through the game's own
+        ///     visible-equipment path, which resolves an item from a prefab hash and only
+        ///     renders it if that hash means something - so the check waits for the model to
+        ///     actually show the piece rather than trusting that the write happened.
+        ///
+        ///     The control is a villager whose containers hold nothing its outfit names. It
+        ///     must stay bare, which is what distinguishes this from a villager that would have
+        ///     ended up dressed regardless.
+        /// </remarks>
+        private static IEnumerator CheckOutfit(TestReport report, Colony colony)
+        {
+            const string Piece = "ArmorLeatherChest";
+            List<Outfit> outfits = colony.State.GetEffectiveOutfits();
+            Outfit uniform = new Outfit { Name = "Benchmark uniform" };
+            uniform[OutfitSlot.Chest] = Piece;
+            outfits.RemoveAll(entry => entry.Name == uniform.Name);
+            outfits.Add(uniform);
+            colony.State.SetOutfits(outfits);
+
+            Villager dressed = VillagerLifecycle.Spawn(colony);
+            Villager bare = VillagerLifecycle.Spawn(colony);
+            if (dressed == null || bare == null ||
+                !dressed.TryGetComponent(out ZNetView dressedView) ||
+                !bare.TryGetComponent(out ZNetView bareView) ||
+                !dressed.TryGetComponent(out MonsterAI ai) ||
+                !dressed.TryGetComponent(out VisEquipment vis))
+            {
+                report.Check(false, "a villager fetches its outfit and wears it", "no worker");
+                yield break;
+            }
+
+            Vector3 at = dressed.transform.position;
+            GameObject wardrobe = Spawn("piece_chest_wood", at + Vector3.right * 3f);
+            Register(colony, wardrobe, "Benchmark wardrobe");
+            Inventory store = wardrobe.GetComponent<Container>().GetInventory();
+            Container bag = VillagerInventory.Attach(dressed.gameObject, dressedView);
+            Clear(store);
+            Clear(bag.GetInventory());
+            bool staged = Add(store, Piece);
+            dressed.State.SetOutfitName(uniform.Name);
+            bare.State.SetOutfitName(uniform.Name);
+            yield return new WaitForSecondsRealtime(.3f);
+
+            ColonyJobConfig equip = Job(ColonyJobType.Equip, string.Empty);
+            equip.Source = wardrobe.GetComponent<ZNetView>().GetZDO().m_uid;
+            equip.StopDistance = 12f;
+            JobResult result = JobResult.Running;
+            var steps = new List<string>();
+            for (int tick = 0; tick < 80 && result != JobResult.Completed; tick++)
+            {
+                result = ColonyJobEngine.Tick(dressed, ai, bag, colony, equip, out string activity);
+                if (steps.Count == 0 || steps[steps.Count - 1] != activity) steps.Add(activity);
+                if (result == JobResult.Failed || result == JobResult.Skipped) break;
+                yield return null;
+            }
+
+            // Wearing is the villager's own business, done on its owned tick, and the model
+            // only shows the piece once the game has resolved and instantiated it.
+            int expected = Piece.GetStableHashCode();
+            for (int attempt = 0; attempt < 40 && vis.m_currentChestItemHash != expected; attempt++)
+                yield return new WaitForSecondsRealtime(.1f);
+            bool wearing = result == JobResult.Completed && Count(bag.GetInventory(), Piece) == 1 &&
+                           vis.m_currentChestItemHash == expected;
+
+            // Control: same outfit, nothing to fetch.
+            Clear(store);
+            Container bareBag = VillagerInventory.Attach(bare.gameObject, bareView);
+            Clear(bareBag.GetInventory());
+            VisEquipment bareVis = bare.GetComponent<VisEquipment>();
+            bare.TryGetComponent(out MonsterAI bareAi);
+            JobResult idle = JobResult.Running;
+            for (int tick = 0; tick < 40 && idle == JobResult.Running; tick++)
+            {
+                idle = ColonyJobEngine.Tick(bare, bareAi, bareBag, colony, equip, out _);
+                yield return null;
+            }
+            yield return new WaitForSecondsRealtime(.5f);
+            bool stayedBare = idle == JobResult.Skipped &&
+                              Count(bareBag.GetInventory(), Piece) == 0 &&
+                              bareVis != null && bareVis.m_currentChestItemHash != expected;
+
+            report.Check(staged && wearing && stayedBare,
+                "a villager fetches the outfit it lacks and wears it, and one with none stays bare",
+                $"staged={staged} result={result} held={Count(bag.GetInventory(), Piece)} " +
+                $"shown={vis.m_currentChestItemHash == expected} control={idle} " +
+                $"controlShown={(bareVis != null && bareVis.m_currentChestItemHash == expected)} " +
+                $"steps={string.Join(" | ", steps.ToArray())}");
+
+            VillagerLifecycle.Remove(colony, dressedView.GetZDO().m_uid);
+            VillagerLifecycle.Remove(colony, bareView.GetZDO().m_uid);
             yield return new WaitForSecondsRealtime(.2f);
         }
 

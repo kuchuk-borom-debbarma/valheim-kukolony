@@ -110,6 +110,12 @@ namespace Kukolony.Debug
             panel.ShowRemoveConfirmForTest();
             yield return new WaitForSecondsRealtime(1f);
             yield return Capture("colony-member-remove-confirm.png");
+            panel.ShowOutfitsForTest();
+            yield return new WaitForSecondsRealtime(1f);
+            yield return Capture("colony-outfits.png");
+            panel.ShowOutfitCardForTest();
+            yield return new WaitForSecondsRealtime(1f);
+            yield return Capture("colony-outfit-card.png");
             panel.ShowTabForTest("Jobs");
             yield return new WaitForSecondsRealtime(.5f);
             yield return Capture("colony-jobs.png");

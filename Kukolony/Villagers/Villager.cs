@@ -116,6 +116,7 @@ namespace Kukolony.Villagers
             // an empty one because it ran before the villager had been named.
             EnsureIdentity();
             EnsureAppearance();
+            EnsureDressed();
             EnsureTamed();
 
             // Work takes priority over idling. A villager only wanders home when it has
@@ -198,6 +199,24 @@ namespace Kukolony.Villagers
             VillagerAppearance.Randomise(_visEquipment);
             state.MarkAppearanceRolled();
             Log.Info($"Villager '{state.Name}' rolled its appearance");
+        }
+
+        /// <summary>
+        ///     Shows what the villager owns of its outfit.
+        /// </summary>
+        /// <remarks>
+        ///     Runs every owned tick rather than once, because the answer changes: an equip job
+        ///     brings a helmet back, a job takes the axe out of the bag. Writing a ZDO field
+        ///     that already holds the same value costs nothing, so a mirror is cheaper than
+        ///     remembering to update one.
+        /// </remarks>
+        private void EnsureDressed()
+        {
+            if (_visEquipment == null || _bag == null) return;
+            Colonies.Colony colony = Colonies.Colony.FindFor(_nview.GetZDO());
+            if (colony == null) return;
+            VillagerWardrobe.Wear(_visEquipment, _bag.GetInventory(),
+                colony.State.GetOutfit(State.OutfitName));
         }
 
         /// <summary>

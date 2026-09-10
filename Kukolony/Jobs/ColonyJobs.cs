@@ -17,7 +17,8 @@ namespace Kukolony.Jobs
         OperateSmelters,
         OperateCookingStations,
         OperateFermenters,
-        CollectBeehives
+        CollectBeehives,
+        Equip
     }
 
     /// <summary>How a job chooses among the colony's registered structures.</summary>
@@ -185,7 +186,8 @@ namespace Kukolony.Jobs
                 case ColonyJobType.OperateCookingStations: return "Puts raw food on a cooking station.";
                 case ColonyJobType.OperateFermenters: return "Starts a fermenter with a mead base.";
                 case ColonyJobType.CollectBeehives: return "Taps a hive and stores the honey.";
-                default: return "Colony work.";
+                case ColonyJobType.Equip: return "Fetches the outfit this villager lacks.";
+                default: return string.Empty;
             }
         }
 
@@ -199,7 +201,13 @@ namespace Kukolony.Jobs
                 case ColonyJobType.OperateSmelters: return "Operate smelters and kilns";
                 case ColonyJobType.OperateCookingStations: return "Operate cooking stations";
                 case ColonyJobType.OperateFermenters: return "Operate fermenters";
-                default: return "Collect beehives";
+                case ColonyJobType.CollectBeehives: return "Collect beehives";
+                case ColonyJobType.Equip: return "Fetch outfit";
+                // Work with no name here is work someone has not finished adding. Empty
+                // rather than a plausible-looking fallback: a fallback puts a wrong but
+                // convincing label in the panel instead of failing the catalogue check that
+                // exists to catch exactly this. It already did once.
+                default: return string.Empty;
             }
         }
 

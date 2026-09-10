@@ -78,6 +78,39 @@ items cannot overwrite it on a later spawn.
 Use ZDO integer hashes—not string reads—to verify a rendered equipment slot. Live
 `VisEquipment` fields may trail the ZDO by several frames while models attach.
 
+## Outfits
+
+An **outfit** is a preference: one item name per slot — head, chest, legs, cape, utility,
+and the two hands. Outfits belong to the colony and are shared by name, the way job presets
+are, so dressing a dozen villagers alike is one edit. A villager records which outfit it
+wears on its own ZDO; an unknown name falls back to the colony's first rather than to
+nothing.
+
+**Only slots an outfit names are managed.** A villager already rolls clothes when it is
+born, so an outfit that owned every slot would strip those the moment it was assigned.
+Naming a slot is what hands it over, and the starter outfit names nothing — an existing
+colony looks exactly as it did.
+
+`VillagerWardrobe` writes the visible slots from what the bag actually holds, on every owned
+tick. It is a mirror, not a step: the answer changes when an equip job brings a helmet back
+or a job takes the axe out of the bag, and writing a ZDO field that already holds the same
+value costs nothing. A named slot whose item the villager does not own is bared, which is
+the visible signal that the outfit is not yet satisfied.
+
+**The item never enters the creature's own inventory.** That is a safety choice rather than
+a shortcut: the routine that equips a creature's best weapon runs on load through a path
+this mod does not suppress, and would quietly strip a tool placed there. Truth lives in the
+persisted bag; the visible slot mirrors it, and a mirror can be rebuilt.
+
+Quality and variant are taken from the villager's own copy of the item rather than assumed.
+They choose which model is shown, so an upgraded chestpiece does not look like a fresh one.
+The setters' shapes were read from the shipped assembly, not the decompiled reference: three
+of them take arguments the reference does not show.
+
+The **Fetch outfit** job brings back what a villager lacks, one piece per cycle, choosing a
+registered container that holds it. What to fetch comes from the outfit rather than the
+job's item filters, so one job serves a colony whose villagers are dressed differently.
+
 ## AI and inventory rules
 
 Villagers run synchronously from the vanilla `MonsterAI.UpdateAI(float)` fixed tick and

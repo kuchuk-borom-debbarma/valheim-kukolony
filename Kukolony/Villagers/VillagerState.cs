@@ -37,6 +37,7 @@ namespace Kukolony.Villagers
         private static readonly int RuntimePhaseKey = "kukolony.queue.phase".GetStableHashCode();
         private static readonly int StepCursorKey = "kukolony.step.cursor.v1".GetStableHashCode();
         private static readonly int WorkStateKey = "kukolony.work.state.v1".GetStableHashCode();
+        private static readonly int OutfitKey = "kukolony.outfit.v1".GetStableHashCode();
 
         private readonly ZDO _zdo;
 
@@ -117,6 +118,15 @@ namespace Kukolony.Villagers
         internal Jobs.Work.WorkState Work => (Jobs.Work.WorkState)(_zdo?.GetInt(WorkStateKey, 0) ?? 0);
 
         internal void SetWork(Jobs.Work.WorkState state) => _zdo.Set(WorkStateKey, (int)state);
+
+        /// <summary>
+        ///     Which of the colony's outfits this villager wears. Held by name rather than by
+        ///     index so that deleting one outfit does not silently redress everybody else, and
+        ///     an unknown name falls back to the colony's first rather than to nothing.
+        /// </summary>
+        internal string OutfitName => _zdo?.GetString(OutfitKey, string.Empty) ?? string.Empty;
+
+        internal void SetOutfitName(string name) => _zdo.Set(OutfitKey, name ?? string.Empty);
         /// <summary>
         ///     Releases the current target only. The pipeline cursor survives, so a step that
         ///     finished with its target resumes at the next piece rather than starting the

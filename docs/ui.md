@@ -56,6 +56,12 @@ dropped at the hearth instead of at its own position — items move, but none ar
 as `(missing job)` rather than being hidden — the engine bypasses it, and hiding it would
 make a partly broken queue look correct.
 
+**Outfits** opens the colony's outfits from the villager list. An outfit is one item name
+per slot; blank leaves a slot alone, because a villager already rolls its own clothes and an
+outfit that owned every slot would strip them. Item prefab names are typed, and naming
+something the colony does not own is allowed — the villagers fetch it and go without until
+they do. A villager's outfit is chosen from its detail screen.
+
 ## Jobs tab
 
 Lists configured jobs with which work each does, execution count, and target mode. New job
