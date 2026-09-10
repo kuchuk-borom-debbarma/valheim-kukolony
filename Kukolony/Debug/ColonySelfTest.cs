@@ -167,6 +167,7 @@ namespace Kukolony.Debug
                 yield return CheckConcreteExecutors(report, colony, villager, origin);
             CheckPairedControls(report, colony, villager, origin, chestRecord.Id);
             yield return CheckLifecycle(report, colony, origin);
+            yield return CheckHaulPipeline(report, colony);
             CheckStationContracts(report);
             CheckStationProtocols(report, origin);
             report.Check(Enum.GetValues(typeof(ColonyJobType)).Length == 7, "concrete job catalog is complete");
@@ -448,6 +449,74 @@ namespace Kukolony.Debug
                     "remove refuses a non-member and leaves it alive");
                 ZNetScene.instance.Destroy(stranger.gameObject);
             }
+        }
+
+        /// <summary>
+        ///     Drives a whole haul through ColonyJobEngine.Tick, which is the only method that
+        ///     sequences select, move and act together.
+        /// </summary>
+        /// <remarks>
+        ///     Every other executor check calls a leaf directly to avoid waiting on
+        ///     pathfinding, so the composition between them has never been exercised in game.
+        ///     Now that a job's steps come from its piece list rather than its type, that gap
+        ///     is exactly where a regression would hide. Fixtures are placed within a generous
+        ///     stop distance so movement completes on the first tick and no pathfinding is
+        ///     involved; the sequencing is the subject, not the walking.
+        /// </remarks>
+        private static IEnumerator CheckHaulPipeline(TestReport report, Colony colony)
+        {
+            Villager worker = VillagerLifecycle.Spawn(colony);
+            if (worker == null || !worker.TryGetComponent(out ZNetView view) || !view.IsValid() ||
+                !worker.TryGetComponent(out MonsterAI ai))
+            {
+                report.Check(false, "haul pipeline runs end to end through the engine tick", "no worker");
+                yield break;
+            }
+
+            Vector3 at = worker.transform.position;
+            GameObject chest = Spawn("piece_chest_wood", at + Vector3.right * 3f);
+            Register(colony, chest, "Pipeline destination");
+            GameObject dropped = Spawn("Flint", at + Vector3.left * 3f);
+            Container bag = VillagerInventory.Attach(worker.gameObject, view);
+            Clear(bag.GetInventory());
+            yield return new WaitForSecondsRealtime(.3f);
+
+            ColonyJobConfig job = Job(ColonyJobType.HaulLoose, "Flint");
+            job.Pieces.AddRange(JobPipeline.For(ColonyJobType.HaulLoose));
+            job.Destination = chest.GetComponent<ZNetView>().GetZDO().m_uid;
+            job.StopDistance = 12f;
+
+            Inventory destination = chest.GetComponent<Container>().GetInventory();
+            int before = Count(destination, "Flint");
+            JobResult result = JobResult.Running;
+            var actions = new List<string>();
+            for (int tick = 0; tick < 80 && result != JobResult.Completed; tick++)
+            {
+                result = ColonyJobEngine.Tick(worker, ai, bag, colony, job, out string activity);
+                if (actions.Count == 0 || actions[actions.Count - 1] != activity) actions.Add(activity);
+                if (result == JobResult.Failed) break;
+                yield return null;
+            }
+            yield return new WaitForSecondsRealtime(.2f);
+
+            int after = Count(destination, "Flint");
+            // Delivered amount is the drop's own stack size, not necessarily one.
+            report.Check(result == JobResult.Completed && after > before && worker.State.StepCursor == 0,
+                "haul pipeline runs end to end through the engine tick",
+                $"result={result} stored={after} was={before} cursor={worker.State.StepCursor} " +
+                $"steps={string.Join(" | ", actions.ToArray())}");
+
+            // Control: the same job with no pieces cannot run. Without it this would pass
+            // just as well if the walker were ignoring the piece list and hauling anyway.
+            ColonyJobConfig empty = Job(ColonyJobType.HaulLoose, "Flint");
+            empty.Destination = job.Destination;
+            JobResult emptyResult = ColonyJobEngine.Tick(worker, ai, bag, colony, empty, out _);
+            report.Check(emptyResult == JobResult.Skipped,
+                "control: a job with no pipeline refuses to run", $"result={emptyResult}");
+
+            if (dropped != null) ZNetScene.instance.Destroy(dropped);
+            VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
+            yield return new WaitForSecondsRealtime(.2f);
         }
 
         /// <summary>

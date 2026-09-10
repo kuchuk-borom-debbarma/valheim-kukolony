@@ -67,6 +67,8 @@ namespace Kukolony.Jobs
             Inventory inventory = bag != null ? bag.GetInventory() : null;
             if (inventory == null) return JobResult.Failed;
 
+            if (WalksPieces(job)) return TickWalker(villager, ai, inventory, colony, job, out activity);
+
             if (!state.StepTarget.IsNone())
             {
                 return TickTarget(villager, ai, inventory, colony, job, out activity);
@@ -133,6 +135,167 @@ namespace Kukolony.Jobs
         ///     merely unloaded keeps the job running — the zone may still stream in, and
         ///     discarding the target would lose committed progress.
         /// </summary>
+        /// <summary>
+        ///     Job types whose execution has moved to the piece walker. They are migrated one
+        ///     at a time so each replacement is proven in-game before the executor it replaces
+        ///     is removed.
+        /// </summary>
+        private static bool WalksPieces(ColonyJobConfig job) => job.Type == ColonyJobType.HaulLoose;
+
+        /// <summary>
+        ///     Runs a job by walking its pieces rather than by switching on its type.
+        /// </summary>
+        /// <remarks>
+        ///     The decision of which step to take is made by <see cref="JobWalker"/>, which is
+        ///     pure and tested without a world. This method only performs the chosen step,
+        ///     reusing the same selectors and executors the type-driven path uses, and records
+        ///     where the villager got to.
+        /// </remarks>
+        private static JobResult TickWalker(Villager villager, MonsterAI ai, Inventory bag,
+            Colony colony, ColonyJobConfig job, out string activity)
+        {
+            VillagerState state = villager.State;
+            List<JobPieceKind> kinds = job.Pieces.ConvertAll(piece => piece.Kind);
+            GameObject target = ResolveTarget(state, out bool targetLost);
+            if (targetLost)
+            {
+                state.ResetJob();
+                activity = "target missing";
+                return JobResult.Failed;
+            }
+
+            JobStep step = JobWalker.Next(kinds, state.StepCursor, new JobFacts(
+                hasTarget: !state.StepTarget.IsNone(),
+                arrivedAtTarget: false,
+                carrying: FirstMatching(bag, job.ItemFilters) != null,
+                stockLimitReached: LimitReached(colony, job)));
+
+            int next = step.Cursor + 1;
+            switch (step.Action)
+            {
+                case StepAction.StopAtLimit:
+                    return JobOutcomes.Skipped(state, "stock limit reached", out activity);
+
+                case StepAction.CompleteCycle:
+                    return JobOutcomes.Completed(state, "job cycle complete", out activity);
+
+                // The world stopped matching the pipeline, usually a target taken by someone
+                // else. Begin again rather than fail: the work itself is still valid.
+                case StepAction.Restart:
+                    return JobOutcomes.Skipped(state, "restarting", out activity);
+
+                case StepAction.Invalid:
+                    return JobOutcomes.Skipped(state, "pipeline cannot run", out activity);
+
+                case StepAction.FindLooseItem:
+                    return Advance(state, next, SelectLooseItem(villager, colony, job, "pickup", out activity));
+
+                case StepAction.SelectSource:
+                    return Advance(state, next, SelectSource(villager, colony, job, out activity));
+
+                case StepAction.SelectTarget:
+                    return Advance(state, next, SelectDestination(villager, colony, job, step.Cursor, out activity));
+
+                case StepAction.Move:
+                    return Walk(villager, ai, state, job, target, next, out activity);
+            }
+
+            // Everything below acts on the target, so a target that has not loaded yet is a
+            // wait rather than a failure: its zone may still be streaming in.
+            if (target == null)
+            {
+                activity = "waiting for target to load";
+                return JobResult.Running;
+            }
+            switch (step.Action)
+            {
+                case StepAction.PickUp: return Advance(state, next, PickupLoose(target, bag, state, out activity));
+                case StepAction.TakeItem: return Advance(state, next, Acquire(target, bag, job, state, out activity));
+                case StepAction.PutItem: return Advance(state, next, Deposit(target, bag, job, state, out activity));
+                case StepAction.OperateStation: return Advance(state, next, Operate(target, bag, job, state, out activity));
+                default: return JobOutcomes.Skipped(state, "pipeline cannot run", out activity);
+            }
+        }
+
+        /// <summary>
+        ///     Records the next piece when a step made progress.
+        /// </summary>
+        /// <remarks>
+        ///     A leaf executor reports Completed to mean its own step finished, which is not
+        ///     the same as the job being done. Reported upwards unchanged it would end the
+        ///     cycle wherever the last executor happened to sit, so anything after that piece
+        ///     could never run - a deposit would end a pipeline and leave End unreached. The
+        ///     step becomes Running and only the End piece completes the cycle, which also
+        ///     makes one cycle cost exactly one queue attempt.
+        ///
+        ///     The cursor is written after the call because the executors clear the whole
+        ///     cycle on their way out.
+        /// </remarks>
+        private static JobResult Advance(VillagerState state, int next, JobResult result)
+        {
+            if (result != JobResult.Running && result != JobResult.Completed) return result;
+            state.SetStepCursor(next);
+            return JobResult.Running;
+        }
+
+        /// <summary>Walks to the chosen target, advancing only once the villager arrives.</summary>
+        private static JobResult Walk(Villager villager, MonsterAI ai, VillagerState state,
+            ColonyJobConfig job, GameObject target, int next, out string activity)
+        {
+            if (target == null)
+            {
+                activity = "waiting for target to load";
+                return JobResult.Running;
+            }
+            MoveResult movement = VillagerMovement.MoveTowards(ai, target.transform.position,
+                Mathf.Max(.5f, job.StopDistance));
+            if (movement == MoveResult.Moving)
+            {
+                activity = "walking to " + TargetName(target);
+                return JobResult.Running;
+            }
+            if (movement == MoveResult.PathFailed)
+            {
+                state.ResetJob();
+                activity = "path failed";
+                return JobResult.Failed;
+            }
+            state.SetStepCursor(next);
+            activity = "arrived at " + TargetName(target);
+            return JobResult.Running;
+        }
+
+        /// <summary>
+        ///     Chooses where to put things. An explicit destination wins; otherwise the piece's
+        ///     own declared capability picks among the colony's registered structures. This is
+        ///     the first time a piece's capability decides anything at runtime.
+        /// </summary>
+        private static JobResult SelectDestination(Villager villager, Colony colony, ColonyJobConfig job,
+            int cursor, out string activity)
+        {
+            if (!job.Destination.IsNone())
+                return SelectExplicitContainer(villager, colony, job.Destination, "depositing", out activity);
+            StructureCapability capability = cursor >= 0 && cursor < job.Pieces.Count
+                ? job.Pieces[cursor].Capability
+                : StructureCapability.None;
+            if (capability == StructureCapability.None) capability = StructureCapability.Container;
+            return SelectStructure(villager, colony, job, capability, "depositing", out activity);
+        }
+
+        /// <summary>
+        ///     The villager's current target, and whether it is gone for good. A target whose
+        ///     ZDO no longer exists is lost; one that is merely unloaded returns null and is
+        ///     worth waiting for.
+        /// </summary>
+        private static GameObject ResolveTarget(VillagerState state, out bool lost)
+        {
+            lost = false;
+            if (state.StepTarget.IsNone()) return null;
+            ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(state.StepTarget) : null;
+            if (zdo == null || !zdo.IsValid()) { lost = true; return null; }
+            return ZNetScene.instance != null ? ZNetScene.instance.FindInstance(state.StepTarget) : null;
+        }
+
         private static JobResult TickTarget(Villager villager, MonsterAI ai, Inventory bag,
             Colony colony, ColonyJobConfig job, out string activity)
         {
