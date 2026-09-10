@@ -168,6 +168,7 @@ namespace Kukolony.Debug
             CheckPairedControls(report, colony, villager, origin, chestRecord.Id);
             yield return CheckLifecycle(report, colony, origin);
             yield return CheckHaulPipeline(report, colony);
+            yield return CheckTransferPipeline(report, colony);
             CheckStationContracts(report);
             CheckStationProtocols(report, origin);
             report.Check(Enum.GetValues(typeof(ColonyJobType)).Length == 7, "concrete job catalog is complete");
@@ -515,6 +516,84 @@ namespace Kukolony.Debug
                 "control: a job with no pipeline refuses to run", $"result={emptyResult}");
 
             if (dropped != null) ZNetScene.instance.Destroy(dropped);
+            VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Drives a whole container-to-container transfer through the engine tick.
+        /// </summary>
+        /// <remarks>
+        ///     Transfer is the job that shows why settings will need to live on pieces rather
+        ///     than on the job: both the take and the put read the same filter list, so it can
+        ///     only ever move one kind of item to somewhere else. Parity is the bar here - the
+        ///     piece-driven path must do exactly what the type-driven one did.
+        /// </remarks>
+        private static IEnumerator CheckTransferPipeline(TestReport report, Colony colony)
+        {
+            Villager worker = VillagerLifecycle.Spawn(colony);
+            if (worker == null || !worker.TryGetComponent(out ZNetView view) || !view.IsValid() ||
+                !worker.TryGetComponent(out MonsterAI ai))
+            {
+                report.Check(false, "transfer pipeline runs end to end through the engine tick", "no worker");
+                yield break;
+            }
+
+            Vector3 at = worker.transform.position;
+            GameObject from = Spawn("piece_chest_wood", at + Vector3.forward * 3f);
+            GameObject into = Spawn("piece_chest_wood", at + Vector3.back * 3f);
+            Register(colony, from, "Pipeline source");
+            Register(colony, into, "Pipeline sink");
+            Inventory source = from.GetComponent<Container>().GetInventory();
+            Inventory sink = into.GetComponent<Container>().GetInventory();
+            Clear(source);
+            Clear(sink);
+            Add(source, "Flint");
+            Container bag = VillagerInventory.Attach(worker.gameObject, view);
+            Clear(bag.GetInventory());
+            yield return new WaitForSecondsRealtime(.3f);
+
+            ColonyJobConfig job = Job(ColonyJobType.Transfer, "Flint");
+            job.Pieces.AddRange(JobPipeline.For(ColonyJobType.Transfer));
+            job.Source = from.GetComponent<ZNetView>().GetZDO().m_uid;
+            job.Destination = into.GetComponent<ZNetView>().GetZDO().m_uid;
+            job.StopDistance = 12f;
+
+            JobResult result = JobResult.Running;
+            var steps = new List<string>();
+            for (int tick = 0; tick < 80 && result != JobResult.Completed; tick++)
+            {
+                result = ColonyJobEngine.Tick(worker, ai, bag, colony, job, out string activity);
+                if (steps.Count == 0 || steps[steps.Count - 1] != activity) steps.Add(activity);
+                if (result == JobResult.Failed) break;
+                yield return null;
+            }
+            yield return new WaitForSecondsRealtime(.2f);
+
+            report.Check(result == JobResult.Completed && Count(sink, "Flint") == 1 &&
+                         Count(source, "Flint") == 0 && worker.State.StepCursor == 0,
+                "transfer pipeline moves an item between containers through the engine tick",
+                $"result={result} moved={Count(sink, "Flint")} left={Count(source, "Flint")} " +
+                $"cursor={worker.State.StepCursor} steps={string.Join(" | ", steps.ToArray())}");
+
+            // Control: with nothing to take, the job must yield and move nothing. Without it
+            // the check above would pass just as well if the destination were being filled by
+            // something other than this pipeline.
+            Clear(source);
+            int settled = Count(sink, "Flint");
+            // An explicitly chosen source is targeted whether or not it holds anything, so
+            // the refusal appears a few ticks later when the take finds nothing. Run until
+            // the pipeline comes to rest rather than judging it on its first tick.
+            JobResult idle = JobResult.Running;
+            for (int tick = 0; tick < 40 && idle == JobResult.Running; tick++)
+            {
+                idle = ColonyJobEngine.Tick(worker, ai, bag, colony, job, out _);
+                yield return null;
+            }
+            report.Check(idle == JobResult.Skipped && Count(sink, "Flint") == settled,
+                "control: transfer with an empty source comes to rest and moves nothing",
+                $"result={idle} sink={Count(sink, "Flint")} was={settled}");
+
             VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
             yield return new WaitForSecondsRealtime(.2f);
         }

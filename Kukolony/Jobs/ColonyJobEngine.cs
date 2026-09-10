@@ -140,7 +140,8 @@ namespace Kukolony.Jobs
         ///     at a time so each replacement is proven in-game before the executor it replaces
         ///     is removed.
         /// </summary>
-        private static bool WalksPieces(ColonyJobConfig job) => job.Type == ColonyJobType.HaulLoose;
+        private static bool WalksPieces(ColonyJobConfig job) =>
+            job.Type == ColonyJobType.HaulLoose || job.Type == ColonyJobType.Transfer;
 
         /// <summary>
         ///     Runs a job by walking its pieces rather than by switching on its type.
