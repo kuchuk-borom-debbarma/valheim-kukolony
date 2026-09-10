@@ -1,0 +1,349 @@
+# Roadmap — foundation
+
+Everything up to and including the machinery that runs jobs. **Not the jobs themselves**:
+what work exists, what each one does and what it needs are decided in their own document, and
+none of it is designed here.
+
+Read [system-design.md](system-design.md) first. This says *how* and *in what order*; that
+says *what* and *why*, and wins wherever the two disagree.
+
+## How to read this
+
+Milestones, not sprints. Each is a thing that either works or does not, and each ends
+somewhere you could load a world and see the result.
+
+**Done means done.** For every milestone: the deterministic checks pass, the build is
+warning-free, the in-game run passes both phases, every screenshot is *looked at*, and every
+positive claim has a paired control that must fail. Code existing is not done.
+
+**Each milestone names its edge cases before it is built.** The expensive bugs in this
+project were not wrong logic; they were cases nobody wrote down — an unloaded chest read as a
+deleted one, a durable reference that could not be minted without ownership, a UI that
+appeared without releasing the mouse.
+
+---
+
+## Milestone 1 — The colony
+
+The settlement exists, is a place, and persists.
+
+### Build
+
+- A buildable piece on the hammer's list. Materials are deliberately cheap: this is the
+  start of the mod, not a reward.
+- A **radius**, from config, the same for every colony. Not upgradeable, not per-colony — one
+  fewer thing to reason about until there is a reason.
+- A **name**, editable, defaulted to something readable rather than blank.
+- A **colony record** on the piece's ZDO: name, and everything later milestones attach.
+
+### Data
+
+Versioned `ZPackage` on the hearth ZDO, as everything here already is. Version 1 starts
+clean: nothing from the current format is carried, because nothing in it survives the
+redesign.
+
+### Rules and edge cases
+
+- **Two colonies overlapping.** Allowed. Structures belong to the colony they were registered
+  to, not to whichever is nearest, so overlap is a cosmetic question rather than a semantic
+  one.
+- **The piece is destroyed.** The colony is gone. Its villagers are orphaned rather than
+  killed — they stand where they are and say they have no colony. Registered structures are
+  untouched; they were never owned, only referenced.
+- **Placement.** No restriction beyond the game's own. A player who wants two hearths a metre
+  apart may have them and will get what they deserve.
+- **Hover text** says the colony's name, its population, and how many structures it has —
+  enough to tell two apart without opening anything.
+
+### Done when
+
+You place a hearth, name it, walk away, save, reload, and it is still there with its name.
+
+---
+
+## Milestone 2 — The screen
+
+The single surface through which the settlement is managed. Built before anything it manages,
+because everything after this needs somewhere to appear.
+
+### Build
+
+**Opening.** One configurable hotkey, from anywhere. Not tied to standing at the hearth.
+Escape closes. Opening releases the mouse and closing gives it back — the previous
+implementation drew a panel without releasing the cursor and was invisible-but-useless.
+
+**Context.** On opening, the screen records what the player was looking at. That is what
+makes registration possible without a held tool, and what later lets pointing at a villager
+or a structure mean something. Looking at nothing is not an error; it just offers less.
+
+**Layout as a system, not as coordinates.** Every screen is rows in a single column at a
+fixed pitch, paged when they overflow. Nothing is hand-placed. Hand-placed coordinates are
+how the old panel ended up with controls overlapping each other and spilling out of the
+frame, and the layout audit that caught it only worked because a script could parse the
+positions.
+
+**A widget for each kind of value**, so no screen invents its own:
+
+| Kind | Control |
+|---|---|
+| A flag | Yes/No |
+| A number | value with − and +, bounded, formatted (metres, counts) |
+| One of a few | a button that cycles |
+| One of many | a picker screen with search and paging |
+| Several of many | the same picker, multi-select, order preserved |
+| Free text | an input field, committed on end-of-edit |
+
+**Navigation.** A back stack. Every sub-screen returns to where it came from, and switching
+tabs clears sub-screens rather than stranding the player inside one.
+
+**Saying things.** A single place for "here is what just happened", used by registration and
+everything after it. Every action reports its outcome, including refusal and why.
+
+### Rules and edge cases
+
+- The screen must survive its subject vanishing — the colony destroyed, the structure gone —
+  by closing cleanly rather than throwing every frame.
+- Text that does not fit is the layout's problem, not the reader's: a sentence cut off
+  mid-word explains nothing, so strings are sized to their column.
+- The list a picker shows is capped and paged. A list of a thousand items is not a list.
+
+### Done when
+
+The screen opens anywhere, releases the mouse, knows what you were looking at, renders one of
+every widget kind, pages a long list, and survives its colony being destroyed while open.
+
+---
+
+## Milestone 3 — Registration
+
+Turning a thing in the world into something the settlement uses.
+
+### What may be registered
+
+A structure qualifies if it carries at least one **compatible component**. The list is the
+whole of what a colony understands, and growing it is how the mod grows. For the foundation:
+
+| Component | Detected by | What it means |
+|---|---|---|
+| **Storage** | `Container` | Things can be kept here |
+| **Processing** | `Smelter` | Covers furnace, smelter and charcoal kiln |
+| **Rest** | `Bed` | One villager can sleep here |
+
+Deliberately excluded for now, and each is a later milestone: fireplaces, cooking stations,
+fermenters, beehives, work areas, the junk area.
+
+**Detected by component, never by prefab name.** A name list misses every modded chest and
+goes stale; a component test does not. Components are found anywhere on the object, including
+on children, because Valheim routinely splits an object's parts across child transforms — but
+only when the child belongs to the *same* networked object, or a building would inherit the
+capabilities of everything standing inside it.
+
+**A creature is never a structure**, and neither is a loose item drop, whatever components
+they carry.
+
+### How it happens
+
+Two ways, both from the screen:
+
+1. **Look at it and register.** The screen knows what you were looking at and offers it.
+2. **Pick it from a list.** Everything registerable nearby, searchable, with what each one
+   would be registered *as*.
+
+Both refuse with a reason: not in range, not a thing the colony understands, already
+registered.
+
+### Data
+
+A record per structure, holding: a **durable reference** to the object, which components it
+has, a player-editable name, and the settings for each component.
+
+**Minting a durable reference requires owning the object.** Ownership is claimed first. A
+reference minted without ownership is silently empty and looks fine until a reload, when it
+resolves to nothing — this cost four benchmark runs to find and is not to be rediscovered.
+
+### Rules and edge cases
+
+- **Registering requires being inside the radius.** Reach is what a settlement can use.
+- **Falling out of radius does not deregister.** The structure goes dormant, stays listed,
+  and says so. It comes back when the settlement reaches it again.
+- **Removal happens on positive evidence only.** Measured: an unloaded structure still
+  resolves, and a destroyed one does not and is additionally listed as dead. So a lookup
+  failing already means destroyed. A record is never dropped because something could not be
+  found — walking away from an outpost must not delete its configuration.
+- **A structure may belong to one colony at a time.** Registering it elsewhere moves it, and
+  says so.
+- **Names default to what the game calls the thing**, not to its prefab: rows reading
+  `charcoal_kiln(Clone)` are a bug, not a detail.
+
+### Done when
+
+You look at a chest, register it, see it listed as Storage; walk out of range and watch it go
+dormant rather than vanish; smash it and watch the record go; and try to register a boar and
+be told why not.
+
+---
+
+## Milestone 4 — Component settings
+
+What makes registration worth doing. Each component contributes its own settings, on the
+structure, where the player is already looking.
+
+### Storage
+
+- **What belongs here** — any number of items, chosen from the game's own catalogue with
+  search. Empty means *anything*, which is what an overflow chest is.
+- **Whether it may be taken from** — some chests are for keeping, not for feeding the
+  settlement back.
+
+### Processing
+
+- **What to keep it fed with** — fuel and input, chosen from what that structure will
+  actually accept, read from the structure rather than typed.
+- **How full to keep it** — so a settlement does not burn every log it owns keeping one kiln
+  permanently brimming.
+
+### Rest
+
+- **Who sleeps here** — one villager, chosen from the colony. Assigning a bed that is taken
+  moves it, and says whose it was.
+
+### The settlement index
+
+The piece everything later leans on, and the reason this is a milestone rather than a
+detail.
+
+Jobs do not search for destinations. They **ask**: *where does wood go?* — and the settlement
+answers from an index it maintains as registrations and settings change. With no cap on
+population, a hundred villagers each walking every chest is the difference between a
+settlement and a slideshow.
+
+- Built from the registered records, updated when they change, never rebuilt per villager.
+- Answers "which structures accept this item", "which processing wants feeding", "which beds
+  are free".
+- Dormant structures are excluded from answers while dormant, and return without ceremony.
+
+### Rules and edge cases
+
+- Two chests claiming the same item is not a conflict; both are valid answers and the nearest
+  usable one wins.
+- A chest that claims wood and is full is not an answer. Capacity is part of the question,
+  because discovering it on arrival wastes a walk.
+- Settings survive the structure going dormant. They are the record's, not the object's.
+
+### Done when
+
+Registering a chest as holding wood and a smelter as wanting coal is the *entire*
+configuration, and the settlement can answer where wood goes without anything walking
+anywhere.
+
+---
+
+## Milestone 5 — Villagers
+
+People in the settlement.
+
+### Build
+
+- **Spawned from the screen**, into the selected colony. A deliberate act, not a hotkey.
+- **Placed on real ground** next to the hearth. The spawn point becomes the villager's home,
+  so getting it wrong is permanent — the ground check must be the reporting kind, which fails
+  loudly, not the silent one that returns your own height when it misses.
+- **Named**, from the game's own name pool, editable.
+- **Appearance**, rolled once and persisted: body, skin, hair, beard, and clothes drawn from
+  what the game actually has rather than a list written by hand.
+- **Belongs to a colony**, and knows it. Losing the colony is a state it reports, not a crash.
+- **A bag**, persisted on the villager rather than trusted to the container component, which
+  was measured not to save.
+- **Removal**, which drops what they carried rather than destroying it, and works whether or
+  not they are loaded.
+
+### Rules and edge cases
+
+- **No population cap.** Everything that touches all villagers is therefore bounded work:
+  amortised scans, no per-villager sweeps over the settlement.
+- A villager whose colony is destroyed says so and stands still. It is not deleted, so a
+  misplaced hammer blow does not erase a settlement.
+- Two villagers never occupy the same job target — claiming is part of the job system, not
+  of politeness.
+- Villagers do not shove the player. Collision with the player is ignored.
+
+### Done when
+
+You spawn five villagers, each looks different, all survive a reload with their names, and
+removing one returns what it was carrying.
+
+---
+
+## Milestone 6 — The job system
+
+The machinery that runs work. **No actual work is defined here** — that is the job document.
+What this delivers is something a job can be plugged into.
+
+### The shape
+
+- **A job is defined on the colony**: a named configuration, shared, not per-villager.
+- **A villager holds a queue** of job references, in order, each with a repeat count.
+- **The queue is a ring.** After the last entry comes the first.
+- **One entry runs at a time**, to completion or refusal, then the queue advances.
+
+### Outcomes, and what each means
+
+The whole scheduler is four answers, and the distinctions matter:
+
+| Outcome | Meaning | Effect |
+|---|---|---|
+| **Running** | progress was made | keep going, consume nothing |
+| **Completed** | one repetition finished | consume one of the count |
+| **Failed** | it could not be done | consume one, so impossible work cannot loop |
+| **Skipped** | nothing useful to do right now | consume nothing, yield to the next entry |
+
+The difference between *Failed* and *Skipped* is what stops an idle job starving a villager,
+and what stops a broken one spinning forever.
+
+### Persistence
+
+On the villager: the queue, its position, repetitions consumed, and enough about the current
+attempt to resume. A villager reloaded mid-job resumes rather than restarting — but **facts
+outrank the record**: if the world has moved on, the recorded state is discarded rather than
+obeyed.
+
+### Assignment
+
+- From a villager's own screen, and in bulk from the colony's.
+- **Presets**: named job configurations, so a settlement of a hundred is not a hundred
+  configurations.
+
+### Saying what is happening
+
+Every villager reports what it is doing in words a player would use, and every refusal says
+why — *needs an axe*, *nowhere to put it*, *nothing to do*. A settlement that stops without
+explaining itself is the failure this whole project is arranged against.
+
+### Scale
+
+- Work is **claimed**, so villagers do not converge on one target.
+- Deciding what to do next is bounded: an index lookup, not a search.
+- Nothing iterates all villagers, all structures, or all loaded objects on a tick.
+
+### Rules and edge cases
+
+- A queue entry whose job was deleted is skipped and shown as missing, not hidden — a
+  half-broken queue must look half-broken.
+- An empty queue is idle, not an error.
+- A job removed from the colony while a villager is mid-cycle ends the cycle cleanly.
+
+### Done when
+
+A villager can be given a queue of two placeholder jobs, runs them in order with their
+counts, resumes mid-cycle across a reload, reports what it is doing throughout, and yields
+rather than starving when one has nothing to do.
+
+---
+
+## After the foundation
+
+**The job catalogue** — its own document. Every job specified before it is built, in two
+terms: the work it does, and the equipment it requires. One at a time.
+
+Then, in the order set out in [system-design.md](system-design.md): rest and energy, ambient
+life, food; then reach — work areas and gathering.
