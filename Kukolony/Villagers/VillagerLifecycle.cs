@@ -144,7 +144,7 @@ namespace Kukolony.Villagers
             Inventory inventory = container.GetInventory();
             if (inventory == null) return;
             Drop(inventory, instance.transform.position);
-            container.Save();
+            VillagerInventory.Persist(container, view);
         }
 
         /// <summary>
@@ -153,27 +153,16 @@ namespace Kukolony.Villagers
         /// </summary>
         private static void DropStoredBag(ZDO zdo, Vector3 origin)
         {
-            string encoded = zdo.GetString(ZDOVars.s_items, string.Empty);
-            if (string.IsNullOrEmpty(encoded)) return;
-
-            // Inventory.Load resolves every item through ObjectDB; without it the decode
-            // yields items with no drop prefab and the contents would vanish silently.
+            // Inventory decoding resolves every item through ObjectDB; without it the items
+            // would come back with no drop prefab and be dropped as nothing.
             if (ObjectDB.instance == null)
             {
                 Log.Warning("[villager] cannot recover a stored bag before ObjectDB is ready");
                 return;
             }
 
-            Inventory inventory = new Inventory("bag", null, VillagerInventory.Width, VillagerInventory.Height);
-            try { inventory.Load(new ZPackage(encoded)); }
-            catch (System.Exception e)
-            {
-                Log.Warning("[villager] unreadable bag on removal: " + e.Message);
-                return;
-            }
-
-            Drop(inventory, origin);
-            zdo.Set(ZDOVars.s_items, string.Empty);
+            Drop(VillagerInventory.Stored(zdo), origin);
+            VillagerInventory.ClearStored(zdo);
         }
 
         /// <summary>

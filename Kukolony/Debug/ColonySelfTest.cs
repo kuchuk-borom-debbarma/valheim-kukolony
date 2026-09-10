@@ -221,6 +221,8 @@ namespace Kukolony.Debug
                     "villager queue runtime survived save and relaunch");
                 report.Check(villager.QueueProgress == 7 && villager.RuntimePhase == "acceptance-persisted" &&
                              !villager.StepTarget.IsNone(), "active target and runtime progress survived save and relaunch");
+                report.Check(StoredBagCount(zdo, "Coal") == 3,
+                    "villager bag contents survived save and relaunch");
             }
             CheckStationContracts(report);
             LastPassed = report.Print();
@@ -244,6 +246,18 @@ namespace Kukolony.Debug
             persisted.SetQueueProgress(7);
             persisted.SetRuntimePhase("acceptance-persisted");
             persisted.SetStepTarget(target.Id);
+
+            // Fill the bag here rather than earlier so no job tick can spend it before the
+            // save; the queue above is deliberately unresolvable, so this villager idles.
+            GameObject carried = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(zdo.m_uid) : null;
+            if (carried != null && carried.TryGetComponent(out ZNetView carriedView) && carriedView.IsValid())
+            {
+                Container bag = VillagerInventory.Attach(carried, carriedView);
+                Clear(bag.GetInventory());
+                for (int i = 0; i < 3; i++) Add(bag.GetInventory(), "Coal");
+                Core.Log.Info($"[Benchmark] primary villager bag before save: live=" +
+                              $"{Count(bag.GetInventory(), "Coal")} stored={StoredBagCount(zdo, "Coal")}");
+            }
 
             // ZDOMan serializes its sector index, not its ID dictionary. Verify the
             // production creature followed the same indexing contract as a vanilla
@@ -365,6 +379,25 @@ namespace Kukolony.Debug
                     "removing an empty villager destroys it and creates no drops");
             }
 
+            // Does a live bag actually reach the villager's ZDO? VillagerInventory exists to
+            // stop a villager losing what it carries when its zone unloads, and that claim
+            // rests on Container flushing to s_items. Uses Flint so it cannot disturb the
+            // Coal counts the recovery check below depends on. Reported as a log rather than
+            // an assertion: the verdict that matters is the cross-reload check in RunReload.
+            Villager carrier = VillagerLifecycle.Spawn(colony);
+            if (carrier != null && carrier.TryGetComponent(out ZNetView carrierView) && carrierView.IsValid())
+            {
+                ZDO carrierZdo = carrierView.GetZDO();
+                Container carrierBag = VillagerInventory.Attach(carrier.gameObject, carrierView);
+                Add(carrierBag.GetInventory(), "Flint");
+                report.Check(Count(carrierBag.GetInventory(), "Flint") == 1,
+                    "control: a live villager bag holds what was added to it");
+                report.Check(StoredBagCount(carrierZdo, "Flint") == 1,
+                    "a villager bag is persisted to its ZDO as soon as it changes");
+                VillagerLifecycle.Remove(colony, carrierZdo.m_uid);
+                yield return new WaitForSecondsRealtime(.2f);
+            }
+
             // The stored-bag branch, exercised directly. It cannot be reached by faking an
             // unloaded villager: destroying the GameObject leaves a stale ZNetScene instance
             // entry that vanilla's OnZDODestroyed dereferences without a guard, which a real
@@ -375,24 +408,23 @@ namespace Kukolony.Debug
             if (stored != null && stored.TryGetComponent(out ZNetView storedView) && storedView.IsValid())
             {
                 ZDO storedZdo = storedView.GetZDO();
-                Inventory seed = new Inventory("bag", null, VillagerInventory.Width, VillagerInventory.Height);
-                Add(seed, "Coal");
-                ZPackage seeded = new ZPackage();
-                seed.Save(seeded);
-                storedZdo.Set(ZDOVars.s_items, seeded.GetBase64());
+                Container storedBag = VillagerInventory.Attach(stored.gameObject, storedView);
+                Add(storedBag.GetInventory(), "Coal");
 
                 Vector3 hearth = colony.transform.position;
                 int coalBefore = LooseCount("Coal", hearth);
-                report.Check(seed.GetAllItems().Count == 1 &&
-                             !string.IsNullOrEmpty(storedZdo.GetString(ZDOVars.s_items, string.Empty)),
+                report.Check(StoredBagCount(storedZdo, "Coal") == 1,
                     "control: a stored bag record is present before recovery");
 
                 VillagerLifecycle.TestRecoverStoredBag(storedZdo, hearth);
+                // Checked before yielding: this villager is still loaded, so its live bag
+                // would re-persist the item on the next change. In the real unloaded case
+                // there is no live container to write it back.
+                report.Check(StoredBagCount(storedZdo, string.Empty) == 0,
+                    "recovered bag is cleared so it cannot be claimed twice");
                 yield return new WaitForSecondsRealtime(.3f);
                 report.Check(LooseCount("Coal", hearth) == coalBefore + 1,
                     "an out-of-range villager's bag is recovered from its ZDO at the hearth");
-                report.Check(string.IsNullOrEmpty(storedZdo.GetString(ZDOVars.s_items, string.Empty)),
-                    "recovered bag is cleared so it cannot be claimed twice");
 
                 VillagerLifecycle.Remove(colony, storedZdo.m_uid);
                 yield return new WaitForSecondsRealtime(.2f);
@@ -408,6 +440,18 @@ namespace Kukolony.Debug
                     "remove refuses a non-member and leaves it alive");
                 ZNetScene.instance.Destroy(stranger.gameObject);
             }
+        }
+
+        /// <summary>
+        ///     Items of a prefab held in a villager's persisted bag, decoded straight from the
+        ///     ZDO the bag writes through. Reads the stored record rather than a live Container
+        ///     so it answers the same question before and after a reload.
+        /// </summary>
+        private static int StoredBagCount(ZDO zdo, string prefabName)
+        {
+            Inventory decoded = VillagerInventory.Stored(zdo);
+            if (prefabName.Length == 0) return decoded.GetAllItems().Count;
+            return Count(decoded, prefabName);
         }
 
         /// <summary>

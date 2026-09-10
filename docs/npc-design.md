@@ -26,6 +26,21 @@ full Player prefab and transplanting 219 inherited fields created a hybrid objec
 Awake/lifecycle assumptions could freeze Unity. `ComponentTransplant` and that design were
 deleted.
 
+## Carried items
+
+A villager's bag is a Container mounted on a collider-less child, which supplies the grid,
+the interaction UI, and ownership-safe access. Persistence is not Container's: it is
+documented as flushing the inventory to `ZDOVars.s_items` on every change, but measured
+in-game it never wrote for this component — with the villager owned and the container
+reporting itself as owner, the record stayed empty after a change and after an explicit
+Save, and everything a villager carried was gone after a real save and relaunch.
+
+`VillagerInventory` therefore persists the bag itself, to its own key on the villager ZDO,
+using the same write that villager queue state already survives on. It restores on attach
+and writes on every inventory change, owner only. The benchmark asserts both the immediate
+write and survival across save, exit, and reload, so a regression here fails loudly rather
+than quietly eating a haul.
+
 ## Creation and removal
 
 Players add villagers from the hearth and remove them from the member detail view;
