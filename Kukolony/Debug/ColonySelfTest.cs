@@ -168,6 +168,7 @@ namespace Kukolony.Debug
             CheckPairedControls(report, colony, villager, origin, chestRecord.Id);
             yield return CheckLifecycle(report, colony, origin);
             CheckStationContracts(report);
+            CheckStationProtocols(report, origin);
             report.Check(Enum.GetValues(typeof(ColonyJobType)).Length == 7, "concrete job catalog is complete");
 
             // Write a non-trivial runtime snapshot last, immediately before the world is
@@ -471,6 +472,43 @@ namespace Kukolony.Debug
         }
 
         /// <summary>
+        ///     Asserts every station prefab resolves to its own protocol. Protocol choice moved
+        ///     from the job's type to what the target actually is, and several vanilla prefabs
+        ///     carry more than one station component, so a wrong probe order would silently
+        ///     operate the wrong half of a station.
+        /// </summary>
+        private static void CheckStationProtocols(TestReport report, Vector3 origin)
+        {
+            var expected = new[]
+            {
+                ("fire_pit", StructureCapability.Fireplace, "FireplaceProtocol"),
+                ("smelter", StructureCapability.Smelter, "SmelterProtocol"),
+                ("charcoal_kiln", StructureCapability.Smelter, "SmelterProtocol"),
+                ("piece_cookingstation", StructureCapability.CookingStation, "CookingStationProtocol"),
+                ("fermenter", StructureCapability.Fermenter, "FermenterProtocol"),
+                ("piece_beehive", StructureCapability.BeeHive, "BeehiveProtocol")
+            };
+            bool allResolved = true;
+            string detail = string.Empty;
+            foreach ((string prefab, StructureCapability capability, string protocol) in expected)
+            {
+                GameObject probe = Spawn(prefab, origin + Vector3.forward * 24f);
+                string actual = ColonyJobEngine.TestResolveProtocol(probe, capability);
+                if (actual != protocol) { allResolved = false; detail += $"{prefab}={actual} "; }
+                if (probe != null) ZNetScene.instance.Destroy(probe);
+            }
+
+            // Control: a container is not a station. Without this the claim above would pass
+            // just as well if the resolver returned the first protocol for anything.
+            GameObject chest = Spawn("piece_chest_wood", origin + Vector3.forward * 27f);
+            bool chestRefused = ColonyJobEngine.TestResolveProtocol(chest, StructureCapability.None).Length == 0;
+            if (chest != null) ZNetScene.instance.Destroy(chest);
+
+            report.Check(allResolved && chestRefused,
+                "every station resolves its own protocol and a container resolves none", detail);
+        }
+
+        /// <summary>
         ///     Asserts each station prefab still exposes the vanilla RPCs the executors invoke,
         ///     so a game update that renames or removes one fails here with a clear message
         ///     rather than as silent no-op work in the field.
@@ -572,16 +610,26 @@ namespace Kukolony.Debug
             hiveJob.Destination = destinationView.GetZDO().m_uid;
             int honeyBefore = Count(destinationObject.GetComponent<Container>().GetInventory(), "Honey");
             JobResult hiveResult = ColonyJobEngine.TestOperate(hiveObject, bag, hiveJob, state, out _);
-            yield return new WaitForSecondsRealtime(.5f);
-            ItemDrop honey = ItemDrop.s_instances.FirstOrDefault(drop => drop != null &&
-                Utils.GetPrefabName(drop.gameObject) == "Honey");
-            if (honey != null)
+
+            // Extraction spawns honey as a world drop, and how many frames that takes is not
+            // ours to control. A fixed wait made this assertion flaky; retry to a deadline
+            // instead, the same way the transfer check waits out an ownership handshake.
+            ItemDrop honey = null;
+            for (int attempt = 0; attempt < 20 && honey == null; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.1f);
+                honey = ItemDrop.s_instances.FirstOrDefault(drop => drop != null &&
+                    Utils.GetPrefabName(drop.gameObject) == "Honey");
+            }
+            bool honeyDropped = honey != null;
+            if (honeyDropped)
             {
                 state.SetRuntimePhase("pickup-collect");
-                ColonyJobEngine.TestPickup(honey.gameObject, bag, state, out _);
-                yield return new WaitForSecondsRealtime(.2f);
-                if (Count(bag, "Honey") == 0)
+                for (int attempt = 0; attempt < 10 && Count(bag, "Honey") == 0; attempt++)
+                {
                     ColonyJobEngine.TestPickup(honey.gameObject, bag, state, out _);
+                    yield return new WaitForSecondsRealtime(.1f);
+                }
             }
             JobResult honeyDeposit = Count(bag, "Honey") > 0
                 ? ColonyJobEngine.TestDeposit(destinationObject, bag, hiveJob, state, out _)
@@ -589,7 +637,8 @@ namespace Kukolony.Debug
             report.Check(hive != null && hiveResult == JobResult.Running && honeyDeposit == JobResult.Completed &&
                          Count(destinationObject.GetComponent<Container>().GetInventory(), "Honey") == honeyBefore + 1,
                 "collect beehives extracts, picks up and stores honey",
-                $"ready={(hive != null ? hive.GetHoneyLevel() : -1)} result={hiveResult} drop={(honey != null)} bag={Count(bag, "Honey")} deposit={honeyDeposit}");
+                $"result={hiveResult} dropped={honeyDropped} deposit={honeyDeposit} " +
+                $"stored={Count(destinationObject.GetComponent<Container>().GetInventory(), "Honey")} was={honeyBefore}");
 
             Clear(bag);
             Fill(destinationObject.GetComponent<Container>().GetInventory(), "Wood");

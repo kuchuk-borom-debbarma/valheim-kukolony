@@ -46,6 +46,12 @@ namespace Kukolony.Jobs
         internal static JobResult TestOperate(GameObject target, Inventory bag, ColonyJobConfig job, VillagerState state, out string activity) =>
             Operate(target, bag, job, state, out activity);
         internal static bool TestLimitReached(Colony colony, ColonyJobConfig job) => LimitReached(colony, job);
+        /// <summary>Which station protocol a target resolves to, or empty for none.</summary>
+        internal static string TestResolveProtocol(GameObject target, Colonies.StructureCapability declared)
+        {
+            Stations.IStationProtocol protocol = Stations.StationProtocols.Resolve(target, declared);
+            return protocol == null ? string.Empty : protocol.GetType().Name;
+        }
 
         /// <summary>
         ///     Advances one job by one tick and reports the player-visible activity string.
@@ -306,6 +312,11 @@ namespace Kukolony.Jobs
             return JobResult.Completed;
         }
 
+        /// <summary>
+        ///     Performs one step of work against a station, delegating to the protocol that
+        ///     matches the target. The job's type no longer picks the protocol: what the
+        ///     station is does, which is why supporting a new one needs no change here.
+        /// </summary>
         private static JobResult Operate(GameObject target, Inventory bag, ColonyJobConfig job,
             VillagerState state, out string activity)
         {
@@ -314,91 +325,14 @@ namespace Kukolony.Jobs
                 state.ResetRuntime(); activity = "station invalid"; return JobResult.Failed;
             }
             if (!view.IsOwner()) { view.ClaimOwnership(); activity = "claiming station"; return JobResult.Running; }
-            ItemDrop.ItemData item = FirstMatching(bag, job.ItemFilters);
-            switch (job.Type)
-            {
-                case ColonyJobType.FuelFireplaces:
-                    if (!target.TryGetComponent(out Fireplace fire))
-                        return FinishFailed(state, "fireplace invalid", out activity);
-                    if (item == null || fire.m_fuelItem == null ||
-                        Utils.GetPrefabName(item.m_dropPrefab) != Utils.GetPrefabName(fire.m_fuelItem.gameObject))
-                        return FinishSkipped(state, "no compatible fuel", out activity);
-                    // AddFuel owns the max-fuel guard and submits the verified
-                    // AddFuelAmount RPC. CanUseItems cannot be used here because it checks
-                    // the local Player inventory rather than the villager bag.
-                    uint fuelRevision = view.GetZDO().DataRevision;
-                    fire.AddFuel(1f);
-                    if (view.GetZDO().DataRevision == fuelRevision)
-                        return FinishSkipped(state, "fireplace full", out activity);
-                    if (!Consume(bag, item)) return FinishFailed(state, "fuel disappeared", out activity);
-                    break;
-                case ColonyJobType.OperateSmelters:
-                    if (!target.TryGetComponent(out Smelter smelter)) return FinishFailed(state, "smelter invalid", out activity);
-                    if (item == null) return FinishSkipped(state, "no input", out activity);
-                    string smelterItem = Utils.GetPrefabName(item.m_dropPrefab);
-                    if (smelter.m_fuelItem != null && Utils.GetPrefabName(smelter.m_fuelItem.gameObject) == smelterItem)
-                    {
-                        if (smelter.m_maxFuel > 0 && smelter.GetFuel() >= smelter.m_maxFuel)
-                            return FinishSkipped(state, "smelter fuel full", out activity);
-                        if (!Consume(bag, item)) return FinishFailed(state, "fuel disappeared", out activity);
-                        view.InvokeRPC("RPC_AddFuel");
-                    }
-                    else
-                    {
-                        if (!smelter.IsItemAllowed(item))
-                            return FinishSkipped(state, "input not accepted", out activity);
-                        if (smelter.GetQueueSize() >= smelter.m_maxOre)
-                            return FinishSkipped(state, "smelter input full", out activity);
-                        if (!Consume(bag, item)) return FinishFailed(state, "input disappeared", out activity);
-                        view.InvokeRPC("RPC_AddOre", smelterItem, false);
-                    }
-                    break;
-                case ColonyJobType.OperateCookingStations:
-                    if (!target.TryGetComponent(out CookingStation cooking)) return FinishFailed(state, "cooking station invalid", out activity);
-                    if (!cooking.IsEmpty() && cooking.IsEverythingCooked())
-                    {
-                        view.InvokeRPC("RPC_RemoveDoneItem", target.transform.position, 1);
-                    }
-                    else if (item != null && cooking.IsItemAllowed(item) && !cooking.IsStationFull())
-                    {
-                        string cookingItem = Utils.GetPrefabName(item.m_dropPrefab);
-                        if (!Consume(bag, item)) return FinishFailed(state, "food disappeared", out activity);
-                        view.InvokeRPC("RPC_AddItem", cookingItem, false);
-                    }
-                    else if (item == null && !cooking.IsStationFull())
-                        return NeedInput(state, "cooking station needs food", out activity);
-                    else
-                        return FinishSkipped(state, "cooking station has no available action", out activity);
-                    break;
-                case ColonyJobType.OperateFermenters:
-                    if (!target.TryGetComponent(out Fermenter fermenter)) return FinishFailed(state, "fermenter invalid", out activity);
-                    if (fermenter.GetStatus() == Fermenter.Status.Ready)
-                        view.InvokeRPC("RPC_Tap");
-                    else if (fermenter.GetStatus() == Fermenter.Status.Empty && item != null && fermenter.IsItemAllowed(item))
-                    {
-                        int hash = Utils.GetPrefabName(item.m_dropPrefab).GetStableHashCode();
-                        if (!Consume(bag, item)) return FinishFailed(state, "fermentable disappeared", out activity);
-                        view.InvokeRPC("RPC_AddItem", hash, false);
-                    }
-                    else if (fermenter.GetStatus() == Fermenter.Status.Empty && item == null)
-                        return NeedInput(state, "fermenter needs input", out activity);
-                    else
-                        return FinishSkipped(state, "fermenter is busy", out activity);
-                    break;
-                case ColonyJobType.CollectBeehives:
-                    if (!target.TryGetComponent(out Beehive hive) || hive.GetHoneyLevel() <= 0)
-                        return FinishSkipped(state, "no honey ready", out activity);
-                    view.InvokeRPC("RPC_Extract");
-                    state.ResetRuntime();
-                    state.SetQueueProgress(100);
-                    activity = "extracting honey";
-                    return JobResult.Running;
-                default:
-                    return FinishFailed(state, "unsupported operation", out activity);
-            }
-            state.ResetRuntime();
-            activity = "operation submitted";
-            return JobResult.Completed;
+
+            Stations.IStationProtocol protocol =
+                Stations.StationProtocols.Resolve(target, ColonyJobCatalog.RequiredCapability(job.Type));
+            if (protocol == null) return JobOutcomes.Failed(state, "unsupported operation", out activity);
+
+            return protocol.Operate(
+                new Stations.StationContext(target, view, bag, FirstMatching(bag, job.ItemFilters), state),
+                out activity);
         }
 
         /// <summary>
@@ -474,25 +408,19 @@ namespace Kukolony.Jobs
             target != null ? Utils.GetPrefabName(target) : "target";
 
         /// <summary>Clears runtime state and yields without consuming a queue attempt.</summary>
-        private static JobResult FinishSkipped(VillagerState state, string message, out string activity)
-        { state.ResetRuntime(); activity = "skipping: " + message; return JobResult.Skipped; }
+        private static JobResult FinishSkipped(VillagerState state, string message, out string activity) =>
+            JobOutcomes.Skipped(state, message, out activity);
 
         /// <summary>Clears runtime state and consumes a queue attempt, bounding retries.</summary>
-        private static JobResult FinishFailed(VillagerState state, string message, out string activity)
-        { state.ResetRuntime(); activity = message; return JobResult.Failed; }
+        private static JobResult FinishFailed(VillagerState state, string message, out string activity) =>
+            JobOutcomes.Failed(state, message, out activity);
 
         /// <summary>
         ///     Releases the station and records sub-state <c>1</c> so the next tick fetches the
         ///     missing input from a source before coming back. Stays <c>Running</c>: the job is
         ///     making progress, it just needs materials first.
         /// </summary>
-        private static JobResult NeedInput(VillagerState state, string message, out string activity)
-        {
-            state.SetStepTarget(ZDOID.None);
-            state.SetRuntimePhase(string.Empty);
-            state.SetQueueProgress(1);
-            activity = message;
-            return JobResult.Running;
-        }
+        private static JobResult NeedInput(VillagerState state, string message, out string activity) =>
+            JobOutcomes.NeedInput(state, message, out activity);
     }
 }
