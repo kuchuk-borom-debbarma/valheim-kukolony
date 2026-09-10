@@ -37,13 +37,6 @@ namespace Kukolony.Jobs
     // contract used to validate a pipeline without exposing an untyped JSON editor.
     internal enum JobCustomisation { ItemFilter, Target, Source, Destination, StockLimit, Movement, Reservation }
     /// <summary>
-    ///     The guided pieces a pipeline is built from. Deliberately linear: no player-authored
-    ///     loops, branches, variables, or async work. Queue semantics remain the only retry and
-    ///     scheduling mechanism. Ordering constraints live in <see cref="PipelineShapeRules"/>.
-    /// </summary>
-    internal enum JobPieceKind { Start, StopAtStockLimit, FindLooseItem, SelectSource, SelectTarget, MoveToTarget, PickUp, TakeItem, PutItem, OperateStation, End }
-
-    /// <summary>
     ///     One step in a pipeline. <see cref="Capability"/> narrows which registered
     ///     structures a selection piece may resolve to; it is unused by other kinds.
     /// </summary>
