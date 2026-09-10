@@ -286,6 +286,42 @@ lie.
 
 ---
 
+## What we have measured
+
+Findings from tests run against the real game, not reasoning about it. Each one closed a
+question that was otherwise going to be guessed at.
+
+### A destroyed object *can* be told from one that is merely not loaded
+
+Measured three ways in one run:
+
+```
+alive      resolves=True   listedDead=False
+destroyed  resolves=False  listedDead=True
+unloaded   resolves=True   listedDead=False    (a real chest, 900m away, after its zone unloaded)
+```
+
+**An unloaded structure stays known.** `ZDOMan.GetZDO` still answers for a chest whose zone
+the game has stopped keeping instantiated, so a lookup returning nothing already means
+destroyed. The game's dead-ZDO list confirms it independently, but no bookkeeping of our own
+is needed.
+
+This is what makes "never delete an outpost by walking away from it" free rather than
+expensive. Neither previous mod distinguished these: both treated a missing instance as "not
+loaded" and teleported to it, and the newer one's answer to the whole problem was a comment
+requiring players to install a third-party chunk loader so nothing was ever unloaded.
+
+Worth remembering that vanilla does not fully trust the check either — its own creature
+spawner pairs it with an `alive_time` heartbeat so a wrong answer only delays a respawn.
+
+### Villagers are drawn with the ghost rig's own shader
+
+Their body and hair use `Custom/Fallen Warrior`; only their clothing uses `Custom/Player`.
+That is why villagers glow gold while the player does not, and why removing the rig's lights
+and particles did not fix it: the glow is in the skin material, not in an effect.
+
+---
+
 ## Decisions
 
 Settled, with the reason.

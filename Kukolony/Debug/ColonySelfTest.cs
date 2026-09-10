@@ -1003,6 +1003,97 @@ namespace Kukolony.Debug
                 $"alive[resolves={aliveResolves} dead={!aliveNotDead}] " +
                 $"destroyed[resolves={destroyedResolves} dead={destroyedListed}] " +
                 $"unheard[resolves={unheardResolves} dead={unheardDead}]");
+
+            ReportVillagerMaterials();
+            yield return CheckUnloadedStaysKnown(report, colony);
+        }
+
+        /// <summary>
+        ///     Does a structure whose zone unloads stay *known*, or does it vanish like a
+        ///     destroyed one?
+        /// </summary>
+        /// <remarks>
+        ///     The check above used a ZDOID nothing ever issued as a stand-in for "not in
+        ///     memory". That is a proxy, and a proxy is not evidence. This does the real
+        ///     thing: put a chest far enough away that the game stops keeping it instantiated,
+        ///     and watch what each lookup says while it happens.
+        ///
+        ///     The answer decides how much machinery cleanup needs. If an unloaded object
+        ///     still resolves, then a lookup returning nothing already means destroyed and no
+        ///     dead-list bookkeeping is required at all.
+        /// </remarks>
+        private static IEnumerator CheckUnloadedStaysKnown(TestReport report, Colony colony)
+        {
+            // Far enough to be outside any active zone, and nowhere near anything the colony
+            // keeps alive - an unregistered chest holds no zone open by itself.
+            Vector3 far = colony.transform.position + Vector3.right * 900f;
+            GameObject remote = Spawn("piece_chest_wood", far);
+            if (remote == null || !remote.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "an unloaded structure stays known", "no fixture");
+                yield break;
+            }
+
+            ZDOID id = view.GetZDO().m_uid;
+            bool everUnloaded = false;
+            bool knownWhileUnloaded = false;
+            bool deadWhileUnloaded = false;
+
+            for (int attempt = 0; attempt < 60 && !everUnloaded; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                if (ZNetScene.instance.FindInstance(id) != null) continue;
+                everUnloaded = true;
+                knownWhileUnloaded = ZDOMan.instance.GetZDO(id) != null;
+                deadWhileUnloaded = KnownDead(id);
+            }
+
+            // Never observing the unload is not a pass and not a failure - it is a measurement
+            // that did not happen, and reporting it as either would be a lie.
+            report.Check(!everUnloaded || (knownWhileUnloaded && !deadWhileUnloaded),
+                everUnloaded
+                    ? "an unloaded structure stays known, and is not listed as dead"
+                    : "an unloaded structure stays known (INCONCLUSIVE - it never unloaded)",
+                $"unloaded={everUnloaded} stillKnown={knownWhileUnloaded} listedDead={deadWhileUnloaded}");
+
+            Release(remote);
+        }
+
+        /// <summary>
+        ///     Reports what a live villager is actually drawn with.
+        /// </summary>
+        /// <remarks>
+        ///     Villagers render gold while the player renders as skin. The rig they are cloned
+        ///     from is a glowing spectral thing, so the likely cause is an emissive material -
+        ///     but the last two asset-shaped problems here were both diagnosed wrongly by
+        ///     reasoning about them, so this reports the shaders, colours and emission actually
+        ///     in use rather than assuming.
+        /// </remarks>
+        private static void ReportVillagerMaterials()
+        {
+            Villager subject = null;
+            foreach (Villager candidate in Villager.Instances)
+                if (candidate != null) { subject = candidate; break; }
+            if (subject == null) { Core.Log.Info("[villager] no instance to inspect"); return; }
+
+            foreach (SkinnedMeshRenderer renderer in subject.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+            {
+                if (renderer == null) continue;
+                foreach (Material material in renderer.sharedMaterials)
+                {
+                    if (material == null) continue;
+                    string emission = material.HasProperty("_EmissionColor")
+                        ? material.GetColor("_EmissionColor").ToString() : "none";
+                    string skin = material.HasProperty("_SkinColor")
+                        ? material.GetColor("_SkinColor").ToString() : "none";
+                    string hue = material.HasProperty("_Color")
+                        ? material.GetColor("_Color").ToString() : "none";
+                    Core.Log.Info($"[villager] {renderer.name} mat={material.name} " +
+                                  $"shader={(material.shader != null ? material.shader.name : "null")} " +
+                                  $"color={hue} skin={skin} emission={emission} " +
+                                  $"keywords={string.Join("|", material.shaderKeywords)}");
+                }
+            }
         }
 
         /// <summary>Whether the game has recorded this object as destroyed.</summary>
