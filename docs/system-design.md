@@ -13,44 +13,65 @@ with rather than agreed to. Nothing here is settled until it moves to *Decisions
 
 ## Vision (draft)
 
-**A Valheim base should feel inhabited, and should keep working when you are not there.**
+**A settlement, not a set of tools.** Kukolony turns a base into a place people live. You
+build a hearth, people gather to it, and the base becomes a small community that works,
+feeds itself, keeps itself in order, and carries on being a place while you are away.
 
-You build a hearth. People join it. The upkeep that makes a base tedious — carrying drops to
-chests, feeding fires, loading smelters, cutting firewood — happens without you doing it by
-hand. You leave to explore, sail, or fight a boss. You come back and the place has carried on.
+The work matters — hauling, chopping, smelting, cooking — but it is not the point. The point
+is that the base is **inhabited**. Someone is always doing something. The fire is fed because
+somebody fed it. The wood is stacked because somebody stacked it. When you come back from a
+week at sea, the village has been living.
 
-The player is a **chieftain, not a foreman**. You say what should happen and roughly how; you
-do not stand over anyone. Configuration is something done occasionally and then left alone.
-A colony that needs constant attention has failed at its one job.
+The player is a **chieftain, not a foreman**. You decide what the settlement is for and give
+it what it needs; you do not stand over anyone. Configuration is occasional, not constant.
 
-**Villagers are people, not machinery.** They have names, faces, clothes, and tools they had
-to be given. They walk places and take time. The point is not throughput.
+**Villagers are people.** Names, faces, clothes, tools they had to be given. They eat. They
+keep themselves in order. They walk places and take time. A villager is not a machine with a
+name painted on it, and the settlement is not a throughput problem.
 
 ---
 
 ## Boundaries (draft)
 
-What this refuses to be, so the answer to "could villagers also…" is already written down.
+What this refuses to be, so "could villagers also…" already has an answer.
 
-**Not a combat mod.** Villagers work. They do not garrison, patrol, or form a militia, and
-the colony is not a defence answer.
+**Not a replacement for playing Valheim.** Villagers live and work in and around the
+settlement. They do not adventure — no sailing, no dungeons, no fetching from a biome you
+have not been to, no fighting bosses. Anything that lets you skip the game is out.
 
-**Not a needs simulation.** No hunger, sleep, mood, illness, relationships or opinions. A
-villager that will not work says so in plain words; it is never sulking.
+**Not a cheat.** Work costs real materials, real tools, and real time. Food is eaten, tools
+are carried, nothing is conjured. A villager is never strictly better than doing it yourself;
+the value is that they do it while you are elsewhere.
 
-**Not a replacement for playing Valheim.** Villagers do chores in and around the base. They
-do not adventure — no sailing, no dungeons, no fetching from a biome you have not been to,
-no fighting bosses. Anything that would let you skip the game is out.
+**Not a combat mod.** *(Under review — a settlement that cannot survive a boar is a hard sell.
+See question 4.)* Villagers work; they are not a garrison and the settlement is not a defence
+answer.
 
-**Not a cheat.** Work costs real materials, real tools, and real time. Nothing is conjured,
-nothing is free, and a villager is never strictly better than doing it yourself.
+**Not a psychology.** They eat and keep themselves in order, but they have no mood, no
+opinions, no relationships, no grudges. A villager that will not work says so in plain words.
+It is never sulking, and there is never a hidden number to guess at.
 
-**Not an economy or a story.** No currency, trade, production chains beyond Valheim's own, no
-dialogue, no quests. Names and appearance are flavour.
+**Not an economy or a story.** No currency, no trade, no production chains beyond Valheim's
+own, no dialogue trees, no quests. Names and appearance are flavour.
 
-**Not a framework.** This is one opinionated mod, not a platform for other people's NPCs.
+**Not a framework.** One opinionated mod, not a platform for other people's NPCs.
 
 ---
+
+## The tension to resolve first
+
+Two things in the vision pull against each other, and most of the open questions below are
+really this same question wearing different clothes:
+
+> **"It keeps going while you are away"** wants a settlement that cannot get into a state you
+> have to come home and fix.
+>
+> **"They are people who eat and keep themselves in order"** wants needs that can go unmet —
+> and a need that cannot go unmet is not a need, it is decoration.
+
+A settlement that quietly starves while you are at sea is a betrayal of the first. A
+settlement whose needs never bite is a betrayal of the second. Where the line sits decides
+what this mod actually is, so it is question 1.
 
 ## Roadmap
 
@@ -93,3 +114,37 @@ Settled, with the reason. Filled in as we go.
 ## Open questions
 
 Numbered so we can refer back.
+
+### 1. Do needs have teeth, and how sharp?
+
+If a villager is not fed, what happens? Options, in order of how much they can ruin a week
+away: nothing but a visible complaint; works slower; stops working; leaves; dies. The answer
+decides whether the settlement is something you tend or something that punishes you for
+leaving, and everything else about food follows from it.
+
+### 2. Where does food come from?
+
+The player stocks a larder and villagers take from it; or villagers cook it themselves from
+what the colony has; or villagers eventually farm it. Each is a different amount of machinery
+and a different failure mode when the chain breaks.
+
+### 3. What does "doing their things" mean, concretely?
+
+Ambient life is what makes a place feel inhabited, and none of it is work: sitting by the
+fire, standing about, sleeping at night, going indoors in the rain. Cheap to fake, and it may
+matter more to the feeling of a settlement than any job does. Related: does a settlement need
+**homes** — beds a villager belongs to and returns to?
+
+### 4. Does a settlement have to survive being attacked?
+
+A village of people who stand still while a boar kills them is not a village. But combat is a
+boundary I drew on purpose, and the previous mod's own notes say working villagers mostly
+failed to defend themselves because the work loop starved the combat AI. Options: no defence
+at all; villagers flee indoors and the player deals with it; villagers defend themselves but
+never seek a fight.
+
+### 5. How far does the settlement extend?
+
+Chopping already sends villagers well beyond the hearth. Is the settlement a **place** with an
+edge, or a radius that follows the work? This decides whether "in the village" is a meaningful
+phrase.
