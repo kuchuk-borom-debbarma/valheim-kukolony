@@ -141,7 +141,7 @@ namespace Kukolony.Jobs
         ///     is removed.
         /// </summary>
         private static bool WalksPieces(ColonyJobConfig job) =>
-            job.Type == ColonyJobType.HaulLoose || job.Type == ColonyJobType.Transfer;
+            job.Type != ColonyJobType.CollectBeehives;
 
         /// <summary>
         ///     Runs a job by walking its pieces rather than by switching on its type.

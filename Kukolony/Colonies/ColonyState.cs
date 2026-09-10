@@ -182,6 +182,11 @@ namespace Kukolony.Colonies
                 }
             }
             else job.Pieces.AddRange(JobPipeline.For(job.Type));
+            if (JobPipeline.IsRetiredStationShape(job.Pieces, job.Type))
+            {
+                job.Pieces.Clear();
+                job.Pieces.AddRange(JobPipeline.For(job.Type));
+            }
             return job;
         }
 

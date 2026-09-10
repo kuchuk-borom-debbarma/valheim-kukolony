@@ -159,10 +159,43 @@ namespace Kukolony.Jobs
                     pieces.Add(new JobPiece { Kind = JobPieceKind.FindLooseItem }); pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget }); pieces.Add(new JobPiece { Kind = JobPieceKind.PickUp }); pieces.Add(new JobPiece { Kind = JobPieceKind.SelectTarget, Capability = StructureCapability.Container }); pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget }); pieces.Add(new JobPiece { Kind = JobPieceKind.PutItem }); break;
                 case ColonyJobType.Transfer:
                     pieces.Add(new JobPiece { Kind = JobPieceKind.SelectSource, Capability = StructureCapability.Container }); pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget }); pieces.Add(new JobPiece { Kind = JobPieceKind.TakeItem }); pieces.Add(new JobPiece { Kind = JobPieceKind.SelectTarget, Capability = StructureCapability.Container }); pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget }); pieces.Add(new JobPiece { Kind = JobPieceKind.PutItem }); break;
+                // Collecting takes nothing to the hive; everything else carries fuel or input
+                // to its station, which the old three-piece shape simply did not depict even
+                // though the engine has always done it.
+                case ColonyJobType.CollectBeehives:
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.SelectTarget, Capability = StructureCapability.BeeHive });
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget });
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.OperateStation, Capability = StructureCapability.BeeHive });
+                    break;
                 default:
-                    pieces.Add(new JobPiece { Kind = JobPieceKind.SelectTarget, Capability = ColonyJobCatalog.RequiredCapability(type) }); pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget }); pieces.Add(new JobPiece { Kind = JobPieceKind.OperateStation, Capability = ColonyJobCatalog.RequiredCapability(type) }); break;
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.SelectSource, Capability = StructureCapability.Container });
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget });
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.TakeItem });
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.SelectTarget, Capability = ColonyJobCatalog.RequiredCapability(type) });
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.MoveToTarget });
+                    pieces.Add(new JobPiece { Kind = JobPieceKind.OperateStation, Capability = ColonyJobCatalog.RequiredCapability(type) });
+                    break;
             }
             pieces.Add(new JobPiece { Kind = JobPieceKind.End }); return pieces;
+        }
+
+        /// <summary>
+        ///     True when a saved pipeline is exactly the old station shape, which chose a
+        ///     station and operated it with nothing to operate it with. The engine used to
+        ///     fetch anyway; now that the pieces are what run, such a job would quietly stop
+        ///     working, so it is replaced by the current default. A pipeline someone has
+        ///     actually edited never matches and is never touched.
+        /// </summary>
+        internal static bool IsRetiredStationShape(List<JobPiece> pieces, ColonyJobType type)
+        {
+            if (type == ColonyJobType.HaulLoose || type == ColonyJobType.Transfer ||
+                type == ColonyJobType.CollectBeehives || pieces.Count != 6) return false;
+            return pieces[0].Kind == JobPieceKind.Start &&
+                   pieces[1].Kind == JobPieceKind.StopAtStockLimit &&
+                   pieces[2].Kind == JobPieceKind.SelectTarget &&
+                   pieces[3].Kind == JobPieceKind.MoveToTarget &&
+                   pieces[4].Kind == JobPieceKind.OperateStation &&
+                   pieces[5].Kind == JobPieceKind.End;
         }
 
         /// <summary>
