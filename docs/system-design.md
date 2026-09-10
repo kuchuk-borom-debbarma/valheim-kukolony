@@ -486,7 +486,24 @@ Settled, with the reason.
   presets.
 - **Energy first, food later.** Energy is self-resolving given a bed, so a settlement left
   alone cannot deadlock on it.
-- **Clothing and equipment stay in the code, unused for now.**
+- **Clothing and equipment stay in the code, unused for now.** So do chopping and work
+  areas. Unexposed rather than deleted: they hold measurements — tool tiers, the two-pass
+  tree, claiming ownership before damage — written down nowhere else.
+- **Features are rebuilt from this document; the engine is salvaged.** What runs today was
+  built to a different plan, and morphing it would carry that plan's shape around forever.
+- **Every job is specified before it is built**, in two terms: the work it does, and the
+  equipment it requires. One at a time — the last job list grew by analogy until seven jobs
+  shared settings none of them used.
+- **No population cap, and the target is high.** That means choosing nothing that must later
+  be thrown away: no per-tick cost that grows with the settlement, and answers rather than
+  searches. It does not mean building for a hundred villagers before there is one.
+- **Written for multiplayer, not tested at scale.** The ownership discipline is free to keep
+  and expensive to add later; it is neither promised nor tested until someone asks.
+- **No defence.** A settlement that cannot survive a boar is accepted, deliberately.
+- **Overlapping work areas are a union** — what a player drawing two circles most likely
+  means.
+- **Energy degrades rather than blocks**: slower, then unwilling, always saying why. Coming
+  home to a stalled village is a story; coming home to corpses is a bug report.
 - **A job refuses to start rather than stranding its result**, falls back to a junk area, and
   drops on the ground only as a last resort. Nothing is destroyed, nothing is held silently.
 - **A villager always comes home to sleep**, from wherever it was working. Distance to an
