@@ -54,6 +54,19 @@ uses the reporting `GetSolidHeight` overload — the plain one returns the input
 miss, which would strand a villager in mid-air, and the reporting form also refuses
 colliders with a rigidbody so a villager cannot spawn onto a cart or a boat.
 
+## Stripping the ghost
+
+The rig this clones is a spectral undead, and villagers inherited all of it: two point lights
+and four particle systems, including the drifting blue motes that read as transparency. Those
+are removed when the prefab is configured, while the human body, skeleton and animation that
+made the rig worth cloning stay. Breath particles go with them - they are part of the same
+set, and a colonist that fogs the air only in cold biomes is not worth keeping them for.
+
+What is attached is asset data, which the managed assembly cannot answer, so the strip reports
+what it found as well as removing it. It also reports any renderer still drawing with a
+see-through shader rather than rewriting the material: swapping one blind is how a villager
+ends up invisible. There were none.
+
 ## Production prefab
 
 `VillagerPrefab` clones `FallenWarrior`, removes only event dialogue/name/drop behaviours,

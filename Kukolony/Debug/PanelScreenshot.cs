@@ -136,6 +136,7 @@ namespace Kukolony.Debug
             yield return Capture("colony-preset-application.png");
 
             panel.Close();
+            yield return CaptureVillager(colony);
             ColonyPicker.Instance?.ShowForTest();
             yield return new WaitForSecondsRealtime(.5f);
             yield return Capture("colony-picker.png");
@@ -194,6 +195,43 @@ namespace Kukolony.Debug
         ///     the working directory happens to be. Must run after WaitForEndOfFrame or
         ///     the frame is not finished being drawn.
         /// </summary>
+        /// <summary>
+        ///     Photographs a villager with no panel in the way.
+        /// </summary>
+        /// <remarks>
+        ///     Every other capture here frames the interface, which is why a villager glowing
+        ///     like the ghost it was cloned from survived run after run: nothing ever looked at
+        ///     one. Appearance is exactly the kind of thing only a picture can check.
+        /// </remarks>
+        private static IEnumerator CaptureVillager(Colony colony)
+        {
+            Villager subject = null;
+            foreach (Villager candidate in Villager.Instances)
+                if (candidate != null) { subject = candidate; break; }
+            if (subject == null || Player.m_localPlayer == null)
+            {
+                Log.Warning("[Screenshot] no villager to photograph");
+                yield break;
+            }
+
+            // Placed relative to the camera, not the player. The game's camera follows the
+            // player every frame and overwrites anything set on it, and positioning by the
+            // player's own transform put the subject somewhere off frame twice - the pictures
+            // came back showing the player's back and no villager at all.
+            //
+            // Standing it beside the player is deliberate: the two share a body rig, so having
+            // both in shot is what makes "does this look like a person" answerable at a glance.
+            if (GameCamera.instance == null) yield break;
+            Transform eye = GameCamera.instance.transform;
+            Vector3 spot = eye.position + eye.forward * 6f + eye.right * 1.5f;
+            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(spot, out float ground))
+                spot.y = ground;
+            subject.transform.position = spot;
+            subject.transform.rotation = Quaternion.LookRotation(eye.position - spot);
+            yield return new WaitForSecondsRealtime(1f);
+            yield return Capture("colony-villager.png");
+        }
+
         private static IEnumerator Capture(string fileName)
         {
             yield return new WaitForEndOfFrame();

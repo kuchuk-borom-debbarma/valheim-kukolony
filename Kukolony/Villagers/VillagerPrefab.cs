@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Jotunn.Configs;
 using Jotunn.Entities;
 using Jotunn.Managers;
@@ -94,6 +95,7 @@ namespace Kukolony.Villagers
             RemoveIfPresent<CharacterDrop>(prefab);
             RemoveIfPresent<WarriorNames>(prefab);
             RemoveIfPresent<NpcTalk>(prefab);
+            Deghost(prefab);
             ClearInheritedCombatGear(humanoid);
 
             // Enforce colony persistence even if vanilla changes the source prefab.
@@ -137,6 +139,62 @@ namespace Kukolony.Villagers
             humanoid.m_randomShield = new GameObject[0];
             humanoid.m_randomSets = new Humanoid.ItemSet[0];
             humanoid.m_randomItems = new Humanoid.RandomItem[0];
+        }
+
+        /// <summary>
+        ///     Strips the spectral effects the base creature is built with.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The rig this clones is a ghost: it carries a blue aura, a light, and drifting
+        ///         particles, and villagers inherited all of it. A colonist is a person, not an
+        ///         apparition, so the effects go while the human body, skeleton and animation
+        ///         that made this rig worth cloning stay.
+        ///     </para>
+        ///     <para>
+        ///         What is actually attached is asset data, which the managed assembly cannot
+        ///         answer, so this reports what it finds as well as removing it. Guessing at
+        ///         assets is how the last few asset-shaped problems here started.
+        ///     </para>
+        /// </remarks>
+        private static void Deghost(GameObject prefab)
+        {
+            List<string> removed = new List<string>();
+
+            foreach (ParticleSystem particles in prefab.GetComponentsInChildren<ParticleSystem>(true))
+            {
+                if (particles == null) continue;
+                removed.Add("particles:" + particles.name);
+                Object.DestroyImmediate(particles.gameObject, allowDestroyingAssets: true);
+            }
+
+            foreach (Light light in prefab.GetComponentsInChildren<Light>(true))
+            {
+                if (light == null) continue;
+                removed.Add("light:" + light.name);
+                Object.DestroyImmediate(light, allowDestroyingAssets: true);
+            }
+
+            // Anything still drawing with a see-through or glowing shader is reported rather
+            // than rewritten: swapping a material blind is how a villager ends up invisible.
+            List<string> suspicious = new List<string>();
+            foreach (Renderer renderer in prefab.GetComponentsInChildren<Renderer>(true))
+            {
+                if (renderer == null) continue;
+                foreach (Material material in renderer.sharedMaterials)
+                {
+                    if (material == null || material.shader == null) continue;
+                    string shader = material.shader.name;
+                    if (shader.IndexOf("Particle", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        shader.IndexOf("Transparent", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        shader.IndexOf("Alpha", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                        suspicious.Add(renderer.name + "=" + shader);
+                }
+            }
+
+            Log.Info($"[villager] removed {removed.Count} effect(s): {string.Join(", ", removed.ToArray())}");
+            Log.Info($"[villager] see-through renderers: " +
+                     (suspicious.Count == 0 ? "none" : string.Join(", ", suspicious.ToArray())));
         }
 
         private static void RemoveIfPresent<T>(GameObject prefab) where T : Component

@@ -52,9 +52,15 @@ The run directory contains `benchmark-create.log`, `benchmark-reload.log`,
 logs, and `failure.txt` on errors. The terminal marker is
 `BENCHMARK TERMINAL <create|reload> <PASS|FAIL> run=<id>`.
 
-Thirteen screenshots are required, covering the panel, structures, members and their detail
-and removal screens, the outfit list and one outfit's slots, jobs and one job's settings, the
-structure picker, preset application, and the colony picker.
+Sixteen screenshots are required, covering the panel, structures and the add-a-structure
+picker, members with their detail and removal screens, the outfit list, one outfit's slots and
+the item chooser for a slot, jobs and one job's settings, a setting's chooser, preset
+application, the colony picker, and **a villager with no panel in the way**.
+
+That last one exists because every other capture frames the interface, which is how villagers
+went on glowing like the ghost they are cloned from, run after run: nothing ever looked at
+one. It stands the villager beside the player, since the two share a body rig and having both
+in shot is what makes "does this look like a person" answerable at a glance.
 
 The UI phase arms the remove confirmation but never executes it: that phase registers chest
 fixtures as colony members, so an executing seam would destroy them mid-run. Removal itself
