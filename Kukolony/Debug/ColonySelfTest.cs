@@ -166,6 +166,7 @@ namespace Kukolony.Debug
             yield return CheckDestinationChoice(report, colony);
             yield return CheckDeclaredSettings(report, colony);
             yield return CheckOutfit(report, colony);
+            CheckRegisterableContainers(report, colony);
             yield return CheckChopping(report, colony);
             yield return CheckChopReservation(report, colony);
             yield return CheckStationJob(report, colony);
@@ -911,6 +912,45 @@ namespace Kukolony.Debug
             VillagerLifecycle.Remove(colony, dressedView.GetZDO().m_uid);
             VillagerLifecycle.Remove(colony, bareView.GetZDO().m_uid);
             yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A container that is not a build piece can still be registered.
+        /// </summary>
+        /// <remarks>
+        ///     Discovery used to walk Valheim's piece registry, which holds only what the
+        ///     hammer builds. A cart is a perfectly good container a player would expect a
+        ///     colony to draw from, and it was invisible - the villager reported "no source
+        ///     item" while the axe sat in the cart in front of them. The control is a loose
+        ///     item drop, which must stay unregisterable: the point is to widen what counts as
+        ///     a container, not to let anything at all become one.
+        /// </remarks>
+        private static void CheckRegisterableContainers(TestReport report, Colony colony)
+        {
+            Vector3 at = colony.transform.position + Vector3.right * 6f;
+            GameObject cart = Spawn("Cart", at);
+            GameObject loose = Spawn("Wood", at + Vector3.forward * 2f);
+            if (cart == null || loose == null)
+            {
+                report.Check(false, "a container that is not a build piece can be registered",
+                    $"fixtures missing: cart={(cart != null)} loose={(loose != null)}");
+                return;
+            }
+
+            StructureRecord cartRecord = StructureRegistry.Describe(cart);
+            StructureRecord looseRecord = StructureRegistry.Describe(loose);
+            bool cartCounts = cartRecord != null &&
+                              (cartRecord.Capabilities & StructureCapability.Container) != 0;
+            bool sweepFindsIt = StructureRegistry.FindRegisterable(colony)
+                .Exists(record => cartRecord != null && record.Id == cartRecord.Id);
+
+            report.Check(cartCounts && sweepFindsIt && looseRecord == null,
+                "a container that is not a build piece can be registered, and a loose item cannot",
+                $"cart={(cartRecord == null ? "rejected: " + StructureRegistry.Explain(cart) : cartRecord.Capabilities.ToString())} " +
+                $"inSweep={sweepFindsIt} loose={(looseRecord == null ? "rejected" : "accepted")}");
+
+            Release(cart);
+            Release(loose);
         }
 
         /// <summary>

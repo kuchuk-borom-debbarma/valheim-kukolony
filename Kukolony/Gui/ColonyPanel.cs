@@ -36,6 +36,8 @@ namespace Kukolony.Gui
         /// <summary>Outfit being edited, or -1 for the outfit list. Cleared on every navigation.</summary>
         private int _selectedOutfit = -1;
         private bool _showOutfits;
+        /// <summary>True while the Structures tab is choosing something new to register.</summary>
+        private bool _showRegisterPicker;
         private bool _blocked;
 
         internal bool IsOpen => _root != null && _root.activeSelf;
@@ -128,6 +130,16 @@ namespace Kukolony.Gui
             Refresh();
         }
 
+        /// <summary>Opens the add-a-structure list. Registers nothing; the capture is the subject.</summary>
+        internal void ShowRegisterPickerForTest()
+        {
+            _tab = Tab.Structures;
+            _showRegisterPicker = true;
+            _search = string.Empty;
+            _page = 0;
+            Refresh();
+        }
+
         /// <summary>Opens the outfit list for UI evidence.</summary>
         internal void ShowOutfitsForTest()
         {
@@ -168,7 +180,7 @@ namespace Kukolony.Gui
         private void SetTab(Tab tab)
         {
             _tab = tab; _page = 0; _pendingRemoval = ZDOID.None; _showTargetPicker = false;
-            _showOutfits = false; _selectedOutfit = -1;
+            _showOutfits = false; _selectedOutfit = -1; _showRegisterPicker = false;
             if (tab != Tab.Members) _selectedMember = ZDOID.None;
             if (tab != Tab.Jobs) { _selectedJob = null; _showPresets = false; _showTargetPicker = false; }
             Refresh();
@@ -188,14 +200,17 @@ namespace Kukolony.Gui
 
         private void BuildStructures()
         {
+            if (_showRegisterPicker) { BuildRegisterPicker(); return; }
             InputField search = GUIManager.Instance.CreateInputField(_content.transform, new Vector2(.5f,1),
                 new Vector2(.5f,1), new Vector2(-150,-155), InputField.ContentType.Standard,
                 "search structures", 24, 360, 30).GetComponent<InputField>();
             search.text = _search;
             search.onEndEdit.AddListener(value => { _search = value; _page = 0; Refresh(); });
-            AddButton(_content.transform, "Register nearby", 115, -155, 150, () =>
-            { ColonyOperations.RegisterDiscovered(_colony); Refresh(); });
-            AddButton(_content.transform, "Sort: " + _sort, 250, -155, 100, () =>
+            // Registering lives on the Add screen, where both "this one" and "all of them"
+            // belong together; this row is for looking at what is already registered.
+            AddButton(_content.transform, "Add…", 90, -155, 100,
+                () => { _showRegisterPicker = true; _search = string.Empty; _page = 0; Refresh(); });
+            AddButton(_content.transform, "Sort: " + _sort, 230, -155, 140, () =>
             { _sort = (StructureSort)(((int)_sort + 1) % 4); Refresh(); });
             AddButton(_content.transform, "Filter: " + CapabilityName(_capabilityFilter), 355, -155, 90, () =>
             { _capabilityFilter = NextCapability(_capabilityFilter); _page = 0; Refresh(); });
@@ -460,6 +475,53 @@ namespace Kukolony.Gui
         ///     player has renamed the job away from it; on a starter job the two are the same
         ///     string and printing both says nothing twice.
         /// </summary>
+        /// <summary>
+        ///     Everything nearby the colony could use, so a player can register one thing
+        ///     rather than sweeping up everything at once.
+        /// </summary>
+        /// <remarks>
+        ///     Registering all of it is still one button away, and is what most bases want. But
+        ///     a sweep cannot express "that chest, not that one", and until this existed the
+        ///     only way to leave something out was to register it and then remove it.
+        /// </remarks>
+        private void BuildRegisterPicker()
+        {
+            AddButton(_content.transform, "← Structures", -310, -160, 150,
+                () => { _showRegisterPicker = false; _page = 0; Refresh(); });
+            TextAt(_content.transform, "Register something nearby", -35, -160, 20, 400, TextAnchor.MiddleLeft);
+            InputField search = InputAt(_content.transform, _search, -170, -205, 300);
+            search.onEndEdit.AddListener(value => { _search = value; _page = 0; Refresh(); });
+            AddButton(_content.transform, "Register all", 280, -205, 200,
+                () => { ColonyOperations.RegisterDiscovered(_colony); Refresh(); });
+
+            List<StructureRecord> known = _colony.State.GetStructures();
+            List<StructureRecord> candidates = new List<StructureRecord>();
+            foreach (StructureRecord candidate in StructureRegistry.FindRegisterable(_colony))
+            {
+                if (known.Exists(existing => existing.Id == candidate.Id)) continue;
+                if (_search.Length > 0 &&
+                    candidate.Name.IndexOf(_search, System.StringComparison.OrdinalIgnoreCase) < 0 &&
+                    candidate.Prefab.IndexOf(_search, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+                candidates.Add(candidate);
+            }
+
+            int start = _page * Rows;
+            for (int row = 0; row < Rows && start + row < candidates.Count; row++)
+            {
+                StructureRecord candidate = candidates[start + row];
+                float y = -260 - row * 48;
+                AddButton(_content.transform, "+ " + Short(candidate.Name, 22), -215, y, 290,
+                    () => { _colony.RegisterStructure(candidate); Refresh(); });
+                TextAt(_content.transform, candidate.Capabilities.ToString(), 190, y, 13, 200,
+                    TextAnchor.MiddleLeft, Color.gray);
+            }
+            Pager(candidates.Count);
+            LeftTextAt(_content.transform, candidates.Count == 0
+                    ? "Nothing unregistered within " + Mathf.RoundToInt(_colony.EffectiveRadius) + "m."
+                    : "You can also look at something and press " + ModConfig.MarkStructureHotkey.Value + ".",
+                -575, 14, 590, Color.gray);
+        }
+
         /// <summary>
         ///     The colony's outfits, and the one being edited.
         /// </summary>

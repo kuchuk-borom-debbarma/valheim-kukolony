@@ -12,6 +12,7 @@ namespace Kukolony.Gui
         internal static ColonyPicker Instance { get; private set; }
         private GameObject _root;
         private InputField _search;
+        private bool _blocked;
         private readonly List<Button> _buttons = new List<Button>();
 
         internal static void Register() => GUIManager.OnCustomGUIAvailable += Build;
@@ -35,11 +36,40 @@ namespace Kukolony.Gui
 
         private void Update()
         {
+            if (_root == null) return;
             if (Input.GetKeyDown(ModConfig.ColonyPickerHotkey.Value) && (Chat.instance == null || !Chat.instance.HasFocus()) && !Console.IsVisible())
             {
-                _root.SetActive(!_root.activeSelf); if (_root.activeSelf) Refresh();
+                if (_root.activeSelf) Hide(); else Show();
             }
-            if (_root != null && _root.activeSelf && Input.GetKeyDown(KeyCode.Escape)) _root.SetActive(false);
+            if (_root.activeSelf && Input.GetKeyDown(KeyCode.Escape)) Hide();
+        }
+
+        /// <summary>
+        ///     Shows the picker and releases the mouse.
+        /// </summary>
+        /// <remarks>
+        ///     Valheim keeps the cursor captured for looking around, so a panel that appears
+        ///     without asking for input is visible and completely unusable - which is exactly
+        ///     what this did. The hearth panel has always released it; this had been left out.
+        /// </remarks>
+        private void Show()
+        {
+            _root.SetActive(true);
+            Block(true);
+            Refresh();
+        }
+
+        private void Hide()
+        {
+            if (_root != null) _root.SetActive(false);
+            Block(false);
+        }
+
+        private void Block(bool value)
+        {
+            if (_blocked == value) return;
+            _blocked = value;
+            GUIManager.BlockInput(value);
         }
 
         private void Refresh()
@@ -51,24 +81,24 @@ namespace Kukolony.Gui
                 if (colony == null || !colony.State.Name.ToLowerInvariant().Contains(query)) continue;
                 Colony selected = colony;
                 Button button = GUIManager.Instance.CreateButton(colony.State.Name, _root.transform, new Vector2(.5f,1), new Vector2(.5f,1), new Vector2(0,-108-row*32), 320, 28).GetComponent<Button>();
-                button.onClick.AddListener(() => { ColonyPanel.Instance?.Open(selected); _root.SetActive(false); }); _buttons.Add(button); row++;
+                // Hide first, then open: the panel takes the mouse for itself, and releasing
+                // it afterwards would hand the cursor straight back to the camera.
+                button.onClick.AddListener(() => { Hide(); ColonyPanel.Instance?.Open(selected); });
+                _buttons.Add(button); row++;
             }
         }
 
         internal void ShowForTest()
         {
             if (_root == null) return;
-            _root.SetActive(true);
-            Refresh();
+            Show();
         }
 
-        internal void HideForTest()
-        {
-            if (_root != null) _root.SetActive(false);
-        }
+        internal void HideForTest() => Hide();
 
         private void OnDestroy()
         {
+            Block(false);
             if (Instance == this) Instance = null;
         }
     }
