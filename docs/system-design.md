@@ -73,6 +73,38 @@ A settlement that quietly starves while you are at sea is a betrayal of the firs
 settlement whose needs never bite is a betrayal of the second. Where the line sits decides
 what this mod actually is, so it is question 1.
 
+## Core objects
+
+The things the whole design is built out of. Defined one at a time, deliberately, before
+anything is built on top of them.
+
+### The colony piece
+
+A buildable piece placed in the world. It **is** the colony: there is no colony without one,
+and everything a colony owns is owned relative to this.
+
+It has a **radius**. That radius is the settlement — the edge of what belongs to this colony
+and what its people concern themselves with.
+
+*Open:* whether the radius is fixed, configurable, or something that grows; what happens when
+two colonies' radii overlap; whether one player may have several.
+
+### The tool
+
+An equippable item, held in the hand. It is how a player acts **on** the settlement rather
+than through a menu — the single physical object that means "I am doing colony things now".
+
+Its uses are listed below, one at a time, as we decide them.
+
+*Uses:*
+
+1. *(to be listed)*
+
+*Open:* how it is obtained; whether it is one item or a family; whether it works outside a
+colony radius.
+
+---
+
 ## Roadmap
 
 To be filled in once vision and boundaries settle. Ordered by what makes the colony *work*,
