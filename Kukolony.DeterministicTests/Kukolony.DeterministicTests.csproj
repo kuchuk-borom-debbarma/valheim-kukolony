@@ -2,6 +2,7 @@
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
   <ItemGroup>
     <Compile Include="../Kukolony/Jobs/JobPieceKind.cs" Link="JobPieceKind.cs" />
+    <Compile Include="../Kukolony/Jobs/PieceCustomisation.cs" Link="PieceCustomisation.cs" />
     <Compile Include="../Kukolony/Jobs/PipelineShapeRules.cs" Link="PipelineShapeRules.cs" />
     <Compile Include="../Kukolony/Jobs/JobWalker.cs" Link="JobWalker.cs" />
   </ItemGroup>

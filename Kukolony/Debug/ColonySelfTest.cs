@@ -169,6 +169,7 @@ namespace Kukolony.Debug
             yield return CheckLifecycle(report, colony, origin);
             yield return CheckHaulPipeline(report, colony);
             yield return CheckTransferPipeline(report, colony);
+            yield return CheckPieceSettings(report, colony);
             CheckStationContracts(report);
             CheckStationProtocols(report, origin);
             report.Check(Enum.GetValues(typeof(ColonyJobType)).Length == 7, "concrete job catalog is complete");
@@ -599,6 +600,90 @@ namespace Kukolony.Debug
         }
 
         /// <summary>
+        ///     Proves a piece's own settings beat the job's, which is the whole reason pieces
+        ///     carry settings at all.
+        /// </summary>
+        /// <remarks>
+        ///     The source holds two kinds of item and the job asks for one of them, while the
+        ///     take and put pieces ask for the other. If overrides were ignored the villager
+        ///     would move the job's item, so the two outcomes are distinguishable rather than
+        ///     merely "something moved". The control runs the same pipeline with no overrides
+        ///     and must move the job's item instead.
+        /// </remarks>
+        private static IEnumerator CheckPieceSettings(TestReport report, Colony colony)
+        {
+            Villager worker = VillagerLifecycle.Spawn(colony);
+            if (worker == null || !worker.TryGetComponent(out ZNetView view) || !view.IsValid() ||
+                !worker.TryGetComponent(out MonsterAI ai))
+            {
+                report.Check(false, "a piece setting overrides the job setting", "no worker");
+                yield break;
+            }
+
+            Vector3 at = worker.transform.position;
+            GameObject from = Spawn("piece_chest_wood", at + Vector3.forward * 3f);
+            GameObject into = Spawn("piece_chest_wood", at + Vector3.back * 3f);
+            Register(colony, from, "Override source");
+            Register(colony, into, "Override sink");
+            Inventory source = from.GetComponent<Container>().GetInventory();
+            Inventory sink = into.GetComponent<Container>().GetInventory();
+            Container bag = VillagerInventory.Attach(worker.gameObject, view);
+
+            ZDOID fromId = from.GetComponent<ZNetView>().GetZDO().m_uid;
+            ZDOID intoId = into.GetComponent<ZNetView>().GetZDO().m_uid;
+
+            // Overridden: the job says Wood, the pieces say Flint.
+            Clear(source); Clear(sink); Clear(bag.GetInventory());
+            Add(source, "Wood");
+            Add(source, "Flint");
+            ColonyJobConfig overridden = Job(ColonyJobType.Transfer, "Wood");
+            overridden.Pieces.AddRange(JobPipeline.For(ColonyJobType.Transfer));
+            overridden.Source = fromId;
+            overridden.Destination = intoId;
+            overridden.StopDistance = 12f;
+            foreach (JobPiece piece in overridden.Pieces)
+                if (piece.Kind == JobPieceKind.TakeItem || piece.Kind == JobPieceKind.PutItem)
+                    piece.ItemFilters.Add("Flint");
+            yield return new WaitForSecondsRealtime(.3f);
+            yield return Run(worker, ai, bag, colony, overridden);
+            bool movedOverride = Count(sink, "Flint") == 1 && Count(sink, "Wood") == 0;
+
+            // Control: same pipeline, no overrides. It must move the job's item instead.
+            Clear(source); Clear(sink); Clear(bag.GetInventory());
+            Add(source, "Wood");
+            Add(source, "Flint");
+            ColonyJobConfig plain = Job(ColonyJobType.Transfer, "Wood");
+            plain.Pieces.AddRange(JobPipeline.For(ColonyJobType.Transfer));
+            plain.Source = fromId;
+            plain.Destination = intoId;
+            plain.StopDistance = 12f;
+            yield return new WaitForSecondsRealtime(.2f);
+            yield return Run(worker, ai, bag, colony, plain);
+            bool movedJob = Count(sink, "Wood") == 1 && Count(sink, "Flint") == 0;
+
+            report.Check(movedOverride && movedJob,
+                "a piece setting overrides the job setting, and without one the job's applies",
+                $"withOverride={(movedOverride ? "Flint" : "wrong")} without={(movedJob ? "Wood" : "wrong")}");
+
+            VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>Runs a job through the engine tick until it completes or gives up.</summary>
+        private static IEnumerator Run(Villager worker, MonsterAI ai, Container bag, Colony colony,
+            ColonyJobConfig job)
+        {
+            JobResult result = JobResult.Running;
+            for (int tick = 0; tick < 80 && result != JobResult.Completed; tick++)
+            {
+                result = ColonyJobEngine.Tick(worker, ai, bag, colony, job, out _);
+                if (result == JobResult.Failed || result == JobResult.Skipped) break;
+                yield return null;
+            }
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
         ///     The two resets differ in exactly one way, and the whole piece cursor depends on
         ///     it: releasing a target keeps a villager's place in its pipeline, abandoning the
         ///     job loses it. Asserted together so neither can quietly become the other.
@@ -813,8 +898,11 @@ namespace Kukolony.Debug
             JobResult honeyDeposit = Count(bag, "Honey") > 0
                 ? ColonyJobEngine.TestDeposit(destinationObject, bag, hiveJob, state, out _)
                 : JobResult.Failed;
+            // How much honey a hive has accumulated by the time it is tapped is its own
+            // business, and a deposit moves the whole stack, so assert that honey arrived
+            // rather than that exactly one unit did.
             report.Check(hive != null && hiveResult == JobResult.Running && honeyDeposit == JobResult.Completed &&
-                         Count(destinationObject.GetComponent<Container>().GetInventory(), "Honey") == honeyBefore + 1,
+                         Count(destinationObject.GetComponent<Container>().GetInventory(), "Honey") > honeyBefore,
                 "collect beehives extracts, picks up and stores honey",
                 $"result={hiveResult} dropped={honeyDropped} deposit={honeyDeposit} " +
                 $"stored={Count(destinationObject.GetComponent<Container>().GetInventory(), "Honey")} was={honeyBefore}");

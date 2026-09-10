@@ -40,9 +40,9 @@ namespace Kukolony.Jobs
         internal static JobResult TestPickup(GameObject target, Inventory bag, VillagerState state, out string activity) =>
             PickupLoose(target, bag, state, out activity);
         internal static JobResult TestAcquire(GameObject target, Inventory bag, ColonyJobConfig job, VillagerState state, out string activity) =>
-            Acquire(target, bag, job, state, out activity);
+            Acquire(target, bag, job.ItemFilters, state, out activity);
         internal static JobResult TestDeposit(GameObject target, Inventory bag, ColonyJobConfig job, VillagerState state, out string activity) =>
-            Deposit(target, bag, job, state, out activity);
+            Deposit(target, bag, job.ItemFilters, state, out activity);
         internal static JobResult TestOperate(GameObject target, Inventory bag, ColonyJobConfig job, VillagerState state, out string activity) =>
             Operate(target, bag, job, state, out activity);
         internal static bool TestLimitReached(Colony colony, ColonyJobConfig job) => LimitReached(colony, job);
@@ -87,8 +87,8 @@ namespace Kukolony.Jobs
                     return carrying
                         ? (!job.Destination.IsNone()
                             ? SelectExplicitContainer(villager, colony, job.Destination, "depositing", out activity)
-                            : SelectStructure(villager, colony, job, StructureCapability.Container, "depositing", out activity))
-                        : SelectLooseItem(villager, colony, job, "pickup", out activity);
+                            : SelectStructure(villager, colony, job, null, StructureCapability.Container, "depositing", out activity))
+                        : SelectLooseItem(villager, colony, job, null, "pickup", out activity);
                 case ColonyJobType.Transfer:
                     return SelectExplicitContainer(villager, colony, carrying ? job.Destination : job.Source,
                         carrying ? "depositing" : "acquiring", out activity);
@@ -96,10 +96,10 @@ namespace Kukolony.Jobs
                     if (state.QueueProgress == 2)
                         return !job.Destination.IsNone()
                             ? SelectExplicitContainer(villager, colony, job.Destination, "depositing", out activity)
-                            : SelectStructure(villager, colony, job, StructureCapability.Container, "depositing", out activity);
+                            : SelectStructure(villager, colony, job, null, StructureCapability.Container, "depositing", out activity);
                     if (state.QueueProgress >= 100)
                     {
-                        JobResult loose = SelectLooseItem(villager, colony, job, "pickup-collect", out activity);
+                        JobResult loose = SelectLooseItem(villager, colony, job, null, "pickup-collect", out activity);
                         if (loose == JobResult.Skipped && state.QueueProgress < 140)
                         {
                             state.SetQueueProgress(state.QueueProgress + 1);
@@ -108,23 +108,23 @@ namespace Kukolony.Jobs
                         }
                         return loose;
                     }
-                    return SelectStructure(villager, colony, job, StructureCapability.BeeHive, "operating", out activity);
+                    return SelectStructure(villager, colony, job, null, StructureCapability.BeeHive, "operating", out activity);
                 case ColonyJobType.OperateCookingStations:
                 case ColonyJobType.OperateFermenters:
                     if (carrying || state.QueueProgress > 0)
                     {
                         if (!carrying)
-                            return SelectSource(villager, colony, job, out activity);
+                            return SelectSource(villager, colony, job, null, out activity);
                     }
-                    return SelectStructure(villager, colony, job,
+                    return SelectStructure(villager, colony, job, null,
                         ColonyJobCatalog.RequiredCapability(job.Type), "operating", out activity);
                 default:
                     if (!carrying)
                     {
-                        JobResult source = SelectSource(villager, colony, job, out activity);
+                        JobResult source = SelectSource(villager, colony, job, null, out activity);
                         if (source != JobResult.Skipped) return source;
                     }
-                    return SelectStructure(villager, colony, job,
+                    return SelectStructure(villager, colony, job, null,
                         ColonyJobCatalog.RequiredCapability(job.Type), "operating", out activity);
             }
         }
@@ -168,7 +168,9 @@ namespace Kukolony.Jobs
             JobStep step = JobWalker.Next(kinds, state.StepCursor, new JobFacts(
                 hasTarget: !state.StepTarget.IsNone(),
                 arrivedAtTarget: false,
-                carrying: FirstMatching(bag, job.ItemFilters) != null,
+                // Carrying is a question about the job, not one step: any item any piece
+                // wants counts, or the fetch pieces would look unsatisfied forever.
+                carrying: FirstMatching(bag, PieceSettings.AllFilters(job)) != null,
                 stockLimitReached: LimitReached(colony, job)));
 
             int next = step.Cursor + 1;
@@ -189,16 +191,17 @@ namespace Kukolony.Jobs
                     return JobOutcomes.Skipped(state, "pipeline cannot run", out activity);
 
                 case StepAction.FindLooseItem:
-                    return Advance(state, next, SelectLooseItem(villager, colony, job, "pickup", out activity));
+                    return Advance(state, next, SelectLooseItem(villager, colony, job, PieceAt(job, step.Cursor), "pickup", out activity));
 
                 case StepAction.SelectSource:
-                    return Advance(state, next, SelectSource(villager, colony, job, out activity));
+                    return Advance(state, next, SelectSource(villager, colony, job, PieceAt(job, step.Cursor), out activity));
 
                 case StepAction.SelectTarget:
                     return Advance(state, next, SelectDestination(villager, colony, job, step.Cursor, out activity));
 
                 case StepAction.Move:
-                    return Walk(villager, ai, state, job, target, next, out activity);
+                    return Walk(villager, ai, state, PieceSettings.StopDistance(job, PieceAt(job, step.Cursor)),
+                        target, next, out activity);
             }
 
             // Everything below acts on the target, so a target that has not loaded yet is a
@@ -211,8 +214,10 @@ namespace Kukolony.Jobs
             switch (step.Action)
             {
                 case StepAction.PickUp: return Advance(state, next, PickupLoose(target, bag, state, out activity));
-                case StepAction.TakeItem: return Advance(state, next, Acquire(target, bag, job, state, out activity));
-                case StepAction.PutItem: return Advance(state, next, Deposit(target, bag, job, state, out activity));
+                case StepAction.TakeItem:
+                    return Advance(state, next, Acquire(target, bag, StepFilters(job, step.Cursor), state, out activity));
+                case StepAction.PutItem:
+                    return Advance(state, next, Deposit(target, bag, StepFilters(job, step.Cursor), state, out activity));
                 case StepAction.OperateStation: return Advance(state, next, Operate(target, bag, job, state, out activity));
                 default: return JobOutcomes.Skipped(state, "pipeline cannot run", out activity);
             }
@@ -239,9 +244,17 @@ namespace Kukolony.Jobs
             return JobResult.Running;
         }
 
+        /// <summary>Items the piece at this cursor works with, falling back to the job's.</summary>
+        private static List<string> StepFilters(ColonyJobConfig job, int cursor) =>
+            PieceSettings.Filters(job, PieceAt(job, cursor));
+
+        /// <summary>The piece at this cursor, or null when the job has none there.</summary>
+        private static JobPiece PieceAt(ColonyJobConfig job, int cursor) =>
+            cursor >= 0 && cursor < job.Pieces.Count ? job.Pieces[cursor] : null;
+
         /// <summary>Walks to the chosen target, advancing only once the villager arrives.</summary>
         private static JobResult Walk(Villager villager, MonsterAI ai, VillagerState state,
-            ColonyJobConfig job, GameObject target, int next, out string activity)
+            float stopDistance, GameObject target, int next, out string activity)
         {
             if (target == null)
             {
@@ -249,7 +262,7 @@ namespace Kukolony.Jobs
                 return JobResult.Running;
             }
             MoveResult movement = VillagerMovement.MoveTowards(ai, target.transform.position,
-                Mathf.Max(.5f, job.StopDistance));
+                Mathf.Max(.5f, stopDistance));
             if (movement == MoveResult.Moving)
             {
                 activity = "walking to " + TargetName(target);
@@ -274,13 +287,13 @@ namespace Kukolony.Jobs
         private static JobResult SelectDestination(Villager villager, Colony colony, ColonyJobConfig job,
             int cursor, out string activity)
         {
-            if (!job.Destination.IsNone())
-                return SelectExplicitContainer(villager, colony, job.Destination, "depositing", out activity);
-            StructureCapability capability = cursor >= 0 && cursor < job.Pieces.Count
-                ? job.Pieces[cursor].Capability
-                : StructureCapability.None;
+            JobPiece piece = cursor >= 0 && cursor < job.Pieces.Count ? job.Pieces[cursor] : null;
+            ZDOID destination = PieceSettings.Container(job, piece, job.Destination);
+            if (!destination.IsNone())
+                return SelectExplicitContainer(villager, colony, destination, "depositing", out activity);
+            StructureCapability capability = piece != null ? piece.Capability : StructureCapability.None;
             if (capability == StructureCapability.None) capability = StructureCapability.Container;
-            return SelectStructure(villager, colony, job, capability, "depositing", out activity);
+            return SelectStructure(villager, colony, job, piece, capability, "depositing", out activity);
         }
 
         /// <summary>
@@ -333,24 +346,27 @@ namespace Kukolony.Jobs
             switch (state.RuntimePhase)
             {
                 case "pickup": return PickupLoose(target, bag, state, out activity);
-                case "acquiring": return Acquire(target, bag, job, state, out activity);
-                case "depositing": return Deposit(target, bag, job, state, out activity);
+                case "acquiring": return Acquire(target, bag, job.ItemFilters, state, out activity);
+                case "depositing": return Deposit(target, bag, job.ItemFilters, state, out activity);
                 default: return Operate(target, bag, job, state, out activity);
             }
         }
 
         private static JobResult SelectLooseItem(Villager villager, Colony colony,
-            ColonyJobConfig job, string phase, out string activity)
+            ColonyJobConfig job, JobPiece piece, string phase, out string activity)
         {
+            List<string> filters = PieceSettings.Filters(job, piece);
+            float radius = PieceSettings.SearchRadius(job, piece);
+            bool reserve = PieceSettings.Reservations(job, piece);
             ItemDrop closest = null;
             float best = float.MaxValue;
             foreach (ItemDrop drop in ItemDrop.s_instances)
             {
                 if (drop == null || !drop.TryGetComponent(out ZNetView view) || !view.IsValid()) continue;
-                if (!Matches(Utils.GetPrefabName(drop.gameObject), job.ItemFilters)) continue;
+                if (!Matches(Utils.GetPrefabName(drop.gameObject), filters)) continue;
                 float distance = Utils.DistanceXZ(drop.transform.position, colony.transform.position);
-                if (distance > job.SearchRadius || distance >= best) continue;
-                if (job.Reservations && TargetClaims.IsClaimedByOther(view.GetZDO().m_uid, villager)) continue;
+                if (distance > radius || distance >= best) continue;
+                if (reserve && TargetClaims.IsClaimedByOther(view.GetZDO().m_uid, villager)) continue;
                 closest = drop; best = distance;
             }
             if (closest == null) { activity = "skipping: no loose item"; return JobResult.Skipped; }
@@ -360,20 +376,25 @@ namespace Kukolony.Jobs
         }
 
         private static JobResult SelectSource(Villager villager, Colony colony,
-            ColonyJobConfig job, out string activity)
+            ColonyJobConfig job, JobPiece piece, out string activity)
         {
-            if (!job.Source.IsNone())
-                return SelectExplicitContainer(villager, colony, job.Source, "acquiring", out activity);
+            ZDOID explicitSource = PieceSettings.Container(job, piece, job.Source);
+            if (!explicitSource.IsNone())
+                return SelectExplicitContainer(villager, colony, explicitSource, "acquiring", out activity);
+            List<string> filters = PieceSettings.Filters(job, piece);
+            List<ZDOID> scope = PieceSettings.Structures(job, piece);
+            TargetMode mode = PieceSettings.Targets(job, piece);
+            bool reserve = PieceSettings.Reservations(job, piece);
             foreach (StructureRecord record in colony.State.GetStructures())
             {
                 if ((record.Capabilities & StructureCapability.Container) == 0 || !record.IsLiveIn(colony)) continue;
-                bool selected = job.SelectedStructures.Contains(record.Id);
-                if (job.Targets == TargetMode.Selected && !selected) continue;
-                if (job.Targets == TargetMode.Ignore && selected) continue;
+                bool selected = scope.Contains(record.Id);
+                if (mode == TargetMode.Selected && !selected) continue;
+                if (mode == TargetMode.Ignore && selected) continue;
                 GameObject instance = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(record.Id) : null;
                 if (instance == null || !instance.TryGetComponent(out Container container) ||
-                    FirstMatching(container.GetInventory(), job.ItemFilters) == null) continue;
-                if (job.Reservations && TargetClaims.IsClaimedByOther(record.Id, villager)) continue;
+                    FirstMatching(container.GetInventory(), filters) == null) continue;
+                if (reserve && TargetClaims.IsClaimedByOther(record.Id, villager)) continue;
                 SetTarget(villager.State, record.Id, "acquiring");
                 activity = "acquiring from " + record.Name;
                 return JobResult.Running;
@@ -397,16 +418,19 @@ namespace Kukolony.Jobs
             return JobResult.Running;
         }
 
-        private static JobResult SelectStructure(Villager villager, Colony colony, ColonyJobConfig job,
+        private static JobResult SelectStructure(Villager villager, Colony colony, ColonyJobConfig job, JobPiece piece,
             StructureCapability capability, string phase, out string activity)
         {
+            List<ZDOID> scope = PieceSettings.Structures(job, piece);
+            TargetMode mode = PieceSettings.Targets(job, piece);
+            bool reserve = PieceSettings.Reservations(job, piece);
             foreach (StructureRecord record in colony.State.GetStructures())
             {
                 if ((record.Capabilities & capability) == 0 || !record.IsLiveIn(colony)) continue;
-                bool selected = job.SelectedStructures.Contains(record.Id);
-                if (job.Targets == TargetMode.Selected && !selected) continue;
-                if (job.Targets == TargetMode.Ignore && selected) continue;
-                if (job.Reservations && TargetClaims.IsClaimedByOther(record.Id, villager)) continue;
+                bool selected = scope.Contains(record.Id);
+                if (mode == TargetMode.Selected && !selected) continue;
+                if (mode == TargetMode.Ignore && selected) continue;
+                if (reserve && TargetClaims.IsClaimedByOther(record.Id, villager)) continue;
                 SetTarget(villager.State, record.Id, phase);
                 activity = phase + " " + record.Name;
                 return JobResult.Running;
@@ -433,7 +457,7 @@ namespace Kukolony.Jobs
             return JobResult.Running;
         }
 
-        private static JobResult Acquire(GameObject target, Inventory bag, ColonyJobConfig job,
+        private static JobResult Acquire(GameObject target, Inventory bag, List<string> filters,
             VillagerState state, out string activity)
         {
             if (!TryOwnedContainer(target, out Container container, out JobResult ownership))
@@ -442,7 +466,7 @@ namespace Kukolony.Jobs
                 return ownership;
             }
             Inventory source = container.GetInventory();
-            ItemDrop.ItemData item = FirstMatching(source, job.ItemFilters);
+            ItemDrop.ItemData item = FirstMatching(source, filters);
             if (item == null) { state.ResetRuntime(); activity = "source has no matching item"; return JobResult.Skipped; }
             if (!bag.CanAddItem(item, 1)) { state.ResetRuntime(); activity = "bag full"; return JobResult.Failed; }
             if (!MoveOne(bag, source, item))
@@ -457,7 +481,7 @@ namespace Kukolony.Jobs
             return JobResult.Running;
         }
 
-        private static JobResult Deposit(GameObject target, Inventory bag, ColonyJobConfig job,
+        private static JobResult Deposit(GameObject target, Inventory bag, List<string> filters,
             VillagerState state, out string activity)
         {
             if (!TryOwnedContainer(target, out Container container, out JobResult ownership))
@@ -466,7 +490,7 @@ namespace Kukolony.Jobs
                 return ownership;
             }
             Inventory destination = container.GetInventory();
-            ItemDrop.ItemData item = FirstMatching(bag, job.ItemFilters);
+            ItemDrop.ItemData item = FirstMatching(bag, filters);
             if (item == null) { state.ResetRuntime(); activity = "nothing to deposit"; return JobResult.Failed; }
             if (!destination.CanAddItem(item, 1)) { state.ResetRuntime(); activity = "destination full"; return JobResult.Failed; }
             destination.MoveItemToThis(bag, item);

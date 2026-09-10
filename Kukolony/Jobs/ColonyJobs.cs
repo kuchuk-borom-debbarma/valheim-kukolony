@@ -33,18 +33,113 @@ namespace Kukolony.Jobs
     /// </summary>
     internal enum JobResult { Running, Completed, Failed, Skipped }
 
-    // "Customisation" is the player-facing term.  These typed values are the
-    // contract used to validate a pipeline without exposing an untyped JSON editor.
-    internal enum JobCustomisation { ItemFilter, Target, Source, Destination, StockLimit, Movement, Reservation }
     /// <summary>
-    ///     One step in a pipeline. <see cref="Capability"/> narrows which registered
-    ///     structures a selection piece may resolve to; it is unused by other kinds.
+    ///     One step in a pipeline, plus the settings it runs with.
     /// </summary>
+    /// <remarks>
+    ///     Every setting has an "inherit" value - an empty list, no container, a negative
+    ///     number - meaning "use the job's". That is what a pipeline saved before pieces had
+    ///     settings means, so older records need no conversion, and it keeps a piece's
+    ///     configuration to only what someone deliberately changed.
+    ///
+    ///     Which of these a given kind actually reads is declared by
+    ///     <see cref="PieceCustomisation.Uses"/> rather than left implicit.
+    /// </remarks>
     internal sealed class JobPiece
     {
         internal JobPieceKind Kind;
+
+        /// <summary>Narrows which registered structures a selection piece may resolve to.</summary>
         internal StructureCapability Capability;
-        internal JobPiece Clone() => new JobPiece { Kind = Kind, Capability = Capability };
+
+        /// <summary>Items this step works with. Empty inherits the job's list.</summary>
+        internal readonly List<string> ItemFilters = new List<string>();
+
+        /// <summary>Container this step uses, overriding the job's source or destination.</summary>
+        internal ZDOID Container = ZDOID.None;
+
+        /// <summary>Structures this step may choose between. Empty inherits the job's.</summary>
+        internal readonly List<ZDOID> SelectedStructures = new List<ZDOID>();
+
+        /// <summary>Stock threshold for this step. Negative inherits the job's.</summary>
+        internal int StockLimit = -1;
+
+        /// <summary>Items to move in one visit. Negative inherits, and one is the floor.</summary>
+        internal int Amount = -1;
+
+        /// <summary>How far this step searches. Negative inherits the job's.</summary>
+        internal float SearchRadius = -1f;
+
+        /// <summary>How close to stand before acting. Negative inherits the job's.</summary>
+        internal float StopDistance = -1f;
+
+        /// <summary>How this step scopes structures. Negative inherits the job's mode.</summary>
+        internal int Targets = -1;
+
+        /// <summary>Whether this step reserves its target: -1 inherit, 0 never, 1 always.</summary>
+        internal int Reservations = -1;
+
+        internal JobPiece Clone()
+        {
+            JobPiece copy = new JobPiece
+            {
+                Kind = Kind, Capability = Capability, Container = Container,
+                StockLimit = StockLimit, Amount = Amount, SearchRadius = SearchRadius,
+                StopDistance = StopDistance, Targets = Targets, Reservations = Reservations
+            };
+            copy.ItemFilters.AddRange(ItemFilters);
+            copy.SelectedStructures.AddRange(SelectedStructures);
+            return copy;
+        }
+    }
+
+    /// <summary>
+    ///     Resolves a setting for one step: the piece's own value when it has one, otherwise
+    ///     the job's. Keeping the fallback in one place stops each executor inventing its own
+    ///     idea of what an unset override means.
+    /// </summary>
+    internal static class PieceSettings
+    {
+        internal static List<string> Filters(ColonyJobConfig job, JobPiece piece) =>
+            piece != null && piece.ItemFilters.Count > 0 ? piece.ItemFilters : job.ItemFilters;
+
+        internal static ZDOID Container(ColonyJobConfig job, JobPiece piece, ZDOID jobValue) =>
+            piece != null && !piece.Container.IsNone() ? piece.Container : jobValue;
+
+        internal static List<ZDOID> Structures(ColonyJobConfig job, JobPiece piece) =>
+            piece != null && piece.SelectedStructures.Count > 0 ? piece.SelectedStructures : job.SelectedStructures;
+
+        internal static int StockLimit(ColonyJobConfig job, JobPiece piece) =>
+            piece != null && piece.StockLimit >= 0 ? piece.StockLimit : job.StockLimit;
+
+        internal static int Amount(JobPiece piece) =>
+            piece != null && piece.Amount > 0 ? piece.Amount : 1;
+
+        internal static float SearchRadius(ColonyJobConfig job, JobPiece piece) =>
+            piece != null && piece.SearchRadius >= 0f ? piece.SearchRadius : job.SearchRadius;
+
+        internal static float StopDistance(ColonyJobConfig job, JobPiece piece) =>
+            piece != null && piece.StopDistance >= 0f ? piece.StopDistance : job.StopDistance;
+
+        internal static TargetMode Targets(ColonyJobConfig job, JobPiece piece) =>
+            piece != null && piece.Targets >= 0 ? (TargetMode)piece.Targets : job.Targets;
+
+        internal static bool Reservations(ColonyJobConfig job, JobPiece piece) =>
+            piece != null && piece.Reservations >= 0 ? piece.Reservations != 0 : job.Reservations;
+
+        /// <summary>
+        ///     Every item any step of this job cares about. Whether a villager is carrying
+        ///     something worth keeping is a question about the job as a whole rather than one
+        ///     step. An empty result means anything counts.
+        /// </summary>
+        internal static List<string> AllFilters(ColonyJobConfig job)
+        {
+            List<string> all = new List<string>(job.ItemFilters);
+            foreach (JobPiece piece in job.Pieces)
+                foreach (string item in piece.ItemFilters)
+                    if (!all.Contains(item)) all.Add(item);
+            return all;
+        }
     }
 
     /// <summary>Builds and validates the piece sequence behind a job.</summary>

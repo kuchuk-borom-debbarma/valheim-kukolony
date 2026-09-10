@@ -12,7 +12,7 @@ static class Program
 
     static int Main()
     {
-        int failures = RunShapeCases() + RunStepCases() + RunCycleCases();
+        int failures = RunShapeCases() + RunStepCases() + RunCycleCases() + RunContractCases();
         Console.WriteLine(failures == 0 ? "RESULT: PASS" : $"RESULT: FAIL ({failures})");
         return failures == 0 ? 0 : 1;
     }
@@ -123,6 +123,51 @@ static class Program
         }
         return performed;
     }
+
+    // The customisation contract is what makes a piece well defined: what it reads, what it
+    // hands on, and what it needs to have been handed. Validation is derived from it, so an
+    // error here shows up as a pipeline that wrongly passes or fails rather than as a crash.
+    static int RunContractCases()
+    {
+        var cases = new (string Name, bool Actual, bool Expected)[]
+        {
+            ("a fetch provides a target",
+                Has(PieceCustomisation.Provides(FindLooseItem), JobCustomisation.Target), true),
+            ("a move needs a target",
+                Has(PieceCustomisation.Requires(MoveToTarget), JobCustomisation.Target), true),
+            ("a deposit needs something carried",
+                Has(PieceCustomisation.Requires(PutItem), JobCustomisation.CarriedItem), true),
+            ("taking provides something carried",
+                Has(PieceCustomisation.Provides(TakeItem), JobCustomisation.CarriedItem), true),
+            ("a source selection is configured by its container",
+                Has(PieceCustomisation.Uses(SelectSource), JobCustomisation.Container), true),
+            ("a loose-item search is configured by its radius",
+                Has(PieceCustomisation.Uses(FindLooseItem), JobCustomisation.SearchRadius), true),
+            ("a move is configured by its stop distance",
+                Has(PieceCustomisation.Uses(MoveToTarget), JobCustomisation.StopDistance), true),
+            ("a limit is configured by its threshold",
+                Has(PieceCustomisation.Uses(StopAtStockLimit), JobCustomisation.StockLimit), true),
+            ("structural pieces are configured by nothing",
+                PieceCustomisation.Uses(Start) == JobCustomisation.None &&
+                PieceCustomisation.Uses(End) == JobCustomisation.None, true),
+            // Control: a move is not configured by a stock limit. Without this the checks
+            // above would pass just as well if Uses returned every flag for every kind.
+            ("control: a move is not configured by a stock limit",
+                Has(PieceCustomisation.Uses(MoveToTarget), JobCustomisation.StockLimit), false),
+            ("control: a fetch does not itself require a target",
+                Has(PieceCustomisation.Requires(FindLooseItem), JobCustomisation.Target), false)
+        };
+        int failures = 0;
+        foreach (var test in cases)
+        {
+            bool ok = test.Actual == test.Expected;
+            Report(ok, "contract: " + test.Name, ok ? "" : $"expected {test.Expected}");
+            if (!ok) failures++;
+        }
+        return failures;
+    }
+
+    static bool Has(JobCustomisation set, JobCustomisation flag) => (set & flag) != 0;
 
     static JobFacts Facts(bool hasTarget = false, bool arrived = false, bool carrying = false,
         bool stockLimitReached = false) => new(hasTarget, arrived, carrying, stockLimitReached);

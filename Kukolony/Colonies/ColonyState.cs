@@ -74,7 +74,7 @@ namespace Kukolony.Colonies
         {
             List<ColonyJobConfig> result = new List<ColonyJobConfig>(); string encoded = _zdo?.GetString(JobsKey, string.Empty) ?? string.Empty;
             if (string.IsNullOrEmpty(encoded)) return result;
-            try { ZPackage p = new ZPackage(encoded); int version=p.ReadInt(); if (version != 4) return result; int count = p.ReadInt(); if (count < 0 || count > 512) return result;
+            try { ZPackage p = new ZPackage(encoded); int version=p.ReadInt(); if (version < 4 || version > JobRecordVersion) return result; int count = p.ReadInt(); if (count < 0 || count > 512) return result;
                 for (int i = 0; i < count; i++) result.Add(ReadJob(p, version)); }
             catch (System.Exception e) { Core.Log.Warning("[colony] invalid job registry: " + e.Message); }
             return result;
@@ -82,7 +82,7 @@ namespace Kukolony.Colonies
 
         internal void SetJobs(List<ColonyJobConfig> jobs)
         {
-            ZPackage p = new ZPackage(); p.Write(4); p.Write(jobs.Count);
+            ZPackage p = new ZPackage(); p.Write(JobRecordVersion); p.Write(jobs.Count);
             foreach (ColonyJobConfig j in jobs) WriteJob(p, j);
             _zdo.Set(JobsKey, p.GetBase64());
         }
@@ -101,7 +101,7 @@ namespace Kukolony.Colonies
             try
             {
                 ZPackage p = new ZPackage(encoded);
-                int version=p.ReadInt(); if (version != 4) return result;
+                int version=p.ReadInt(); if (version < 4 || version > JobRecordVersion) return result;
                 int count = p.ReadInt();
                 if (count < 0 || count > 512) return result;
                 for (int i = 0; i < count; i++)
@@ -113,7 +113,7 @@ namespace Kukolony.Colonies
 
         internal void SetPresets(List<JobPreset> presets)
         {
-            ZPackage p = new ZPackage(); p.Write(4); p.Write(presets.Count);
+            ZPackage p = new ZPackage(); p.Write(JobRecordVersion); p.Write(presets.Count);
             foreach (JobPreset preset in presets)
             {
                 p.Write(preset.Name ?? string.Empty);
@@ -122,6 +122,12 @@ namespace Kukolony.Colonies
             }
             _zdo.Set(PresetsKey, p.GetBase64());
         }
+
+        /// <summary>
+        ///     Job record format. Bumped to 5 when pieces gained their own settings; version 4
+        ///     records still read, with every piece inheriting from its job.
+        /// </summary>
+        private const int JobRecordVersion = 5;
 
         private static ColonyJobConfig ReadJob(ZPackage p, int version)
         {
@@ -149,7 +155,31 @@ namespace Kukolony.Colonies
             {
                 int pieces = p.ReadInt();
                 if (pieces < 2 || pieces > 128) throw new System.IO.InvalidDataException("invalid pipeline piece count");
-                for (int i = 0; i < pieces; i++) job.Pieces.Add(new JobPiece { Kind = (JobPieceKind)p.ReadInt(), Capability = (StructureCapability)p.ReadInt() });
+                for (int i = 0; i < pieces; i++)
+                {
+                    JobPiece piece = new JobPiece { Kind = (JobPieceKind)p.ReadInt(), Capability = (StructureCapability)p.ReadInt() };
+                    // Version 4 pipelines have no per-piece settings, and a piece with none
+                    // inherits the job's - so an older record needs no conversion, only this
+                    // branch. It is deliberately unexercised: the deterministic project has no
+                    // ZPackage and there is no v4 fixture world to load.
+                    if (version >= 5)
+                    {
+                        int pieceFilters = p.ReadInt();
+                        if (pieceFilters < 0 || pieceFilters > 256) throw new System.IO.InvalidDataException("invalid piece filter count");
+                        for (int f = 0; f < pieceFilters; f++) piece.ItemFilters.Add(p.ReadString());
+                        piece.Container = ReadReference(p, version);
+                        int pieceStructures = p.ReadInt();
+                        if (pieceStructures < 0 || pieceStructures > 4096) throw new System.IO.InvalidDataException("invalid piece target count");
+                        for (int t = 0; t < pieceStructures; t++) piece.SelectedStructures.Add(ReadReference(p, version));
+                        piece.StockLimit = p.ReadInt();
+                        piece.Amount = p.ReadInt();
+                        piece.SearchRadius = p.ReadSingle();
+                        piece.StopDistance = p.ReadSingle();
+                        piece.Targets = p.ReadInt();
+                        piece.Reservations = p.ReadInt();
+                    }
+                    job.Pieces.Add(piece);
+                }
             }
             else job.Pieces.AddRange(JobPipeline.For(job.Type));
             return job;
@@ -164,7 +194,22 @@ namespace Kukolony.Colonies
             p.Write(job.SelectedStructures.Count); foreach (ZDOID id in job.SelectedStructures) WriteReference(p, id);
             p.Write(job.ItemFilters.Count); foreach (string item in job.ItemFilters) p.Write(item ?? string.Empty);
             List<JobPiece> pieces = job.Pieces.Count == 0 ? JobPipeline.For(job.Type) : job.Pieces;
-            p.Write(pieces.Count); foreach (JobPiece piece in pieces) { p.Write((int)piece.Kind); p.Write((int)piece.Capability); }
+            p.Write(pieces.Count);
+            foreach (JobPiece piece in pieces)
+            {
+                p.Write((int)piece.Kind); p.Write((int)piece.Capability);
+                p.Write(piece.ItemFilters.Count);
+                foreach (string item in piece.ItemFilters) p.Write(item ?? string.Empty);
+                WriteReference(p, piece.Container);
+                p.Write(piece.SelectedStructures.Count);
+                foreach (ZDOID id in piece.SelectedStructures) WriteReference(p, id);
+                p.Write(piece.StockLimit);
+                p.Write(piece.Amount);
+                p.Write(piece.SearchRadius);
+                p.Write(piece.StopDistance);
+                p.Write(piece.Targets);
+                p.Write(piece.Reservations);
+            }
         }
 
         private static ZDOID ReadReference(ZPackage package, int version)
