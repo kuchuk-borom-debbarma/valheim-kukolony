@@ -35,6 +35,8 @@ wait_for_run() {
     sleep 1; waited=$((waited+1)); [ "$waited" -lt 60 ] || { echo "Valheim did not start"; return 1; }
   done
   waited=0
+  missing=0
+  quiet=0
   while [ "$waited" -lt 900 ]; do
     if [ -s "$report" ] && grep -Fq "BENCHMARK TERMINAL $expected_stage " "$report"; then
       cp "$GAME_LOG" "$OUTPUT/$expected_stage.game.log" 2>/dev/null || true
@@ -51,10 +53,36 @@ wait_for_run() {
       cat "$report"
       return 1
     fi
-    if ! pgrep -f "$PROCESS_PATTERN" >/dev/null; then
-      cp "$GAME_LOG" "$OUTPUT/$expected_stage.died.log" 2>/dev/null || true
-      echo "Valheim exited before benchmark terminal report ($expected_stage)"; return 1
+    # Steam exits and re-execs the game while it starts, so there is a window where
+    # nothing matches the pattern even though the run is fine. A single miss meant a
+    # failed run; only repeated misses mean the process is really gone.
+    if pgrep -f "$PROCESS_PATTERN" >/dev/null; then
+      missing=0
+    else
+      missing=$((missing+1))
+      if [ "$missing" -ge 8 ]; then
+        cp "$GAME_LOG" "$OUTPUT/$expected_stage.died.log" 2>/dev/null || true
+        echo "Valheim exited before benchmark terminal report ($expected_stage)"; return 1
+      fi
     fi
+
+    # A hang during world load never writes a heartbeat, so the heartbeat check below
+    # cannot see it and the run would sit here until the overall timeout. The game logs
+    # steadily while it is alive, so silence is the signal.
+    log_mtime="$(stat -f %m "$GAME_LOG" 2>/dev/null || echo 0)"
+    if [ "$log_mtime" -gt 0 ]; then
+      log_age=$(( $(date +%s) - log_mtime ))
+      if [ "$log_age" -gt 180 ]; then quiet=$((quiet+1)); else quiet=0; fi
+      if [ "$quiet" -ge 3 ]; then
+        cp "$GAME_LOG" "$OUTPUT/$expected_stage.hung.log" 2>/dev/null || true
+        pkill -TERM -f "$PROCESS_PATTERN" 2>/dev/null || true
+        echo "Valheim stopped logging for ${log_age}s ($expected_stage); treating as hung"
+        # Nothing of ours had run yet, so this cannot be the change under test.
+        [ -f "$OUTPUT/heartbeat.txt" ] || return 2
+        return 1
+      fi
+    fi
+
     if [ -f "$OUTPUT/heartbeat.txt" ]; then
       modified="$(stat -f %m "$OUTPUT/heartbeat.txt")"; now="$(date +%s)"
       [ $((now-modified)) -le 180 ] || { echo "benchmark heartbeat stalled ($expected_stage)"; return 1; }
@@ -76,8 +104,19 @@ set_value BenchmarkScreenshots "${BENCHMARK_SCREENSHOTS:-true}"
 set_value BenchmarkAutoExit true
 set_value BenchmarkWorld KukolonyBenchmark
 
-wait_for_run create
-wait_for_run reload
+# A hang before the benchmark starts is in world loading, not in anything being
+# tested, so it is worth one retry rather than a failed run.
+run_stage() {
+  status=0
+  wait_for_run "$1" || status=$?
+  if [ "$status" -eq 0 ]; then return 0; fi
+  if [ "$status" -ne 2 ]; then return 1; fi
+  echo "retrying $1 once after a load hang"
+  wait_for_run "$1"
+}
+
+run_stage create
+run_stage reload
 
 if [ "${BENCHMARK_SCREENSHOTS:-true}" = "true" ]; then
   expected='colony-panel.png colony-structures.png colony-members.png colony-members-page-2.png colony-member-detail.png colony-member-remove-confirm.png colony-jobs.png colony-job-config.png colony-piece-editor.png colony-piece-settings.png colony-piece-picker.png colony-structure-picker.png colony-preset-application.png colony-picker.png'

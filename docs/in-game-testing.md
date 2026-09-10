@@ -91,6 +91,12 @@ images and by checking element bounds against the panel content column described
 - Stale heartbeat: inspect the last phase/readiness marker in the archived game log.
 - `villager spawn begin` is last: inspect the verified NPC prefab contract and spawned ZDO.
 - Process dies without terminal report: preserve the archived crash log; the script fails.
+  A single missed process match is not a death - Steam exits and re-execs the game while it
+  starts - so the runner requires several consecutive misses before giving up.
+- Valheim hangs during world load: it writes no heartbeat yet, so the runner watches the
+  game log's own timestamp and treats sustained silence as a hang. The log is archived as
+  `<stage>.hung.log`. A hang before the first heartbeat is retried once, because nothing
+  under test had run; a hang afterwards fails outright.
 - Terminal report without exit: wait for save grace, then terminate only that stale process.
 - Missing screenshot: inspect capture errors and `screenshots.manifest.json`.
 - Reload failure: compare create/reload logs and the persisted colony/ZDO fields.
