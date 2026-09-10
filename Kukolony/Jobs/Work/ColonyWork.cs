@@ -29,6 +29,12 @@ namespace Kukolony.Jobs.Work
         /// <summary>Nothing, unless the work needs a tool to do it at all.</summary>
         public virtual ToolRequirement RequiredTool => ToolRequirement.None;
 
+        /// <summary>
+        ///     False: most work is done on containers and stations the colony registered, and
+        ///     those are kept loaded already.
+        /// </summary>
+        public virtual bool GathersFromTheWorld => false;
+
         public virtual WorkStep Next(WorkState state, WorkFacts facts) => FetchAndDeliver.Next(state, facts);
 
         /// <summary>

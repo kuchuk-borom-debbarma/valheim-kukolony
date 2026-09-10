@@ -8,6 +8,15 @@ Common controls on every job: name, count, reservations, search radius, movement
 distance, item filters, eligible-target mode and exact structures, source and destination
 containers, stock threshold, and whether the result goes into a container or on the ground.
 
+## Chop wood
+
+- **Finds:** standing trees and felled logs within search radius, logs first.
+- **Needs:** an axe in the villager's bag. Without one the job refuses to start and says so.
+- **Settings:** search radius, count, reservations, movement.
+- **Result:** one target felled per cycle. Felling a tree leaves a log, which is a second
+  pass; cutting the log up is what produces wood, and hauling puts it away. A tree the axe
+  cannot cut is reported and released rather than struck forever.
+
 ## Haul loose items to storage
 
 - **Finds:** matching loose ItemDrop objects within search radius.

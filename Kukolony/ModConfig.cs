@@ -37,6 +37,7 @@ namespace Kukolony
 
         /// <summary>How often to sweep the world for villagers that are not loaded.</summary>
         internal static ConfigEntry<float> KeepAliveScanSeconds { get; private set; }
+        internal static ConfigEntry<float> ResourceScanRadius { get; private set; }
 
         /// <summary>Load only colony-relevant objects in zones kept open for a villager.</summary>
         internal static ConfigEntry<bool> KeepAliveFilterObjects { get; private set; }
@@ -115,6 +116,16 @@ namespace Kukolony
                 "In zones kept loaded only for a villager, load just what the colony needs - "
                 + "villagers, registered structures, buildings and loose items - and skip trees, "
                 + "rocks and wildlife. Disable to load everything, as chunk loader mods do.");
+
+            ResourceScanRadius = config.Bind(
+                "2 - Jobs",
+                nameof(ResourceScanRadius),
+                96f,
+                new ConfigDescription(
+                    "How far from a hearth to look for trees and other gatherable world objects. "
+                    + "This bounds the scan itself; a gathering job's own search radius narrows it "
+                    + "further, and cannot reach past this.",
+                    new AcceptableValueRange<float>(16f, 256f)));
 
             ClaimsEnabled = config.Bind(
                 "2 - Jobs",

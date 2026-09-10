@@ -24,7 +24,8 @@ namespace Kukolony.Jobs.Work
                 new StationWork(ColonyJobType.OperateCookingStations, Colonies.StructureCapability.CookingStation),
                 new StationWork(ColonyJobType.OperateFermenters, Colonies.StructureCapability.Fermenter),
                 new BeehiveWork(),
-                new EquipWork()
+                new EquipWork(),
+                new ChopWork()
             });
 
         /// <summary>The job for this type, or null while it still uses the older path.</summary>

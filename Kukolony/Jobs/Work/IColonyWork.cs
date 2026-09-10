@@ -53,6 +53,18 @@ namespace Kukolony.Jobs.Work
         bool DeliversInPlace(WorkSubject subject);
 
         /// <summary>
+        ///     Whether this job works on the world itself - trees, ore - rather than on things
+        ///     the colony has registered.
+        /// </summary>
+        /// <remarks>
+        ///     Asked before any villager runs, because it decides whether zones kept open for a
+        ///     colony bother instantiating scenery. A job that gathers and cannot see what it
+        ///     gathers idles silently off-screen and works perfectly under observation, which is
+        ///     the hardest kind of fault to find.
+        /// </remarks>
+        bool GathersFromTheWorld { get; }
+
+        /// <summary>
         ///     Chooses what to work on. Separated from delivery because a job that hauls looks
         ///     for an item on the ground while one that transfers looks in a container.
         /// </summary>

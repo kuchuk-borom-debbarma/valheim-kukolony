@@ -142,6 +142,12 @@ rocks nobody is looking at. We append only ZDOs whose prefab is on an allowlist,
 by scanning `ZNetScene.m_prefabs` **by component** rather than by name, so modded chests and
 stations are covered too. 1267 prefabs qualify; everything else is skipped.
 
+Trees and logs are on the list **only when some colony gathers**, which a job declares for
+itself. A gathering job that cannot see what it gathers idles silently off-screen and works
+perfectly under observation — the hardest kind of fault to find — but trees are by far the
+most numerous thing in the world, so a colony that only hauls and smelts pays nothing for
+them. The allowlist is rebuilt when that answer changes, not every frame.
+
 `Piece` is on the list deliberately: walking through a tree that was not loaded is
 cosmetic, walking through your wall is not.
 

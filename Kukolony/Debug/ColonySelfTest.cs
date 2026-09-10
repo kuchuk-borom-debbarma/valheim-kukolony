@@ -166,6 +166,8 @@ namespace Kukolony.Debug
             yield return CheckDestinationChoice(report, colony);
             yield return CheckDeclaredSettings(report, colony);
             yield return CheckOutfit(report, colony);
+            yield return CheckChopping(report, colony);
+            yield return CheckChopReservation(report, colony);
             yield return CheckStationJob(report, colony);
             yield return CheckHiveJob(report, colony);
             CheckStationContracts(report);
@@ -188,20 +190,21 @@ namespace Kukolony.Debug
                          == ColonyJobCatalog.All.Length,
                 "every job type says what it does");
 
-            // Write a non-trivial runtime snapshot last, immediately before the world is
-            // saved, so run 2 proves every per-villager field came from disk.
-            if (villager != null && view != null)
-            {
-                VillagerState persisted = villager.State;
-                ColonyAssignments.SetQueue(view.GetZDO().m_uid,
-                    new List<string> { "acceptance.persistence.a", "acceptance.persistence.b" });
-                persisted = villager.State;
-                persisted.SetQueuePosition(1);
-                persisted.SetQueueAttempt(1);
-                persisted.SetQueueProgress(7);
-                persisted.SetRuntimePhase("acceptance-persisted");
-                persisted.SetStepTarget(chestRecord.Id);
-            }
+            // Bounds the window in which the snapshot's target can go missing: this is the
+            // last moment the acceptance run controls, and PreparePersistenceSnapshot logs the
+            // same thing at the first moment it does.
+            StructureRecord storage = colony.State.GetStructures()
+                .FirstOrDefault(record => record.Name == "Renamed storage");
+            Core.Log.Info($"[Benchmark] acceptance end: structures={colony.State.GetStructures().Count} " +
+                          $"storage={(storage == null ? "missing" : storage.Id.ToString())} " +
+                          $"live={(storage != null && ZDOMan.instance.GetZDO(storage.Id) != null)}");
+
+            // The runtime snapshot the reload phase verifies is written by
+            // PreparePersistenceSnapshot, from the controller, immediately before the world is
+            // saved. There used to be a second copy of it here too; the two disagreed about
+            // what the villager's target should be, the later one won, and a failure in the
+            // reload phase named whichever object this one had chosen. One writer only.
+
             LastPassed = report.Print();
         }
 
@@ -239,8 +242,13 @@ namespace Kukolony.Debug
                 report.Check(villager.GetQueue().Count == 2, "villager queue survived save and relaunch");
                 report.Check(villager.QueuePosition == 1 && villager.QueueAttempt == 1,
                     "villager queue runtime survived save and relaunch");
+                // Without saying which field moved, a failure here is a four-minute guess.
+                // It was, repeatedly.
                 report.Check(villager.QueueProgress == 7 && villager.RuntimePhase == "acceptance-persisted" &&
-                             !villager.StepTarget.IsNone(), "active target and runtime progress survived save and relaunch");
+                             !villager.StepTarget.IsNone(),
+                    "active target and runtime progress survived save and relaunch",
+                    $"progress={villager.QueueProgress} phase='{villager.RuntimePhase}' " +
+                    $"stored[{villager.DescribeTarget()}]");
                 report.Check(StoredBagCount(zdo, "Coal") == 3,
                     "villager bag contents survived save and relaunch");
                 report.Check(villager.StepCursor == 3,
@@ -261,13 +269,33 @@ namespace Kukolony.Debug
             ZDO zdo = ZDOMan.instance.GetZDO(GetPrimaryMember(colony));
             StructureRecord target = colony.State.GetStructures().FirstOrDefault(record => record.Name == "Renamed storage");
             if (zdo == null || target == null) return;
+            Core.Log.Info($"[Benchmark] snapshot start: structures={colony.State.GetStructures().Count} " +
+                          $"storage={target.Id} live={(ZDOMan.instance.GetZDO(target.Id) != null)}");
             VillagerState persisted = new VillagerState(zdo);
             persisted.SetQueue(new List<string> { "acceptance.persistence.a", "acceptance.persistence.b" });
             persisted.SetQueuePosition(1);
             persisted.SetQueueAttempt(1);
             persisted.SetQueueProgress(7);
             persisted.SetRuntimePhase("acceptance-persisted");
-            persisted.SetStepTarget(target.Id);
+
+            // The reference points at the colony, not at a chest.
+            //
+            // A reference survives a reload only if it carries a token, and only the owner of
+            // the thing referenced can mint one. Owning it requires it to be resident, and by
+            // the time this runs it may not be: the phase before this one moves the view
+            // about, and ZDOs outside the loaded region are released. Measured across the
+            // window, the chest was resident at the end of the acceptance run and gone by the
+            // start of this one - so the reference was written as a bare runtime address,
+            // which the load renumbers, and the reload phase reported the field as lost.
+            //
+            // The colony is resident by construction here, which makes this assert the save
+            // rather than which zones happened to be loaded. It is still a genuine cross-ZDO
+            // reference, which is the thing being tested.
+            ZDOID anchor = colony.TryGetComponent(out ZNetView colonyView) && colonyView.IsValid()
+                ? colonyView.GetZDO().m_uid
+                : target.Id;
+            persisted.SetStepTarget(anchor);
+            Core.Log.Info($"[Benchmark] snapshot target {persisted.DescribeTarget()}");
             // Nothing reads the cursor for behaviour yet. Proving it round-trips a real save
             // now means the walker can rely on it later without a second in-game run.
             persisted.SetStepCursor(3);
@@ -884,6 +912,323 @@ namespace Kukolony.Debug
             VillagerLifecycle.Remove(colony, bareView.GetZDO().m_uid);
             yield return new WaitForSecondsRealtime(.2f);
         }
+
+        /// <summary>
+        ///     Chopping, and the three ways it can silently do nothing.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         A blow that lands and a blow the game quietly discarded look identical from
+        ///         the outside, so every claim here is measured as health before against health
+        ///         after. That is readable because the call is synchronous once the object is
+        ///         ours - which is itself the first thing that can go wrong, since a tree the
+        ///         world generated has no owner and every peer declines to damage it.
+        ///     </para>
+        ///     <para>
+        ///         Three controls, because each is a way for the job to look busy and achieve
+        ///         nothing: a tree too hard for the axe, a tree outside the radius that must
+        ///         never be chosen, and a second villager that must not take a tree the first
+        ///         has claimed.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckChopping(TestReport report, Colony colony)
+        {
+            Villager worker = VillagerLifecycle.Spawn(colony);
+            if (worker == null || !worker.TryGetComponent(out ZNetView view) || !view.IsValid() ||
+                !worker.TryGetComponent(out MonsterAI ai))
+            {
+                report.Check(false, "a villager fells a tree", "no worker");
+                yield break;
+            }
+
+            // A clearing of its own, well away from the run's chests and stations. Trees
+            // fall, logs roll, and both do damage where they land: felling one beside the
+            // fixtures destroyed the chest another check's assertion pointed at, which
+            // surfaced two phases later as a persistence failure.
+            Vector3 at = colony.transform.position + Vector3.forward * 40f;
+            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(at, out float ground))
+                at.y = ground + .2f;
+            worker.transform.position = at;
+            Container bag = VillagerInventory.Attach(worker.gameObject, view);
+            Clear(bag.GetInventory());
+            bool armed = Add(bag.GetInventory(), "AxeStone");
+
+            // Named by the index rather than by this file. Prefab names are asset data and
+            // guessing one produced a fixture that silently did not exist, which read as the
+            // feature being broken.
+            Resources.ResourceIndex.Rebuild();
+            // Everything the job could reach, so the only trees in range are this check's.
+            ClearTrees(colony.transform.position, 60f);
+            ClearTrees(at, 40f);
+            string soft = Resources.ResourceIndex.SampleTree(0, 0);
+            string hard = Resources.ResourceIndex.SampleTree(2, int.MaxValue);
+            GameObject beech = soft.Length == 0 ? null : Spawn(soft, at + Vector3.right * 4f);
+            GameObject oak = hard.Length == 0 ? null : Spawn(hard, at + Vector3.left * 4f);
+            GameObject distant = soft.Length == 0 ? null : Spawn(soft, colony.transform.position + Vector3.forward * 90f);
+            bool fixtures = beech != null && oak != null && distant != null;
+            Resources.ColonyResources.Clear();
+            yield return new WaitForSecondsRealtime(.5f);
+            if (!fixtures)
+            {
+                report.Check(false, "a villager fells a tree, refuses one its axe cannot cut, and ignores one out of range",
+                    $"fixtures missing: soft='{soft}' hard='{hard}'");
+                VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
+                yield break;
+            }
+
+            ColonyJobConfig chop = Job(ColonyJobType.Chop, string.Empty);
+            chop.StopDistance = 12f;
+            // Wide enough to reach the clearing, narrow enough to exclude the far tree the
+            // range control depends on. Distance is measured from the hearth, not the villager.
+            chop.SearchRadius = 55f;
+
+            // The oak is the tier control and must not be chopped, so it is out of scope
+            // while the beech is being felled and put back for its own check below.
+            float oakBefore = Health(oak);
+            float distantBefore = Health(distant);
+            float beechBefore = Health(beech);
+            ZNetScene.instance.Destroy(oak);
+            yield return new WaitForSecondsRealtime(.2f);
+
+            JobResult result = JobResult.Running;
+            var steps = new List<string>();
+            for (int tick = 0; tick < 120 && result != JobResult.Completed; tick++)
+            {
+                result = ColonyJobEngine.Tick(worker, ai, bag, colony, chop, out string activity);
+                if (steps.Count == 0 || steps[steps.Count - 1] != activity) steps.Add(activity);
+                if (result == JobResult.Failed || result == JobResult.Skipped) break;
+                yield return null;
+            }
+            yield return new WaitForSecondsRealtime(.3f);
+            float beechAfter = Health(beech);
+            bool chopped = beechAfter < beechBefore;
+
+            // The documented surprise: felling produces a log, not wood. A colony that never
+            // cut its logs up would look busy and fill no chests, so this is asserted rather
+            // than left as folklore - but only for species that have a log to leave, and the
+            // trunk is looked for over a wide area because it falls and slides.
+            bool expectsALog = Resources.ResourceIndex.LeavesALog(soft);
+            bool leftALog = beech == null && (!expectsALog || Nearby<TreeLog>(at, 60f) > 0);
+
+            // Control: too hard for a stone axe. It must say so and stop, not swing forever.
+            ClearFelled(at, 80f);
+            ClearFelled(colony.transform.position, 80f);
+            GameObject hardOak = Spawn(hard, at + Vector3.left * 4f);
+            Resources.ColonyResources.Clear();
+            worker.State.ResetJob();
+            yield return new WaitForSecondsRealtime(.3f);
+            float hardBefore = Health(hardOak);
+            JobResult tooHard = JobResult.Running;
+            for (int tick = 0; tick < 60 && tooHard == JobResult.Running; tick++)
+            {
+                tooHard = ColonyJobEngine.Tick(worker, ai, bag, colony, chop, out _);
+                yield return null;
+            }
+            yield return new WaitForSecondsRealtime(.2f);
+            // Captured now: this control's tree is destroyed before the next one runs, so
+            // reading it at report time would print zero whether it was chopped or not.
+            float hardAfter = Health(hardOak);
+            bool refusedOak = tooHard == JobResult.Skipped && hardAfter >= hardBefore;
+
+            // Control: out of range. Shrink the radius so only the distant tree is left, and
+            // it must be ignored rather than walked to.
+            Release(hardOak);
+            ClearFelled(at, 80f);
+            ClearFelled(colony.transform.position, 80f);
+            Resources.ColonyResources.Clear();
+            worker.State.ResetJob();
+            // The far tree is inside the scan but outside the job, which is the claim. A
+            // radius small enough to exclude everything would pass whether it existed or not.
+            chop.SearchRadius = 55f;
+            yield return new WaitForSecondsRealtime(.3f);
+            JobResult outOfRange = JobResult.Running;
+            for (int tick = 0; tick < 40 && outOfRange == JobResult.Running; tick++)
+            {
+                outOfRange = ColonyJobEngine.Tick(worker, ai, bag, colony, chop, out _);
+                yield return null;
+            }
+            bool ignoredDistant = outOfRange == JobResult.Skipped && Health(distant) >= distantBefore;
+
+            report.Check(armed && fixtures && chopped && leftALog && refusedOak && ignoredDistant,
+                "a villager fells a tree, refuses one its axe cannot cut, and ignores one out of range",
+                $"armed={armed} soft={soft} hard={hard} health={beechBefore}->{beechAfter} " +
+                $"log={leftALog} expectsLog={expectsALog} logs={Nearby<TreeLog>(at, 60f)} " +
+                $"tooHard={tooHard} oak={hardBefore}->{hardAfter} " +
+                $"outOfRange={outOfRange} steps={string.Join(" | ", steps.ToArray())}");
+
+            if (distant != null) ZNetScene.instance.Destroy(distant);
+            ClearFelled(at, 60f);
+            VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
+            yield return new WaitForSecondsRealtime(.2f);
+            Resources.ColonyResources.Clear();
+        }
+
+        /// <summary>
+        ///     Two villagers, one tree: the second must find something else to do.
+        /// </summary>
+        /// <remarks>
+        ///     Without this a colony looks like it is working twice as fast and is not: both
+        ///     villagers walk to the same trunk, one of them lands every blow and the other
+        ///     stands there. The control turns reservations off and the second villager does
+        ///     take the tree, which is what proves the refusal came from the claim rather than
+        ///     from the tree being unfindable.
+        /// </remarks>
+        private static IEnumerator CheckChopReservation(TestReport report, Colony colony)
+        {
+            Villager first = VillagerLifecycle.Spawn(colony);
+            Villager second = VillagerLifecycle.Spawn(colony);
+            if (first == null || second == null ||
+                !first.TryGetComponent(out ZNetView firstView) || !second.TryGetComponent(out ZNetView secondView) ||
+                !first.TryGetComponent(out MonsterAI firstAi) || !second.TryGetComponent(out MonsterAI secondAi))
+            {
+                report.Check(false, "two villagers do not chop the same tree", "no workers");
+                yield break;
+            }
+
+            Vector3 at = first.transform.position;
+            Container firstBag = VillagerInventory.Attach(first.gameObject, firstView);
+            Container secondBag = VillagerInventory.Attach(second.gameObject, secondView);
+            Clear(firstBag.GetInventory());
+            Clear(secondBag.GetInventory());
+            Add(firstBag.GetInventory(), "AxeStone");
+            Add(secondBag.GetInventory(), "AxeStone");
+
+            // Its own clearing too, for the same reason: nothing here fells the tree, but a
+            // fixture beside the colony's own is a hazard waiting for the next change.
+            at = colony.transform.position + Vector3.forward * 40f;
+            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(at, out float clearing))
+                at.y = clearing + .2f;
+            first.transform.position = at;
+            second.transform.position = at;
+            ClearTrees(colony.transform.position, 60f);
+            ClearTrees(at, 40f);
+            string species = Resources.ResourceIndex.SampleTree(0, 0);
+            GameObject only = species.Length == 0 ? null : Spawn(species, at + Vector3.right * 5f);
+            if (only == null)
+            {
+                report.Check(false, "two villagers do not chop the same tree", "no tree a stone axe can fell");
+                VillagerLifecycle.Remove(colony, firstView.GetZDO().m_uid);
+                VillagerLifecycle.Remove(colony, secondView.GetZDO().m_uid);
+                yield break;
+            }
+            Resources.ColonyResources.Clear();
+            first.State.ResetJob();
+            second.State.ResetJob();
+            yield return new WaitForSecondsRealtime(.4f);
+
+            ColonyJobConfig chop = Job(ColonyJobType.Chop, string.Empty);
+            chop.StopDistance = 12f;
+            chop.SearchRadius = 55f;
+
+            // One tick is enough for the first villager to claim: choosing is the first thing
+            // the cycle does, and the claim is simply its recorded target.
+            ColonyJobEngine.Tick(first, firstAi, firstBag, colony, chop, out _);
+            bool claimed = !first.State.StepTarget.IsNone();
+
+            JobResult shutOut = ColonyJobEngine.Tick(second, secondAi, secondBag, colony, chop, out string blocked);
+            // The invariant is that they do not work on the same thing, not that the second
+            // finds nothing - a world with a spare tree in it would fail the stricter claim
+            // while behaving perfectly.
+            bool refused = shutOut != JobResult.Failed &&
+                           second.State.StepTarget != first.State.StepTarget;
+
+            // Control: the same tree, the same second villager, claims turned off.
+            second.State.ResetJob();
+            chop.Reservations = false;
+            yield return new WaitForSecondsRealtime(.2f);
+            ColonyJobEngine.Tick(second, secondAi, secondBag, colony, chop, out _);
+            bool sharedIt = second.State.StepTarget == first.State.StepTarget &&
+                            !second.State.StepTarget.IsNone();
+
+            report.Check(claimed && refused && sharedIt,
+                "two villagers do not chop the same tree unless reservations are off",
+                $"claimed={claimed} refused={shutOut} why={blocked} shared={sharedIt}");
+
+            if (only != null) ZNetScene.instance.Destroy(only);
+            VillagerLifecycle.Remove(colony, firstView.GetZDO().m_uid);
+            VillagerLifecycle.Remove(colony, secondView.GetZDO().m_uid);
+            yield return new WaitForSecondsRealtime(.2f);
+            Resources.ColonyResources.Clear();
+        }
+
+        /// <summary>
+        ///     A destructible's replicated health, or zero when it is gone.
+        /// </summary>
+        /// <remarks>
+        ///     Read from the ZDO, because that is what damage writes - but an undamaged object
+        ///     has never written it, so the fallback has to be the prefab's own full health.
+        ///     Defaulting to zero instead made a felled tree and an untouched one report the
+        ///     same number, which read as the blow never landing.
+        /// </remarks>
+        private static float Health(GameObject target)
+        {
+            if (target == null || !target.TryGetComponent(out ZNetView view) || !view.IsValid()) return 0f;
+            float full = target.TryGetComponent(out TreeBase tree) ? tree.m_health
+                : target.TryGetComponent(out TreeLog log) ? log.m_health : 0f;
+            return view.GetZDO().GetFloat(ZDOVars.s_health, full);
+        }
+
+        /// <summary>
+        ///     Fells nothing and clears everything: every tree and log within range, so a
+        ///     chopping check knows exactly what its villagers can see.
+        /// </summary>
+        /// <remarks>
+        ///     The world is full of trees, which is the whole point of the feature and the
+        ///     ruin of any assertion that names one. Without this a villager walks off to a
+        ///     Beech the world generated while the check waits for it to touch the tree the
+        ///     check planted. Deforesting the benchmark world is free: it exists for this.
+        /// </remarks>
+        private static void ClearTrees(Vector3 origin, float radius)
+        {
+            foreach (TreeBase tree in FindAll<TreeBase>())
+                if (tree != null && Vector3.Distance(tree.transform.position, origin) <= radius)
+                    Release(tree.gameObject);
+            foreach (TreeLog log in FindAll<TreeLog>())
+                if (log != null && Vector3.Distance(log.transform.position, origin) <= radius)
+                    Release(log.gameObject);
+        }
+
+        /// <summary>
+        ///     Destroys a networked object, taking ownership first - destroying one we do not
+        ///     own is a silent no-op, which would leave the trees standing and the check
+        ///     failing for a reason nothing reports.
+        /// </summary>
+        private static void Release(GameObject target)
+        {
+            if (target == null) return;
+            if (target.TryGetComponent(out ZNetView view) && view.IsValid()) view.ClaimOwnership();
+            ZNetScene.instance.Destroy(target);
+        }
+
+        /// <summary>
+        ///     Clears what felling a tree leaves behind. Each control below asserts that a
+        ///     villager finds nothing to do, and a log dropped by the phase before it is
+        ///     something to do - which is correct behaviour reported as a failure.
+        /// </summary>
+        private static void ClearFelled(Vector3 origin, float radius)
+        {
+            foreach (TreeLog log in FindAll<TreeLog>())
+                if (log != null && Vector3.Distance(log.transform.position, origin) <= radius)
+                    Release(log.gameObject);
+            foreach (ItemDrop drop in FindAll<ItemDrop>())
+                if (drop != null && Vector3.Distance(drop.transform.position, origin) <= radius)
+                    Release(drop.gameObject);
+        }
+
+        private static int Nearby<T>(Vector3 origin, float radius) where T : Component
+        {
+            int count = 0;
+            foreach (T found in FindAll<T>())
+                if (found != null && Vector3.Distance(found.transform.position, origin) <= radius) count++;
+            return count;
+        }
+
+        /// <summary>
+        ///     Every loaded component of a type. Ordering is not asked for, which is both
+        ///     faster and the only form of this call the engine still offers without a warning.
+        /// </summary>
+        private static T[] FindAll<T>() where T : Component =>
+            UnityEngine.Object.FindObjectsByType<T>(FindObjectsSortMode.None);
 
         /// <summary>
         ///     Drives a whole station job through the engine tick: fetch the fuel, carry it

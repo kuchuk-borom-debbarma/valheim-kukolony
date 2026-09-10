@@ -5,7 +5,7 @@ static class Program
 {
     static int Main()
     {
-        int failures = RunWorkCases() + RunTapCases();
+        int failures = RunWorkCases() + RunTapCases() + RunChopCases();
         Console.WriteLine(failures == 0 ? "RESULT: PASS" : $"RESULT: FAIL ({failures})");
         return failures == 0 ? 0 : 1;
     }
@@ -131,6 +131,72 @@ static class Program
             if (!ok) failures++;
         }
         return failures;
+    }
+
+    // Chopping stays on one target until it comes down, which is the opposite of every
+    // other job: the target disappearing is success, and choosing a new one mid-cycle would
+    // mean abandoning a half-felled tree.
+    static int RunChopCases()
+    {
+        var cases = new (string Name, WorkState From, WorkFacts Facts, int Blows, WorkAction[] Expected)[]
+        {
+            ("fells a tree", WorkState.Choosing, Observed(), 3,
+                [WorkAction.ChooseSource, WorkAction.Move, WorkAction.Collect, WorkAction.Collect,
+                 WorkAction.Collect, WorkAction.Complete]),
+
+            // Saved mid-tree. It must keep hitting the one it started, not go and pick another.
+            ("resumed mid-chop keeps hitting", WorkState.Collecting, Observed(hasTarget: true, arrived: true), 2,
+                [WorkAction.Collect, WorkAction.Collect, WorkAction.Complete]),
+
+            // Knocked back between blows. Walk in again rather than swinging at thin air.
+            ("pushed away walks back", WorkState.Collecting, Observed(hasTarget: true), 1,
+                [WorkAction.Move, WorkAction.Collect, WorkAction.Complete]),
+
+            ("no axe yields", WorkState.Choosing, Observed(hasTool: false), 1, [WorkAction.Yield]),
+            ("stock limit yields", WorkState.Choosing, Observed(stockLimitReached: true), 1, [WorkAction.Yield]),
+
+            // Somebody else felled it first. That ends the cycle; it does not start another
+            // one, which is what bounds a villager to one tree per queue attempt.
+            ("control: a tree gone before the first blow ends the cycle", WorkState.Collecting,
+                Observed(), 1, [WorkAction.Complete])
+        };
+        int failures = 0;
+        foreach (var test in cases)
+        {
+            var actual = DriveChop(test.From, test.Facts, test.Blows);
+            bool ok = actual.Count == test.Expected.Length;
+            for (int i = 0; ok && i < actual.Count; i++) ok = actual[i] == test.Expected[i];
+            Report(ok, "chop: " + test.Name, ok ? "" : string.Join(" -> ", actual));
+            if (!ok) failures++;
+        }
+        return failures;
+    }
+
+    /// <param name="blows">
+    ///     How many hits the target survives. The engine releases the target on the blow that
+    ///     fells it, so that is what is modelled - not the target vanishing on its own.
+    /// </param>
+    static List<WorkAction> DriveChop(WorkState state, WorkFacts start, int blows)
+    {
+        bool hasTarget = start.HasTarget, arrived = start.Arrived;
+        var performed = new List<WorkAction>();
+        for (int tick = 0; tick < 32; tick++)
+        {
+            WorkStep step = WorkUntilGone.Next(state,
+                new WorkFacts(hasTarget, arrived, false, start.StockLimitReached, start.HasTool));
+            performed.Add(step.Action);
+            state = step.Next;
+            switch (step.Action)
+            {
+                case WorkAction.ChooseSource: hasTarget = true; arrived = false; break;
+                case WorkAction.Move: arrived = true; break;
+                case WorkAction.Collect:
+                    if (--blows <= 0) hasTarget = false;
+                    break;
+                default: return performed;   // Yield and Complete both end the cycle
+            }
+        }
+        return performed;
     }
 
     /// <summary>

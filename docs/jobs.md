@@ -56,6 +56,37 @@ the item is in the bag rather than when it has been carried somewhere. Putting i
 a step: what a villager shows is a mirror of what it holds. See
 [npc-design.md](npc-design.md).
 
+## Gathering
+
+Chopping is the first job whose targets are not registered structures, and four things shape
+it.
+
+**An untouched tree is unworkable by everyone.** Damage is routed to whoever owns the
+object, and a tree the world generated has no owner at all, so every peer decides the blow
+is somebody else's business and drops it. The villager swings, the health does not move, and
+nothing anywhere reports a problem. Ownership is claimed first and the blow waits a tick.
+
+**A tree does not produce wood.** Felling it leaves a log — a separate object, which has to
+be cut up in a second pass before any wood exists. Logs are chosen before standing trees so
+a colony finishes what it started; one that kept felling and never cut up would look busy and
+fill no chests. The wood ends on the ground, where hauling picks it up: chopping never
+learns to carry.
+
+**There is no registry of trees.** The game keeps instance lists for items and creatures, not
+for scenery, so finding one means looking through everything loaded — affordable once every
+few seconds for a colony, not once per villager per tick. `ColonyResources` caches it, and
+`ResourceIndex` classifies prefabs by component so the scan itself is an integer compare.
+
+**Keep-alive deliberately skips trees**, so off-screen a villager would pick a tree, walk to
+it and wait forever, while working perfectly every time anyone came to look. Trees are now
+loaded in kept zones — but only for colonies that actually gather, declared by the job
+itself, because trees are the most numerous thing in the world and loading them everywhere is
+exactly the cost that allowlist exists to avoid.
+
+A blow that lands and a blow the game quietly discarded look identical from outside, so
+health before and after is read every time. A tool that cannot bite says so and the job
+stops, rather than swinging forever at something it will never cut.
+
 A job that needs a tool says so, and refuses to start without it rather than working by
 fiat. Tools are classified by the damage they can do — an axe chops, a pickaxe mines —
 because axes and pickaxes are weapons in the game's own taxonomy and only hammers and hoes

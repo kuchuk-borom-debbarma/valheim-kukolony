@@ -161,6 +161,67 @@ namespace Kukolony.Jobs
             return JobResult.Completed;
         }
 
+        /// <summary>
+        ///     Picks something to chop: a felled log if any are lying about, otherwise a
+        ///     standing tree. Logs first so a villager finishes what it started - a colony that
+        ///     kept felling and never cut up would produce no wood at all while looking busy.
+        /// </summary>
+        internal static JobResult ChooseResource(Work.WorkContext c, out string activity)
+        {
+            if (SelectNearest(c, Resources.ResourceKind.Log, out activity)) return JobResult.Running;
+            if (SelectNearest(c, Resources.ResourceKind.Tree, out activity)) return JobResult.Running;
+            return JobOutcomes.Skipped(c.State, "nothing to chop nearby", out activity);
+        }
+
+        /// <summary>
+        ///     Nearest unclaimed resource of a kind, within the job's radius. Distance is
+        ///     measured from the hearth rather than the villager so that the colony works
+        ///     outward from itself instead of wandering off after whatever is closest.
+        /// </summary>
+        private static bool SelectNearest(Work.WorkContext c, Resources.ResourceKind kind, out string activity)
+        {
+            ZDOID best = ZDOID.None;
+            float closest = float.MaxValue;
+            foreach (ZDOID id in Resources.ColonyResources.Near(c.Colony, kind, c.Job.SearchRadius))
+            {
+                ZDO zdo = ZDOMan.instance.GetZDO(id);
+                if (zdo == null || !zdo.IsValid()) continue;
+                float distance = Utils.DistanceXZ(zdo.GetPosition(), c.Colony.transform.position);
+                if (distance >= closest) continue;
+                if (c.Job.Reservations && TargetClaims.IsClaimedByOther(id, c.Villager)) continue;
+                best = id;
+                closest = distance;
+            }
+            if (best.IsNone()) { activity = string.Empty; return false; }
+            SetTarget(c.State, best, "chopping");
+            activity = kind == Resources.ResourceKind.Log ? "found a log" : "found a tree";
+            return true;
+        }
+
+        /// <summary>
+        ///     Lands one blow. The target coming down is what ends the cycle, so this releases
+        ///     it rather than leaving a reference to something the scene has destroyed - which
+        ///     the next tick would read as a fault instead of as a felled tree.
+        /// </summary>
+        internal static JobResult StrikeTarget(Work.WorkContext c, out string activity)
+        {
+            ItemDrop.ItemData axe = FirstTool(c.Bag, Work.ToolRequirement.Axe);
+            Resources.BlowResult blow = Resources.Felling.Strike(c.Target, axe, out activity);
+            switch (blow)
+            {
+                case Resources.BlowResult.Struck:
+                case Resources.BlowResult.Claiming:
+                    return JobResult.Running;
+                case Resources.BlowResult.Felled:
+                    c.State.ClearTarget();
+                    return JobResult.Running;
+                default:
+                    // Releasing the target matters as much here: without it the villager would
+                    // stand in front of the same unchoppable tree for the rest of the session.
+                    return JobOutcomes.Skipped(c.State, activity, out activity);
+            }
+        }
+
         internal static JobResult ChooseStation(Work.WorkContext c, StructureCapability capability,
             out string activity) =>
             SelectStructure(c.Villager, c.Colony, c.Job, capability, "operating", out activity);
@@ -287,20 +348,28 @@ namespace Kukolony.Jobs
         }
 
         /// <summary>True when the bag holds a tool that can do the work this job needs.</summary>
-        private static bool HasRequiredTool(Inventory bag, Work.ToolRequirement required)
+        private static bool HasRequiredTool(Inventory bag, Work.ToolRequirement required) =>
+            required == Work.ToolRequirement.None || FirstTool(bag, required) != null;
+
+        /// <summary>
+        ///     The best tool in the bag for this kind of work, or null. Best means highest
+        ///     tier: a villager carrying a stone axe and a bronze one should use the bronze.
+        /// </summary>
+        internal static ItemDrop.ItemData FirstTool(Inventory bag, Work.ToolRequirement required)
         {
-            if (required == Work.ToolRequirement.None) return true;
-            if (bag == null) return false;
+            if (required == Work.ToolRequirement.None || bag == null) return null;
+            ItemDrop.ItemData best = null;
             foreach (ItemDrop.ItemData item in bag.GetAllItems())
             {
                 if (item == null || item.m_shared == null) continue;
                 // Classified by what the tool can do, not by its category: axes and pickaxes
                 // are weapons in the game's own taxonomy, and only hammers and hoes are tools.
                 HitData.DamageTypes damage = item.GetDamage();
-                if (required == Work.ToolRequirement.Axe && damage.m_chop > 0f) return true;
-                if (required == Work.ToolRequirement.Pickaxe && damage.m_pickaxe > 0f) return true;
+                bool fits = required == Work.ToolRequirement.Axe ? damage.m_chop > 0f : damage.m_pickaxe > 0f;
+                if (!fits) continue;
+                if (best == null || item.m_shared.m_toolTier > best.m_shared.m_toolTier) best = item;
             }
-            return false;
+            return best;
         }
 
         /// <summary>Says why a job yielded, so a missing tool is visible rather than mysterious.</summary>

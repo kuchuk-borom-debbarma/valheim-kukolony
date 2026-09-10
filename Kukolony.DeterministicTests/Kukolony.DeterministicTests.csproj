@@ -4,5 +4,6 @@
     <Compile Include="../Kukolony/Jobs/Work/WorkState.cs" Link="WorkState.cs" />
     <Compile Include="../Kukolony/Jobs/Work/FetchAndDeliver.cs" Link="FetchAndDeliver.cs" />
     <Compile Include="../Kukolony/Jobs/Work/TapThenGather.cs" Link="TapThenGather.cs" />
+    <Compile Include="../Kukolony/Jobs/Work/WorkUntilGone.cs" Link="WorkUntilGone.cs" />
   </ItemGroup>
 </Project>

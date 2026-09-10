@@ -4,6 +4,20 @@ A placed Colony Hearth is the persistent ZDO-backed root for a settlement. It ow
 display name, villager IDs, structure records, configured jobs, and presets. Direct
 interaction opens it; the configurable hotkey opens a searchable colony picker.
 
+Durable references between saved objects are minted by the **owner** of the thing being
+referenced: `PersistentZdoReference.Ensure` returns nothing for a ZDO this peer does not
+own, because a token written by a non-owner is discarded on the next sync. A reference
+written without one still works for the rest of the session — it falls back to the runtime
+address — but does not survive a reload, since loading renumbers those. Structure records
+and colony membership are written by the owner and so are durable; a villager's current
+step target is not always, and does not need to be: on reload it re-derives what to do from
+what it can see.
+
+Resolving a reference also needs its target **loaded**. An unloaded object is
+indistinguishable from a deleted one here, which is correct for deciding whether a villager
+can work on something and misleading if read as "the save lost it".
+
+
 ## Live radius and structures
 
 The hearth has a configurable live radius (48m by default). Registration accepts only a

@@ -18,7 +18,8 @@ namespace Kukolony.Jobs
         OperateCookingStations,
         OperateFermenters,
         CollectBeehives,
-        Equip
+        Equip,
+        Chop
     }
 
     /// <summary>How a job chooses among the colony's registered structures.</summary>
@@ -187,6 +188,7 @@ namespace Kukolony.Jobs
                 case ColonyJobType.OperateFermenters: return "Starts a fermenter with a mead base.";
                 case ColonyJobType.CollectBeehives: return "Taps a hive and stores the honey.";
                 case ColonyJobType.Equip: return "Fetches the outfit this villager lacks.";
+                case ColonyJobType.Chop: return "Fells trees and cuts up logs. Needs an axe.";
                 default: return string.Empty;
             }
         }
@@ -203,6 +205,7 @@ namespace Kukolony.Jobs
                 case ColonyJobType.OperateFermenters: return "Operate fermenters";
                 case ColonyJobType.CollectBeehives: return "Collect beehives";
                 case ColonyJobType.Equip: return "Fetch outfit";
+                case ColonyJobType.Chop: return "Chop wood";
                 // Work with no name here is work someone has not finished adding. Empty
                 // rather than a plausible-looking fallback: a fallback puts a wrong but
                 // convincing label in the panel instead of failing the catalogue check that

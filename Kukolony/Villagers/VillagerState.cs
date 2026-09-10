@@ -69,6 +69,22 @@ namespace Kukolony.Villagers
         internal ZDOID StepTarget => _zdo == null ? ZDOID.None : PersistentZdoReference.Resolve(
             _zdo.GetString(StepTargetPersistentKey, string.Empty), _zdo.GetZDOID(StepTargetKey));
 
+        /// <summary>
+        ///     What is actually stored behind <see cref="StepTarget"/>, for diagnosing a
+        ///     reference that stops resolving. The resolved answer alone cannot distinguish a
+        ///     token that was never written from one whose target is gone.
+        /// </summary>
+        internal string DescribeTarget()
+        {
+            if (_zdo == null) return "no zdo";
+            ZDOID raw = _zdo.GetZDOID(StepTargetKey);
+            string token = _zdo.GetString(StepTargetPersistentKey, string.Empty);
+            ZDO target = raw.IsNone() || ZDOMan.instance == null ? null : ZDOMan.instance.GetZDO(raw);
+            return $"raw={(raw.IsNone() ? "none" : raw.ToString())} " +
+                   $"live={(target != null && target.IsValid())} " +
+                   $"token={(token.Length == 0 ? "none" : token)}";
+        }
+
         internal string ActiveItem => _zdo?.GetString(ActiveItemKey, string.Empty) ?? string.Empty;
         internal int QueuePosition => _zdo?.GetInt(QueuePositionKey, 0) ?? 0;
         internal int QueueAttempt => _zdo?.GetInt(QueueAttemptKey, 0) ?? 0;
