@@ -165,8 +165,36 @@ walking to a distant work area keeps its own corridor loaded and works when it a
 cost is real — a villager crossing open country forces zones along the way — and is the price
 of the work being genuine rather than pretend.
 
-*Open:* whether a work area names the kind of work, or is a neutral place that jobs point at;
-what happens when areas overlap; whether a villager assigned far away should sleep out there.
+**An area is a neutral place, not a kind of work.** It says *here*, nothing more. Which work
+happens there is the job's business, so one forest can be logged by one villager and foraged
+by another without needing two markers standing in the same trees.
+
+**A job chooses its areas, and may choose several.** Configuring a job includes picking which
+areas it works in — a hauling job might sweep the village and two outposts; a chopping job
+might name three separate woods.
+
+**The colony is always one of them.** Every job includes the settlement itself without being
+told to, so a job with nothing selected still works around home. Areas are added reach, never
+a replacement for it, and there is no way to configure a job into having nowhere to work.
+
+*Open:* what happens when areas overlap; whether a villager assigned far away should sleep
+out there.
+
+### Which decides what: places versus things
+
+Two questions that look alike and are answered by different halves of the design. Worth
+stating plainly, because getting them the wrong way round would put every setting in the
+wrong place.
+
+- **Where does work happen?** The **job** decides, by choosing areas. Deliberate, because
+  only the player knows which forest is theirs to cut and which they are saving.
+- **Where does the result go?** The **structure** decides, by saying what belongs in it. A
+  hauling job never names a destination; it asks the settlement where wood goes.
+
+A pleasant consequence: because storage is chosen by what a container says rather than by
+distance, putting a chest inside a distant work area is all it takes for wood to accumulate
+out there instead of being walked home. The outpost becomes a real outpost, and nothing had
+to be added to make that work.
 
 ### Villagers
 
@@ -270,6 +298,9 @@ Settled, with the reason.
   drops on the ground only as a last resort. Nothing is destroyed, nothing is held silently.
 - **A bed is an upgrade, not a requirement.** No bed means slow recovery idling by the colony
   piece, so a settlement cannot deadlock for want of furniture.
+- **Areas are neutral places; jobs point at them, and may point at several.** The colony is
+  always included, so no job can be configured into having nowhere to work.
+- **Jobs choose where work happens; structures choose where results go.**
 - **Reach is placed, not raised.** The colony radius stays modest so the settlement remains a
   place; a **work area** is a separate placed structure with its own radius, anywhere, that
   says where a kind of work happens. Territory is a shape a player draws.
