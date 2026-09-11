@@ -147,10 +147,23 @@ two Wood, owned by this peer and loaded, reported an empty `s_items` record:
 Five runs, each eliminating one explanation. The live inventory reported two Wood throughout, so
 the items were genuinely there.
 
-**Consequence: capacity is a loaded-only question.** An unloaded container cannot be asked how
-full it is, so the settlement index treats it as *unknown* — which must mean "still a candidate",
-not "empty". Empty reads as plenty of room and would send every villager to the one chest nobody
-can see.
+**Consequence: capacity is a loaded-only question** — but that turns out to bind far less than
+it first appears, because a colony keeps its own registered structures loaded.
+
+Measured, with the unregistered chest in `CheckUnloadedStaysKnown` as the control: two chests at
+900m from the player, same prefab, same distance. The unregistered one unloads. The one
+registered to a colony 900m away stays instantiated, and its capacity reads normally. The only
+difference between them is registration, so that is what the difference can be attributed to.
+
+`ColonyRegistry.CollectMemberPositions` is why: every registered structure's position is fed to
+the keep-alive, which holds its zone open. Registration is itself bounded by the colony radius,
+so a structure is always near its own hearth — meaning a whole settlement stays loaded, not
+individual chests.
+
+So the index treats an unloaded container as *unknown*, and unknown must mean "still a
+candidate" rather than "empty" — but it is a fallback rather than the usual case. It is reached
+when the keep-alive is off (`KeepAliveEnabled`), on a joining client (the keep-alive is
+server-gated), or when a settlement exceeds `KeepAliveMaxZones`.
 
 The check asserting this is deliberately phrased as the negative, so that if a game update makes
 containers flush, it fails and the index gets made smarter on purpose rather than by accident.

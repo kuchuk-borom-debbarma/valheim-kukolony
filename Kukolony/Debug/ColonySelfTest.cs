@@ -128,6 +128,7 @@ namespace Kukolony.Debug
             yield return CheckRegistration(report, colony, origin);
             yield return CheckReaper(report, colony, origin);
             yield return CheckStoredContents(report, colony, origin);
+            yield return CheckOutpostStaysLoaded(report, colony);
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
 
@@ -579,6 +580,90 @@ namespace Kukolony.Debug
         ///         since to this peer they are the same situation.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     A registered structure at an outpost nobody is near stays loaded.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         This is what decides whether "unknown capacity" is the common case or a rare
+        ///         fallback. Registration is bounded by the colony radius, so a structure is
+        ///         always near <em>its own</em> hearth - the interesting case is a second
+        ///         settlement far from the player, which is precisely what the keep-alive
+        ///         exists for.
+        ///     </para>
+        ///     <para>
+        ///         The control is the unregistered chest in CheckUnloadedStaysKnown, sitting at
+        ///         the same distance and observed to unload. Same place, same prefab, same
+        ///         distance from the player: the only difference is being registered, so that
+        ///         is what the difference in outcome can be attributed to.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckOutpostStaysLoaded(TestReport report, Colony colony)
+        {
+            if (!ModConfig.KeepAliveEnabled.Value)
+            {
+                report.Note("outpost check skipped: keep-alive is off");
+                yield break;
+            }
+
+            // Built on loaded ground and then moved, not built where it is going: unloaded
+            // terrain answers zero to a ground query, so a piece placed at 900m lands under
+            // the world and is destroyed. That cost a run here and had already cost one in
+            // milestone 1 - the same mistake, the second time.
+            Vector3 near = colony.transform.position + new Vector3(0f, 0f, 40f);
+            GameObject hearth = Spawn(ColonyPrefab.PrefabName, near);
+            GameObject chest = Spawn("piece_chest_wood", near + new Vector3(3f, 0f, 0f));
+            yield return new WaitForSecondsRealtime(.4f);
+
+            Colony outpost = hearth != null ? hearth.GetComponent<Colony>() : null;
+            if (outpost == null || chest == null || !chest.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "outpost check could place a distant colony and chest");
+                yield break;
+            }
+
+            outpost.EnsureNamed();
+            ZDOID chestId = view.GetZDO().m_uid;
+            RegisterOutcome outcome = ColonyOperations.Register(outpost, chest);
+            report.Check(outcome == RegisterOutcome.Registered,
+                "control: the outpost's chest was registered to it", $"outcome={outcome}");
+
+            // Now move both far away, together, so the chest stays inside its own colony's
+            // radius while both leave the player's active area.
+            Vector3 far = colony.transform.position + Vector3.right * 900f;
+            Relocate(hearth, far);
+            Relocate(chest, far + new Vector3(3f, 0f, 0f));
+
+            // Long enough for the colony scan and at least one keep-alive pass to notice.
+            yield return new WaitForSecondsRealtime(ModConfig.KeepAliveScanSeconds.Value * 3f + 2f);
+
+            bool stillLoaded = ZNetScene.instance.FindInstance(chestId) != null;
+            Inventory readable = StructureInventory.Live(chestId);
+            report.Check(stillLoaded,
+                "a registered structure 900m from the player is kept loaded by its colony",
+                $"loaded={stillLoaded} capacityReadable={readable != null}");
+
+            if (chest != null) Release(chest);
+            if (outpost != null && outpost.TryGetComponent(out ZNetView outpostView) && outpostView.IsValid())
+            {
+                outpostView.ClaimOwnership();
+                ZNetScene.instance.Destroy(outpost.gameObject);
+            }
+
+            yield return null;
+        }
+
+        /// <summary>
+        ///     Moves an object and its ZDO together, so the game agrees about where it is.
+        /// </summary>
+        private static void Relocate(GameObject target, Vector3 position)
+        {
+            if (target == null || !target.TryGetComponent(out ZNetView view) || !view.IsValid()) return;
+            view.ClaimOwnership();
+            target.transform.position = position;
+            view.GetZDO().SetPosition(position);
+        }
+
         /// <summary>
         ///     What a registered container's capacity can and cannot tell the settlement.
         /// </summary>
