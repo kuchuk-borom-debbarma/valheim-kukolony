@@ -55,6 +55,7 @@ static class Program
         Reckoning();
         Arriving();
         Rescuing();
+        Locomoting();
 
         Console.WriteLine(_failed == 0
             ? $"RESULT: PASS ({_cases} cases)"
@@ -313,6 +314,77 @@ static class Program
         // Control: and it must actually stop growing.
         Case("control: rescues are bounded however bad the ground is",
             Rescue.BurstSeconds(30) == Rescue.BurstSeconds(4));
+    }
+
+    /// <summary>
+    ///     Walking versus being rescued. Six booleans, sixty-four combinations, all of them.
+    /// </summary>
+    static void Locomoting()
+    {
+        Console.WriteLine("locomotion");
+
+        // The property worth having, checked exhaustively rather than argued: a villager is
+        // never left doing neither. Every combination must produce something that moves it or
+        // puts it somewhere it can move from.
+        int idle = 0;
+        for (int bits = 0; bits < 64; bits++)
+        {
+            TravelFacts facts = new TravelFacts(
+                (bits & 1) != 0, (bits & 2) != 0, (bits & 4) != 0, (bits & 8) != 0,
+                (bits & 16) != 0, (bits & 32) != 0, canStand: true);
+
+            Locomotion move = Locomotor.Decide(facts);
+            if (move != Locomotion.Walk && move != Locomotion.CoverGround &&
+                move != Locomotion.BackOnFoot && move != Locomotion.PutBackOnNavmesh &&
+                move != Locomotion.BeginRescue) idle++;
+        }
+
+        Case($"every combination of facts produces an action (idle in {idle})", idle == 0);
+
+        // The five-minute standstill, as a single line: rescuing, in view, polite rescues still
+        // available - but nowhere to stand. It must keep covering ground rather than stop.
+        Case("a villager with nowhere to stand keeps going rather than waiting to be able to walk",
+            Locomotor.Decide(new TravelFacts(true, true, false, true, true, true, false))
+                == Locomotion.CoverGround);
+
+        Case("and hands back the moment there is somewhere to stand",
+            Locomotor.Decide(new TravelFacts(true, true, false, true, true, true, true))
+                == Locomotion.BackOnFoot);
+
+        // Walking is preferred wherever it is possible.
+        Case("not stalled means walk, whoever is watching",
+            Locomotor.Decide(new TravelFacts(false, true, false, false, false, true, true))
+                == Locomotion.Walk);
+        Case("a short errand is never a journey to be rescued from",
+            Locomotor.Decide(new TravelFacts(false, false, false, false, true, true, true))
+                == Locomotion.Walk);
+
+        // Being seen ends a rescue early, which is what stops a villager gliding home in view.
+        Case("coming into view ends a rescue that still had time left",
+            Locomotor.Decide(new TravelFacts(true, true, false, true, true, true, true))
+                == Locomotion.BackOnFoot);
+        Case("but not once the polite rescues have been used up",
+            Locomotor.Decide(new TravelFacts(true, true, false, true, true, false, true))
+                == Locomotion.CoverGround);
+
+        // Escalation: unseen and stalled goes straight to covering ground, because there is
+        // nobody to be polite for.
+        Case("stalled and unobserved starts a rescue without ceremony",
+            Locomotor.Decide(new TravelFacts(false, true, true, false, true, true, true))
+                == Locomotion.BeginRescue);
+        Case("stalled in view tries the gentle option first",
+            Locomotor.Decide(new TravelFacts(false, true, true, true, true, true, true))
+                == Locomotion.PutBackOnNavmesh);
+
+        // Control: the gentle option must not be offered where it cannot work.
+        Case("control: nowhere to stand means no point being put back on the navmesh",
+            Locomotor.Decide(new TravelFacts(false, true, true, true, true, true, false))
+                == Locomotion.BeginRescue);
+
+        // Control: arriving ends a rescue rather than continuing it forever.
+        Case("control: a journey that is over stops being rescued",
+            Locomotor.Decide(new TravelFacts(true, false, false, false, false, false, true))
+                == Locomotion.BackOnFoot);
     }
 
     static void Burst(string what, int consecutive, float expected)

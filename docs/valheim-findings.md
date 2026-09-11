@@ -525,3 +525,35 @@ from `Update` now, which runs whatever the coroutines are doing.
 **Corollary for reading logs:** "Valheim stopped logging for N seconds" is not evidence of a hang
 either. The game logs nothing while nothing happens, and a quiet stretch looks identical to a
 freeze from outside.
+
+---
+
+## `GetPath` snaps BOTH ends, and fails outright if either will not snap
+
+**The single most misleading fault in this codebase so far.** It presents as "walking does not work
+near the colony", and the colony has nothing to do with it.
+
+```csharp
+if (!SnapToNavMesh(ref from, extendedSearchArea: true, settings)) return false;
+if (!SnapToNavMesh(ref to,   !havePath,               settings)) return false;
+```
+
+A destination in terrain nobody has loaded has no navmesh to snap to. So asking for a path to it
+returns **nothing at all** — not a partial path, not a short one, nothing — regardless of how good
+the ground under the villager is. `BaseAI.MoveTo` then takes its "stopped" branch with an empty
+waypoint list and the villager never takes a step.
+
+That is why the symptom looked like local terrain:
+
+- `fullPath=False partialPath=True waypoints=0`, in every direction, at the colony.
+- The same villager walks to a chest six metres away without complaint.
+- It "stalled" at 70m, at 77m, and at 2m from home — all different places, one cause.
+
+**So never ask for a path to somewhere that is not loaded.** Walk towards a point on the route
+that is inside the loaded halo — ours is 45m ahead along the bearing, which is the same waypoint
+that holds the ground open — and judge arrival against the real destination. The far end becomes
+askable only once the villager is near enough for it to be loaded, which is exactly when it
+matters.
+
+Hours went into treating this as bad pathfinding, a bad navmesh, bad terrain, physics, and the
+keep-alive. It was a question that could not be answered, asked over and over.

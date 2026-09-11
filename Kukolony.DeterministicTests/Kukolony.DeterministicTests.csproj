@@ -14,5 +14,6 @@
     <Compile Include="../Kukolony/Villagers/Navigation/Reckoning.cs" Link="Reckoning.cs" />
     <Compile Include="../Kukolony/Villagers/Navigation/Arrival.cs" Link="Arrival.cs" />
     <Compile Include="../Kukolony/Villagers/Navigation/Rescue.cs" Link="Rescue.cs" />
+    <Compile Include="../Kukolony/Villagers/Navigation/Locomotor.cs" Link="Locomotor.cs" />
   </ItemGroup>
 </Project>

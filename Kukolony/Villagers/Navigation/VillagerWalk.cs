@@ -31,8 +31,24 @@ namespace Kukolony.Villagers.Navigation
         /// <summary>How long a path failure is forgiven after taking a new target.</summary>
         private const float GraceSeconds = 3f;
 
-        /// <summary>How much closer counts as having got somewhere.</summary>
-        private const float ProgressStep = .25f;
+        /// <summary>
+        ///     How much closer counts as having got somewhere.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Metres, not centimetres, and that distinction is the whole of it. This was a
+        ///         quarter of a metre, which a villager grinding against a rock at a tenth of a
+        ///         metre per second clears every couple of seconds - so it never looked stalled,
+        ///         never got rescued, and inched one metre in five minutes while every rescue in
+        ///         the ladder stood by waiting for it to stop making progress.
+        ///     </para>
+        ///     <para>
+        ///         Three metres against the fifteen seconds of patience below is a floor of about
+        ///         a fifth of a villager's walking speed. Anything slower than that is not walking
+        ///         badly, it is failing to walk.
+        ///     </para>
+        /// </remarks>
+        private const float ProgressStep = 3f;
 
         /// <summary>
         ///     How long without getting any closer before a walk is called off.
@@ -68,6 +84,24 @@ namespace Kukolony.Villagers.Navigation
         /// </remarks>
         private const float RescueAfterSeconds = 15f;
 
+        /// <summary>
+        ///     How far the next stretch must move before it is worth re-snapping to the navmesh.
+        /// </summary>
+        /// <remarks>
+        ///     The waypoint slides forward as the villager walks, so without a threshold this
+        ///     would ask the navmesh where to stand on every tick - and that question is a real
+        ///     query, not a field read.
+        /// </remarks>
+        private const float LegChange = 5f;
+
+        /// <summary>How far a destination must move to count as a different errand.</summary>
+        /// <remarks>
+        ///     Generous, because a job nudges its target about as it re-reads the world and none
+        ///     of that is a new journey. Only being sent somewhere genuinely else should forgive
+        ///     a villager the trouble it had getting here.
+        /// </remarks>
+        private const float NewErrandDistance = 20f;
+
         /// <summary>How many polite rescues to try before resorting to one a player might see.</summary>
         private const int RescuesBeforeGliding = 2;
 
@@ -84,11 +118,15 @@ namespace Kukolony.Villagers.Navigation
         private bool _hasTarget;
         private float _graceUntil;
         private float _closest;
+        private float _nearest;
         private float _lastProgress;
         private bool _reckoning;
         private float _reckonUntil;
         private int _rescues;
         private int _bursts;
+        private Vector3 _errand = new Vector3(float.MaxValue, 0f, float.MaxValue);
+        private Vector3 _leg = new Vector3(float.MaxValue, 0f, float.MaxValue);
+        private Vector3 _legStanding;
 
         internal VillagerWalk(MonsterAI ai)
         {
@@ -108,7 +146,7 @@ namespace Kukolony.Villagers.Navigation
         internal float StalledFor => _hasTarget ? Mathf.Max(0f, Time.time - _lastProgress) : 0f;
 
         /// <summary>The closest it has managed to get to the current target.</summary>
-        internal float Closest => _closest;
+        internal float Closest => _nearest;
 
         /// <param name="deltaTime">
         ///     The AI tick's own step. Defaulted to the frame time for callers that do not have
@@ -119,6 +157,17 @@ namespace Kukolony.Villagers.Navigation
         internal MoveResult MoveTowards(Vector3 target, float stopDistance, bool run = false,
             float deltaTime = 0f)
         {
+            // A new errand starts the rescue ladder from the bottom. Without this a villager
+            // that needed help getting somewhere arrives with its polite rescues already spent,
+            // and covers the whole way back by gliding - which is how one crossed the last
+            // ninety metres home in plain sight without touching the ground.
+            if (Utils.DistanceXZ(_errand, target) > NewErrandDistance)
+            {
+                _errand = target;
+                _rescues = 0;
+                _bursts = 0;
+            }
+
             _journey.Prepare(target, stopDistance);
 
             // A rescue already under way. Bursts are bounded so that walking is always tried
@@ -126,52 +175,57 @@ namespace Kukolony.Villagers.Navigation
             // updated the stall clock during reckoning it never stopped being stalled - so a
             // villager that escaped one bad patch glided the rest of the way home and reported
             // that it had never come back into view.
-            if (_reckoning)
+            // The decision itself is a pure function with every combination checked, because
+            // getting it wrong is not obvious from reading it: four different versions of this
+            // looked right while leaving a villager walking into a rock, gliding home in plain
+            // sight, or doing neither for five minutes.
+            bool canStand = !_journey.Travelling || _journey.CanStand(_ai.m_character);
+
+            TravelFacts facts = new TravelFacts(
+                rescuing: _reckoning,
+                travelling: _journey.Travelling,
+                burstSpent: Time.time >= _reckonUntil,
+                observed: _journey.Observed(_ai.transform.position),
+                stalled: StalledFor > RescueAfterSeconds,
+                politeRescuesLeft: _rescues < RescuesBeforeGliding,
+                canStand: canStand);
+
+            switch (Locomotor.Decide(facts))
             {
-                if (Time.time < _reckonUntil && _journey.Travelling)
-                {
+                case Locomotion.CoverGround:
+                    if (facts.BurstSpent) _reckonUntil = Time.time + Rescue.BurstSeconds(_bursts);
+
                     VillagerMovement.Stop(_ai);
                     return _journey.Advance(_ai.m_character, target,
                         deltaTime > 0f ? deltaTime : Time.deltaTime)
                         ? MoveResult.Arrived
                         : MoveResult.Moving;
-                }
 
-                // Only hand back to the ground when there is ground to hand back to. Otherwise
-                // keep covering distance: a villager set down where no path can even begin
-                // reports no path forever, and would stand there until something removed it.
-                if (!EndReckoning()) _reckonUntil = Time.time + Rescue.BurstSeconds(_bursts);
-                return MoveResult.Moving;
-            }
+                case Locomotion.BackOnFoot:
+                    _reckoning = false;
+                    _journey.Resume(_ai.m_character);
+                    Forget();
+                    return MoveResult.Moving;
 
-            if (_journey.Travelling && StalledFor > RescueAfterSeconds)
-            {
-                // In view, and the gentle option has not been exhausted: put it back on the
-                // navmesh where it stands. A villager that cannot walk is usually standing
-                // somewhere the navmesh does not reach, and this is a correction of a metre or
-                // two rather than something worth hiding from.
-                if (_journey.Observed(_ai.transform.position) && _rescues < RescuesBeforeGliding)
-                {
-                    // If there is nowhere to stand, putting it back on the navmesh is not a
-                    // rescue and pretending otherwise costs fifteen seconds per attempt.
-                    if (_journey.Resume(_ai.m_character))
-                    {
-                        _rescues++;
-                        Forget();
-                        return MoveResult.Moving;
-                    }
+                case Locomotion.PutBackOnNavmesh:
+                    _rescues++;
+                    _journey.Resume(_ai.m_character);
+                    Forget();
+                    return MoveResult.Moving;
 
+                case Locomotion.BeginRescue:
                     BeginReckoning();
                     return MoveResult.Moving;
-                }
-
-                BeginReckoning();
-                return MoveResult.Moving;
             }
 
             Retarget(target);
 
             float distance = Utils.DistanceXZ(target, _ai.transform.position);
+
+            // Tracked separately from progress: the nearest it has been is useful for reporting
+            // and costs nothing, while what resets the clock has to be a real advance.
+            if (distance < _nearest) _nearest = distance;
+
             if (distance < _closest - ProgressStep)
             {
                 // Real progress, not the first reading of a new journey. Forgetting a route sets
@@ -192,7 +246,26 @@ namespace Kukolony.Villagers.Navigation
                 }
             }
 
-            MoveResult stepped = VillagerMovement.MoveTowards(_ai, _standing,
+            // Walk towards the next stretch of the route, not the far end of it.
+            //
+            // GetPath snaps BOTH ends of a query onto the navmesh and fails outright if either
+            // will not snap. A destination a hundred and sixty metres away in terrain nobody has
+            // loaded has no navmesh to snap to, so asking for a path to it returns nothing at
+            // all - not a partial path, nothing. That is why walking appeared to fail "near the
+            // colony": the ground under the villager was fine, and the question was unanswerable
+            // because of where it ended. The same villager walks to a chest six metres away
+            // without complaint.
+            //
+            // The waypoint is forty-five metres along the bearing and inside the halo this
+            // journey holds open, so it snaps, and the path that comes back is a real one.
+            Vector3 leg = _journey.Travelling ? _journey.Waypoint : target;
+            if (Utils.DistanceXZ(_leg, leg) > LegChange)
+            {
+                _leg = leg;
+                _legStanding = Approach.Standing(_ai, leg);
+            }
+
+            MoveResult stepped = VillagerMovement.MoveTowards(_ai, _legStanding,
                 VillagerMovement.MinimumStopDistance, run);
 
             // Inside the grace, a stop means the throttled pathfinder has not considered this
@@ -221,17 +294,6 @@ namespace Kukolony.Villagers.Navigation
             _reckonUntil = Time.time + Rescue.BurstSeconds(_bursts);
         }
 
-        /// <summary>Hands the villager back to the ground: physics on, feet on the navmesh.</summary>
-        /// <returns>False when there was nowhere to stand, so the rescue must continue.</returns>
-        private bool EndReckoning()
-        {
-            if (!_journey.Resume(_ai.m_character)) return false;
-
-            _reckoning = false;
-            Forget();
-            return true;
-        }
-
         internal void Stop()
         {
             VillagerMovement.Stop(_ai);
@@ -250,6 +312,7 @@ namespace Kukolony.Villagers.Navigation
         {
             _hasTarget = false;
             _closest = float.MaxValue;
+            _nearest = float.MaxValue;
         }
 
         /// <summary>The point being walked to, which is not always the thing being walked at.</summary>
@@ -269,6 +332,7 @@ namespace Kukolony.Villagers.Navigation
 
             _target = target;
             _hasTarget = true;
+            _nearest = float.MaxValue;
 
             // Resolved once per journey, not per tick. HavePath is a real query against the
             // navmesh, and a villager has no reason to ask it twenty times a second about a

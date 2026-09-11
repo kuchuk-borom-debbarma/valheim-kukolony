@@ -205,19 +205,35 @@ namespace Kukolony.Villagers.Navigation
         /// </remarks>
         internal bool Resume(Character body)
         {
-            if (body == null) return false;
-            if (Pathfinding.instance == null) return false;
+            if (!TryFindStanding(body, out Vector3 valid)) return false;
+
+            Place(body, valid, reckoning: false);
+            return true;
+        }
+
+        /// <summary>
+        ///     Whether there is anywhere within reach this villager could stand and walk from.
+        /// </summary>
+        /// <remarks>
+        ///     Asked before deciding, and answered without moving anything, so the decision and
+        ///     the action agree about the world. The alternative - deciding to put a villager
+        ///     back on its feet and only then discovering there is nowhere to put it - is what
+        ///     left one standing still for five minutes, allowed to do neither.
+        /// </remarks>
+        internal bool CanStand(Character body) => TryFindStanding(body, out _);
+
+        private bool TryFindStanding(Character body, out Vector3 point)
+        {
+            point = Vector3.zero;
+            if (body == null || Pathfinding.instance == null) return false;
 
             foreach (float radius in ResumeSearches)
             {
-                if (!Pathfinding.instance.FindValidPoint(out Vector3 valid, body.transform.position,
+                if (Pathfinding.instance.FindValidPoint(out point, body.transform.position,
                         radius, _ai.m_pathAgentType))
                 {
-                    continue;
+                    return true;
                 }
-
-                Place(body, valid, reckoning: false);
-                return true;
             }
 
             return false;

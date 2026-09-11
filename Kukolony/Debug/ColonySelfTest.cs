@@ -1098,6 +1098,21 @@ namespace Kukolony.Debug
                 "control: the overflow chest it came from is emptied of it, not merely copied from",
                 $"leftInOverflow={CountIn(misplaced, "Wood")}");
 
+            // Wait for the villager to actually run out of work before measuring stillness.
+            // Measuring after a fixed delay asked whether the settlement was still, while it was
+            // still legitimately delivering what it had already picked up - so the check failed
+            // on a settlement that was working correctly, which is the worst kind of flake.
+            float settling = 0f;
+            while (settling < 20f && keeper.Activity != "nothing to haul")
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                settling += .5f;
+            }
+
+            report.Check(keeper.Activity == "nothing to haul",
+                "control: the villager ran out of work before stillness was measured",
+                $"doing '{keeper.Activity}' after {settling:0}s");
+
             // Everything is where it belongs. Nothing should move again.
             string before = $"{CountIn(misplaced, "Wood")}/{CountIn(into, "Wood")}";
             yield return new WaitForSecondsRealtime(3f);
