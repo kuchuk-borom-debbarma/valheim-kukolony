@@ -50,7 +50,7 @@ namespace Kukolony.Colonies
                     string persistentId = p.ReadString();
                     result.Add(new StructureRecord { Id = PersistentZdoReference.Resolve(persistentId, saved),
                         PersistentId = persistentId, Name = p.ReadString(), Prefab = p.ReadString(),
-                        Capabilities = (StructureCapability)p.ReadInt() });
+                        Capabilities = (StructureCapability)p.ReadInt() & StructureCapabilities.Known });
                 }
             }
             catch (System.Exception e) { Core.Log.Warning("[colony] invalid structure registry: " + e.Message); }

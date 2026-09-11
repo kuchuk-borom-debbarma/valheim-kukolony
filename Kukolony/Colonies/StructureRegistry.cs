@@ -5,18 +5,6 @@ using UnityEngine;
 
 namespace Kukolony.Colonies
 {
-    [Flags]
-    internal enum StructureCapability
-    {
-        None = 0,
-        Container = 1,
-        Fireplace = 2,
-        Smelter = 4,
-        CookingStation = 8,
-        Fermenter = 16,
-        BeeHive = 32
-    }
-
     /// <summary>A named, persistent reference to a placed (ZNet-backed) structure.</summary>
     /// <summary>
     ///     Whether a registered structure can be used right now.
@@ -142,12 +130,9 @@ namespace Kukolony.Colonies
             capabilities = StructureCapability.None;
             if (candidate == null || candidate.GetComponent<Character>() != null || candidate.GetComponent<ItemDrop>() != null)
                 return false;
-            if (Has<Container>(candidate)) capabilities |= StructureCapability.Container;
-            if (Has<Fireplace>(candidate)) capabilities |= StructureCapability.Fireplace;
-            if (Has<Smelter>(candidate)) capabilities |= StructureCapability.Smelter;
-            if (Has<CookingStation>(candidate)) capabilities |= StructureCapability.CookingStation;
-            if (Has<Fermenter>(candidate)) capabilities |= StructureCapability.Fermenter;
-            if (Has<Beehive>(candidate)) capabilities |= StructureCapability.BeeHive;
+            if (Has<Container>(candidate)) capabilities |= StructureCapability.Storage;
+            if (Has<Smelter>(candidate)) capabilities |= StructureCapability.Processing;
+            if (Has<Bed>(candidate)) capabilities |= StructureCapability.Rest;
             return capabilities != StructureCapability.None;
         }
 

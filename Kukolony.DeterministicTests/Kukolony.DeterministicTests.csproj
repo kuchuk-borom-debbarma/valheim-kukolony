@@ -1,10 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>disable</Nullable></PropertyGroup>
   <!--
-    Pure decision logic is linked in here, without Unity, so a whole behaviour cycle is
-    verified in about a second rather than only inside a four-minute game run. There is
-    nothing to link at the moment: the job system that used this was removed with the rest
-    of the feature layer, and gets rebuilt at roadmap milestone 6. The wiring stays so the
-    first pure logic written after that is covered immediately.
+    Pure decision logic is linked in here, without Unity, so it is verified in about a second
+    rather than only inside a four-minute game run. Files listed here must not reference
+    UnityEngine - that is the whole point, and is why the capability set lives in its own file
+    apart from the registry that probes GameObjects for it.
   -->
+  <ItemGroup>
+    <Compile Include="../Kukolony/Colonies/StructureCapabilities.cs" Link="StructureCapabilities.cs" />
+  </ItemGroup>
 </Project>
