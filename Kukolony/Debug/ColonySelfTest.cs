@@ -61,11 +61,11 @@ namespace Kukolony.Debug
             GameObject chest = Spawn("piece_chest_wood", origin + Vector3.right * 7f);
             StructureRecord chestRecord = Register(colony, chest, "Main storage");
             report.Check(chestRecord != null, "placed ZNet structure registers inside live radius");
-            report.Check(chestRecord != null && (chestRecord.Capabilities & StructureCapability.Container) != 0,
+            report.Check(chestRecord != null && (chestRecord.Capabilities & StructureCapability.Storage) != 0,
                 "container capability is cached");
             report.Check(ColonyOperations.RenameStructure(colony, chestRecord.Id, "Renamed storage") &&
                          colony.State.GetStructures()[0].Name == "Renamed storage", "structure naming persists");
-            report.Check(ColonyOperations.FilterStructures(colony, "renamed", StructureCapability.Container,
+            report.Check(ColonyOperations.FilterStructures(colony, "renamed", StructureCapability.Storage,
                 StructureSort.Name).Count == 1, "structure search and capability filtering");
             report.Check(ColonyOperations.FilterStructures(colony, string.Empty, StructureCapability.None,
                 StructureSort.Status).Count == 1, "structure status sorting retains live records");
@@ -122,6 +122,7 @@ namespace Kukolony.Debug
 
             yield return CheckLifecycle(report, colony, origin);
             CheckRegisterableContainers(report, colony);
+            yield return CheckDurableReference(report, colony, origin);
             yield return CheckZdoLifetime(report, colony);
             yield return CheckOrphanedVillager(report, colony);
             yield return CheckDestroyedColonyLeavesStructures(report, colony, origin);
@@ -546,7 +547,7 @@ namespace Kukolony.Debug
             StructureRecord cartRecord = StructureRegistry.Describe(cart);
             StructureRecord looseRecord = StructureRegistry.Describe(loose);
             bool cartCounts = cartRecord != null &&
-                              (cartRecord.Capabilities & StructureCapability.Container) != 0;
+                              (cartRecord.Capabilities & StructureCapability.Storage) != 0;
             bool sweepFindsIt = StructureRegistry.FindRegisterable(colony)
                 .Exists(record => cartRecord != null && record.Id == cartRecord.Id);
 
@@ -576,6 +577,63 @@ namespace Kukolony.Debug
         ///         since to this peer they are the same situation.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     A durable reference must follow its token, not the raw address stored beside it.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Loading renumbers every ZDO to (1, N) in file order - measured across runs,
+        ///         one villager returned as 1:2605 and 1:2607 for the same object. Records
+        ///         persist the id they last resolved to, so after one reload and any write the
+        ///         blob holds a dense address that the next load hands to a different object.
+        ///         Resolving by that address finds something live and valid and wrong.
+        ///     </para>
+        ///     <para>
+        ///         Checked here rather than across relaunches because the corruption needs a
+        ///         second reload after a write to appear, and the harness runs two launches. A
+        ///         token deliberately paired with another live object's address is the same
+        ///         situation without the wait.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckDurableReference(TestReport report, Colony colony, Vector3 origin)
+        {
+            GameObject chest = Spawn("piece_chest_wood", origin + Vector3.left * 6f);
+            yield return null;
+            if (chest == null || !chest.TryGetComponent(out ZNetView view) || !view.IsValid() ||
+                !colony.TryGetComponent(out ZNetView colonyView) || !colonyView.IsValid())
+            {
+                report.Check(false, "durable-reference check could place its fixture");
+                yield break;
+            }
+
+            view.ClaimOwnership();
+            string token = Core.PersistentZdoReference.Ensure(view.GetZDO());
+            ZDOID chestId = view.GetZDO().m_uid;
+            ZDOID otherId = colonyView.GetZDO().m_uid;
+
+            report.Check(!string.IsNullOrEmpty(token) && chestId != otherId,
+                "control: the fixture has a token and two distinct live objects to confuse",
+                $"token={(string.IsNullOrEmpty(token) ? "none" : "present")} chest={chestId} other={otherId}");
+
+            ZDOID wrongFallback = Core.PersistentZdoReference.Resolve(token, otherId);
+            report.Check(wrongFallback == chestId,
+                "a token outranks a stale address that resolves to the wrong object",
+                $"resolved={wrongFallback} wanted={chestId} decoy={otherId}");
+
+            ZDOID matching = Core.PersistentZdoReference.Resolve(token, chestId);
+            report.Check(matching == chestId,
+                "control: an address that agrees with its token is still trusted",
+                $"resolved={matching}");
+
+            ZDOID noToken = Core.PersistentZdoReference.Resolve(string.Empty, otherId);
+            report.Check(noToken == otherId,
+                "control: with no token the raw address is all there is, and is used",
+                $"resolved={noToken}");
+
+            Release(chest);
+            yield return null;
+        }
+
         private static IEnumerator CheckZdoLifetime(TestReport report, Colony colony)
         {
             GameObject chest = Spawn("piece_chest_wood", colony.transform.position + Vector3.right * 8f);

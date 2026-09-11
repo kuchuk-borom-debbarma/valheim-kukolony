@@ -35,8 +35,32 @@ namespace Kukolony.Core
         {
             if (ZDOMan.instance == null) return ZDOID.None;
             PrepareCache();
-            if (!runtimeFallback.IsNone() && ZDOMan.instance.GetZDO(runtimeFallback) != null)
-                return runtimeFallback;
+            // The raw id is trusted only when there is no token to check it against, or
+            // when the object it finds actually carries that token.
+            //
+            // Without the token check this returned the wrong object outright: handed a
+            // chest's token and another live object's address, it answered with the other
+            // object. Demonstrated by reverting this guard and watching the paired check fail
+            // while its three controls passed - one session, both objects loaded, no reload
+            // involved. Nothing downstream could tell, because the answer resolves and is
+            // valid; it is simply something else.
+            //
+            // Stale addresses are reachable because loading rewrites ZDOIDs: the benchmark's
+            // villager is 597515522:9013 before a save and 1:2605 after it, and records
+            // persist whatever they last resolved to. How often a stale address lands on a
+            // live object has not been measured - the guard costs one string compare and does
+            // not depend on knowing.
+            if (!runtimeFallback.IsNone())
+            {
+                ZDO direct = ZDOMan.instance.GetZDO(runtimeFallback);
+                if (direct != null &&
+                    (string.IsNullOrEmpty(persistentId) ||
+                     direct.GetString(Key, string.Empty) == persistentId))
+                {
+                    return runtimeFallback;
+                }
+            }
+
             if (string.IsNullOrEmpty(persistentId)) return ZDOID.None;
 
             if (Cache.TryGetValue(persistentId, out ZDOID cached))
