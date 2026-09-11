@@ -108,6 +108,78 @@ namespace Kukolony.Villagers
         private Vector3 _errand;
         private bool _onErrand;
 
+        /// <summary>
+        ///     Narrates a journey to the log, for the half of travelling only a person can judge.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Three things are worth a line and nothing else is. <b>Mode changes</b>, because
+        ///         the moment a villager comes into view and stops covering ground unseen is the
+        ///         one most likely to look wrong. <b>Speed actually achieved</b>, measured between
+        ///         reports rather than assumed from a setting - a villager that is technically
+        ///         moving at three centimetres a second has been the answer more than once.
+        ///         <b>Arrival</b>, so "it got there" and "it stopped" are different lines.
+        ///     </para>
+        ///     <para>
+        ///         Silent unless a villager is on a journey longer than the settlement is wide,
+        ///         which does not happen during ordinary work.
+        ///     </para>
+        /// </remarks>
+        private void TraceTravel(Vector3 destination, MoveResult result)
+        {
+            bool travelling = _walk.Travelling;
+            float remaining = Utils.DistanceXZ(transform.position, destination);
+
+            if (!travelling)
+            {
+                if (!_tracing) return;
+
+                _tracing = false;
+                Log.Info($"[travel] {State.Name} finished travelling - {remaining:0}m out, " +
+                         $"'{Activity}'. Walking from here.");
+                return;
+            }
+
+            bool reckoning = _walk.Reckoning;
+
+            if (!_tracing)
+            {
+                _tracing = true;
+                _tracedReckoning = reckoning;
+                _tracedAt = transform.position;
+                _nextTrace = Time.time + TraceSeconds;
+                Log.Info($"[travel] {State.Name} setting off - {remaining:0}m to go, " +
+                         $"{(reckoning ? "unseen" : "walking")}.");
+                return;
+            }
+
+            if (reckoning != _tracedReckoning)
+            {
+                _tracedReckoning = reckoning;
+                string change = reckoning
+                    ? "is out of sight and now covering ground unseen"
+                    : "has come into view and is walking again";
+                Log.Info($"[travel] {State.Name} {change} - {remaining:0}m to go.");
+            }
+
+            if (Time.time < _nextTrace) return;
+
+            float covered = Utils.DistanceXZ(transform.position, _tracedAt);
+            Log.Info($"[travel] {State.Name}: {remaining:0}m to go, " +
+                     $"{covered / TraceSeconds:0.0}m/s {(reckoning ? "unseen" : "walking")}, " +
+                     $"'{Activity}'{(result == MoveResult.PathFailed ? " - STUCK" : string.Empty)}");
+
+            _tracedAt = transform.position;
+            _nextTrace = Time.time + TraceSeconds;
+        }
+
+        private const float TraceSeconds = 3f;
+
+        private bool _tracing;
+        private bool _tracedReckoning;
+        private Vector3 _tracedAt;
+        private float _nextTrace;
+
         /// <summary>Whether this villager is partway through a journey longer than one hop.</summary>
         internal bool IsTravelling => _walk != null && _walk.Travelling;
 
@@ -152,6 +224,7 @@ namespace Kukolony.Villagers
             {
                 MoveResult errand = _walk.MoveTowards(_errand, Navigation.Approach.ToStructure,
                     run: false, deltaTime: deltaTime);
+                TraceTravel(_errand, errand);
                 if (errand == MoveResult.Arrived) _onErrand = false;
                 SetActivity(errand == MoveResult.PathFailed ? "cannot get there" : "travelling");
                 return true;

@@ -40,11 +40,22 @@ namespace Kukolony.Villagers.Navigation
         /// <remarks>
         ///     Generous, because the thing it must not mistake for being stuck is a villager
         ///     waiting at the edge of the built world for the next navmesh tiles - measured at up
-        ///     to fifteen seconds for ground nobody had asked about before. Being slow to give up
-        ///     costs a villager some standing about; being quick to give up costs it every
-        ///     journey longer than the navmesh it started with.
+        ///     to fifteen seconds for ground nobody had asked about before.
         /// </remarks>
         private const float StallSeconds = 20f;
+
+        /// <summary>
+        ///     The same, for a walk that stays inside the settlement.
+        /// </summary>
+        /// <remarks>
+        ///     Patience is only a virtue where the navmesh might still be building. Within a
+        ///     settlement the ground has been walked already, so a villager that is not getting
+        ///     closer is genuinely obstructed and the useful thing is to give up quickly and
+        ///     pick different work. Applying the long patience everywhere made a villager spend
+        ///     twenty seconds failing to reach a chest six metres away, which is most of the
+        ///     time a hauling trip is given.
+        /// </remarks>
+        private const float NearbyStallSeconds = 4f;
 
         private readonly MonsterAI _ai;
         private readonly Journey _journey;
@@ -67,6 +78,9 @@ namespace Kukolony.Villagers.Navigation
         internal Vector3 Waypoint => _journey.Waypoint;
 
         internal bool Travelling => _journey.Travelling;
+
+        /// <summary>Whether it is covering ground unseen rather than walking it.</summary>
+        internal bool Reckoning => _wasReckoning;
 
         /// <summary>How long the villager has been trying without getting closer.</summary>
         internal float StalledFor => _hasTarget ? Mathf.Max(0f, Time.time - _lastProgress) : 0f;
@@ -142,7 +156,8 @@ namespace Kukolony.Villagers.Navigation
             // about a target it has not considered yet and there is no progress to measure.
             if (Time.time < _graceUntil) return MoveResult.Moving;
 
-            return StalledFor < StallSeconds ? MoveResult.Moving : MoveResult.PathFailed;
+            float patience = _journey.Travelling ? StallSeconds : NearbyStallSeconds;
+            return StalledFor < patience ? MoveResult.Moving : MoveResult.PathFailed;
         }
 
         internal void Stop()
