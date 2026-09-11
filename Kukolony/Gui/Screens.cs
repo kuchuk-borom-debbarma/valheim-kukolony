@@ -63,54 +63,39 @@ namespace Kukolony.Gui
             }
 
             List<StructureRecord> structures = state.GetStructures();
-            if (column.TryRow(out Row heading))
+            if (column.TryRow(out Row structuresRow))
             {
-                Widgets.Label(heading, structures.Count == 0
-                    ? "No registered structures"
-                    : $"Registered structures ({structures.Count})", Color.gray);
+                Widgets.Caption(structuresRow, "Structures");
+                Widgets.Caption(structuresRow, structures.Count.ToString(), 80f);
+                Widgets.Button(structuresRow, "Manage", 160f, () => host.Push(new StructureListScreen()));
             }
 
-            foreach (StructureRecord record in structures)
+            // Registering what the player was looking at when the screen opened. Offered only
+            // when there is something to offer: a row reading "Register nothing" would be
+            // worse than the subtitle already saying they were looking at nothing.
+            GameObject looked = host.LookedAt;
+            if (looked != null && column.TryRow(out Row registerRow))
             {
-                if (!column.TryRow(out Row row))
+                string what = StructureRegistry.DisplayName(looked);
+                Widgets.Caption(registerRow, what, 300f);
+                Widgets.Button(registerRow, "Register", 160f, () =>
                 {
-                    continue;
-                }
+                    Report.Say(ColonyOperations.Explain(
+                        ColonyOperations.Register(colony, looked), what, state.Name));
+                    host.Refresh();
+                });
+            }
 
-                Widgets.Caption(row, record.Name, 360f);
-                StructureStatus status = record.StatusIn(colony);
-                Widgets.Label(row, StatusLabel(status), StatusColour(status));
+            if (column.TryRow(out Row nearbyRow))
+            {
+                Widgets.Button(nearbyRow, "Register something nearby", 300f,
+                    () => host.Push(new RegisterNearbyScreen()));
             }
 
             if (column.TryRow(out Row switchRow))
             {
                 Widgets.Button(switchRow, "Switch colony", 200f, () => host.Push(new ColonyListScreen()));
                 Widgets.Button(switchRow, "Widget gallery", 200f, () => host.Push(new GalleryScreen()));
-            }
-        }
-
-        /// <summary>
-        ///     Explicit, because a raw enum name is not a player-facing string and a default
-        ///     branch that returns a plausible one hides the case it failed to handle.
-        /// </summary>
-        private static string StatusLabel(StructureStatus status)
-        {
-            switch (status)
-            {
-                case StructureStatus.Ready: return "ready";
-                case StructureStatus.OutOfReach: return "out of reach";
-                case StructureStatus.NotFound: return "not found";
-                default: return string.Empty;
-            }
-        }
-
-        private static Color StatusColour(StructureStatus status)
-        {
-            switch (status)
-            {
-                case StructureStatus.Ready: return Color.green;
-                case StructureStatus.NotFound: return Color.red;
-                default: return Color.gray;
             }
         }
     }

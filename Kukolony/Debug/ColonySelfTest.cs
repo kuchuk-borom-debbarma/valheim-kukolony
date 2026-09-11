@@ -126,6 +126,7 @@ namespace Kukolony.Debug
             yield return CheckZdoLifetime(report, colony);
             yield return CheckOrphanedVillager(report, colony);
             yield return CheckDestroyedColonyLeavesStructures(report, colony, origin);
+            yield return CheckRegistration(report, colony, origin);
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
 
@@ -578,6 +579,161 @@ namespace Kukolony.Debug
         ///     </para>
         /// </remarks>
         /// <summary>
+        ///     Registering: what a colony accepts, what it refuses, and what it says.
+        /// </summary>
+        /// <remarks>
+        ///     Every claim here is paired, because "it registered" and "it refused" are both
+        ///     easy to produce by accident - a path that refuses everything passes half of
+        ///     these, and a path that accepts everything passes the other half.
+        /// </remarks>
+        private static IEnumerator CheckRegistration(TestReport report, Colony colony, Vector3 origin)
+        {
+            // A bed is the one capability with no prior coverage at all, and naming a prefab
+            // that does not exist gives a silent null that reads as a feature failure - which
+            // has happened here before. So the candidates are tried and the answer reported.
+            GameObject bed = SpawnFirst(origin + Vector3.forward * 4f, "bed", "piece_bed", "bed_wood");
+            GameObject kiln = SpawnFirst(origin + Vector3.forward * 8f, "charcoal_kiln", "smelter");
+            yield return new WaitForSecondsRealtime(.3f);
+
+            report.Check(bed != null && kiln != null,
+                "control: the registration check found a bed and a processing station to use",
+                $"bed={(bed == null ? "none" : Utils.GetPrefabName(bed))} " +
+                $"kiln={(kiln == null ? "none" : Utils.GetPrefabName(kiln))}");
+
+            if (bed != null)
+            {
+                RegisterOutcome outcome = ColonyOperations.Register(colony, bed);
+                StructureRecord record = Recorded(colony, bed);
+                report.Check(outcome == RegisterOutcome.Registered && record != null &&
+                             (record.Capabilities & StructureCapability.Rest) != 0,
+                    "a bed registers as Rest",
+                    $"outcome={outcome} capabilities={(record == null ? "none" : StructureCapabilities.Describe(record.Capabilities))}");
+
+                report.Check(ColonyOperations.Register(colony, bed) == RegisterOutcome.AlreadyHere,
+                    "registering the same structure twice is refused as already registered");
+            }
+
+            if (kiln != null)
+            {
+                RegisterOutcome outcome = ColonyOperations.Register(colony, kiln);
+                StructureRecord record = Recorded(colony, kiln);
+                report.Check(outcome == RegisterOutcome.Registered && record != null &&
+                             (record.Capabilities & StructureCapability.Processing) != 0,
+                    "a charcoal kiln registers as Processing",
+                    $"outcome={outcome} capabilities={(record == null ? "none" : StructureCapabilities.Describe(record.Capabilities))}");
+            }
+
+            // Control: a creature is refused, and refused for being a creature rather than for
+            // being out of reach or unreadable. Standing right beside the hearth so distance
+            // cannot be what rejects it.
+            Villager creature = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (creature != null)
+            {
+                int before = colony.State.GetStructures().Count;
+                RegisterOutcome outcome = ColonyOperations.Register(colony, creature.gameObject);
+                report.Check(outcome == RegisterOutcome.NotUsable &&
+                             colony.State.GetStructures().Count == before,
+                    "control: a creature is refused and nothing is registered",
+                    $"outcome={outcome} explain='{StructureRegistry.Explain(creature.gameObject)}'");
+
+                if (creature.TryGetComponent(out ZNetView creatureView) && creatureView.IsValid())
+                    VillagerLifecycle.Remove(colony, creatureView.GetZDO().m_uid);
+            }
+
+            // Out of reach, with the reason.
+            GameObject distant = Spawn("piece_chest_wood",
+                origin + new Vector3(colony.EffectiveRadius + 14f, 0f, 0f));
+            yield return null;
+            if (distant != null)
+            {
+                RegisterOutcome outcome = ColonyOperations.Register(colony, distant);
+                report.Check(outcome == RegisterOutcome.OutOfReach,
+                    "a structure outside the colony's reach is refused for being out of reach",
+                    $"outcome={outcome}");
+                Release(distant);
+            }
+
+            yield return CheckMoveBetweenColonies(report, colony, origin);
+        }
+
+        /// <summary>
+        ///     A structure belongs to one colony at a time, and changing which says so.
+        /// </summary>
+        private static IEnumerator CheckMoveBetweenColonies(TestReport report, Colony colony, Vector3 origin)
+        {
+            Vector3 where = origin + new Vector3(0f, 0f, -30f);
+            if (ZoneSystem.instance == null || !ZoneSystem.instance.GetSolidHeight(where, out float _))
+            {
+                report.Check(false, "move check found ground for its second hearth");
+                yield break;
+            }
+
+            GameObject spawned = Spawn(ColonyPrefab.PrefabName, where);
+            GameObject chest = Spawn("piece_chest_wood", where + new Vector3(3f, 0f, 0f));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            Colony second = spawned != null ? spawned.GetComponent<Colony>() : null;
+            if (second == null || chest == null)
+            {
+                report.Check(false, "move check kept its second hearth and chest alive");
+                yield break;
+            }
+
+            second.EnsureNamed();
+            RegisterOutcome first = ColonyOperations.Register(second, chest);
+            bool inSecond = Recorded(second, chest) != null;
+            report.Check(first == RegisterOutcome.Registered && inSecond,
+                "control: the chest belonged to the second colony before the move",
+                $"outcome={first}");
+
+            RegisterOutcome moved = ColonyOperations.Register(colony, chest);
+            report.Check(moved == RegisterOutcome.Moved,
+                "registering a structure another colony holds moves it, and says so",
+                $"outcome={moved}");
+            report.Check(Recorded(colony, chest) != null && Recorded(second, chest) == null,
+                "a moved structure is in exactly one colony's list",
+                $"inNew={Recorded(colony, chest) != null} inOld={Recorded(second, chest) != null}");
+
+            if (chest.TryGetComponent(out ZNetView chestView) && chestView.IsValid())
+                colony.RemoveStructure(chestView.GetZDO().m_uid);
+            Release(chest);
+            if (second.TryGetComponent(out ZNetView secondView) && secondView.IsValid())
+            {
+                secondView.ClaimOwnership();
+                ZNetScene.instance.Destroy(second.gameObject);
+            }
+
+            yield return null;
+        }
+
+        /// <summary>The colony's record for an object, or null.</summary>
+        private static StructureRecord Recorded(Colony colony, GameObject target)
+        {
+            if (colony == null || target == null ||
+                !target.TryGetComponent(out ZNetView view) || !view.IsValid()) return null;
+            ZDOID id = view.GetZDO().m_uid;
+            return colony.State.GetStructures().Find(r => r.Id == id);
+        }
+
+        /// <summary>
+        ///     Spawns the first prefab name that exists, and says which. Guessing a prefab name
+        ///     that does not exist produced a silent null once, which read as the feature being
+        ///     broken rather than the fixture being absent.
+        /// </summary>
+        private static GameObject SpawnFirst(Vector3 position, params string[] names)
+        {
+            foreach (string name in names)
+            {
+                if (ZNetScene.instance == null || ZNetScene.instance.GetPrefab(name) == null) continue;
+                return Spawn(name, position);
+            }
+
+            Core.Log.Warning("[Benchmark] none of these prefabs exist: " + string.Join(",", names));
+            return null;
+        }
+
+        /// <summary>
         ///     A durable reference must follow its token, not the raw address stored beside it.
         /// </summary>
         /// <remarks>
@@ -877,10 +1033,26 @@ namespace Kukolony.Debug
             report.Check(valid, prefabName + " exposes verified " + typeof(T).Name + " RPC contract");
         }
 
+        /// <summary>
+        ///     Registers a fixture the way a player does, then names it.
+        /// </summary>
+        /// <remarks>
+        ///     Deliberately not a hand-built record. Constructing one directly skips the claim
+        ///     and the durable token, so the benchmark would exercise a path no player can take
+        ///     and would prove persistence for records that are not the ones the game creates.
+        /// </remarks>
         private static StructureRecord Register(Colony colony, GameObject target, string name)
         {
-            StructureRecord record = MakeRecord(target, name);
-            return record != null && colony.RegisterStructure(record) ? record : null;
+            RegisterOutcome outcome = ColonyOperations.Register(colony, target);
+            if (outcome != RegisterOutcome.Registered && outcome != RegisterOutcome.Moved)
+            {
+                Core.Log.Warning($"[Benchmark] fixture '{name}' was not registered: {outcome}");
+                return null;
+            }
+
+            if (!target.TryGetComponent(out ZNetView view) || !view.IsValid()) return null;
+            ColonyOperations.RenameStructure(colony, view.GetZDO().m_uid, name);
+            return colony.State.GetStructures().Find(r => r.Id == view.GetZDO().m_uid);
         }
 
         private static StructureRecord MakeRecord(GameObject target, string name)

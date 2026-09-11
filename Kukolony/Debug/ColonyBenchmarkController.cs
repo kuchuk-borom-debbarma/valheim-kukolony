@@ -192,6 +192,7 @@ namespace Kukolony.Debug
         {
             // Structures
             "piece_chest_wood", "fire_pit", "smelter", "charcoal_kiln",
+            "bed", "piece_bed", "bed_wood",
             "piece_cookingstation", "fermenter", "piece_beehive", "Cart",
             // Items left lying about by pickup, drop and felling checks
             "Wood", "Flint", "Coal", "CopperOre", "RawMeat", "Honey",

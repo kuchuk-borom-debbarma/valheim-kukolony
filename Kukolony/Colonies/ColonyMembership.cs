@@ -3,6 +3,10 @@ namespace Kukolony.Colonies
     /// <summary>
     ///     The back-pointer every member keeps to its colony.
     ///
+    ///     Used by villagers and by registered structures alike: both answer "whose am I?"
+    ///     the same way, and one mechanism means one place where the ownership rules for
+    ///     writing it have to be right.
+    ///
     ///     Membership is deliberately bidirectional. The colony holds the authoritative
     ///     lists, which is what lets us enumerate members without loading them. Each
     ///     member also records which colony it belongs to, which makes "whose am I?" a

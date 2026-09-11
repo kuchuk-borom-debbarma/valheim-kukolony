@@ -122,8 +122,22 @@ namespace Kukolony.Colonies
             _nview.ClaimOwnership();
             List<StructureRecord> records = State.GetStructures();
             bool removed = records.RemoveAll(r => r.Id == id) > 0;
-            if (removed) State.SetStructures(records);
-            return removed;
+            if (!removed) return false;
+
+            State.SetStructures(records);
+
+            // Clear the structure's own claim to this colony, or it keeps pointing here and a
+            // later attempt to register it elsewhere is refused as belonging to a colony that
+            // no longer lists it. Only if it still points at us - a structure that has since
+            // moved on is not ours to rewrite.
+            ZDO structureZdo = ZDOMan.instance?.GetZDO(id);
+            if (structureZdo != null && ColonyMembership.BelongsTo(structureZdo, Id))
+            {
+                structureZdo.SetOwner(ZDOMan.GetSessionID());
+                ColonyMembership.SetColony(structureZdo, ZDOID.None);
+            }
+
+            return true;
         }
 
         /// <summary>

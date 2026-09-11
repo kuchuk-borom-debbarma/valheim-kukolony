@@ -62,10 +62,22 @@ namespace Kukolony.Colonies
             ZPackage p = new ZPackage(); p.Write(1); p.Write(records.Count);
             foreach (StructureRecord r in records)
             {
-                ZDO zdo = ZDOMan.instance?.GetZDO(r.Id);
-                string persistentId = !string.IsNullOrEmpty(r.PersistentId)
-                    ? r.PersistentId : PersistentZdoReference.Ensure(zdo);
-                p.Write(r.Id); p.Write(persistentId); p.Write(r.Name ?? string.Empty);
+                // Records arrive with their token already minted, by the one path that claims
+                // the object first. Minting here instead would mean rewriting this list - which
+                // renaming a single structure does - claimed ownership of every structure in
+                // the colony at once.
+                //
+                // A record without one is a record built off the registration path. Saying so
+                // is the point: it persists, and it will resolve only while its runtime address
+                // happens to still be right, which is a bug that otherwise surfaces two reloads
+                // later as a reference to somebody else's chest.
+                if (string.IsNullOrEmpty(r.PersistentId))
+                {
+                    Core.Log.Warning($"[colony] structure '{r.Name}' has no durable id; " +
+                                     "it was not registered through ColonyOperations");
+                }
+
+                p.Write(r.Id); p.Write(r.PersistentId ?? string.Empty); p.Write(r.Name ?? string.Empty);
                 p.Write(r.Prefab ?? string.Empty); p.Write((int)r.Capabilities);
             }
             _zdo.Set(StructuresKey, p.GetBase64());

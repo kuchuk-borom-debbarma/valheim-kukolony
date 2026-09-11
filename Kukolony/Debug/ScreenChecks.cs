@@ -163,24 +163,35 @@ namespace Kukolony.Debug
         {
             screen.Close();
             screen.Open(colony, null);
+            screen.Push(new StructureListScreen());
             yield return null;
 
-            string live = StatusBeside(screen, "Renamed storage");
-            string gone = StatusBeside(screen, "Deleted storage");
+            string live = RowBeside(screen, "Renamed storage");
+            string gone = RowBeside(screen, "Deleted storage");
 
-            report.Check(gone == "not found", "a structure that cannot be found says so",
-                $"read '{gone}'");
-            report.Check(live == "ready",
+            report.Check(gone.Contains("not found"), "a structure that cannot be found says so",
+                $"row read '{gone}'");
+            report.Check(live.Contains("ready") && !live.Contains("not found"),
                 "control: a structure that is present reads differently from one that is not",
-                $"read '{live}'");
+                $"row read '{live}'");
+
+            screen.Root(new ColonyHomeScreen());
+            yield return null;
         }
 
         /// <summary>
-        ///     The status drawn on the same row as a named structure. Matched by row position
-        ///     rather than by searching the whole screen for the word, which would pass on any
-        ///     row happening to carry it.
+        ///     Everything drawn on the same row as a named structure.
         /// </summary>
-        private static string StatusBeside(ColonyScreen screen, string name)
+        /// <remarks>
+        ///     Returns the whole row rather than the first cell beside the name. A row now
+        ///     carries a capability as well as a status, and "the first other text on this
+        ///     row" silently became the wrong column the moment that was added - a check that
+        ///     keeps passing while reading something else is worse than one that breaks.
+        ///
+        ///     Still matched by row position, so a word appearing anywhere else on the screen
+        ///     cannot satisfy it.
+        /// </remarks>
+        private static string RowBeside(ColonyScreen screen, string name)
         {
             ScreenAudit.Result built = ScreenAudit.Inspect(screen.Content);
             float y = float.NaN;
@@ -198,16 +209,18 @@ namespace Kukolony.Debug
                 return "<no such row>";
             }
 
+            System.Text.StringBuilder row = new System.Text.StringBuilder();
             foreach (ScreenAudit.Element element in built.Elements)
             {
                 if (Mathf.Abs(element.Rect.center.y - y) < 2f && element.Text != name &&
                     !string.IsNullOrEmpty(element.Text))
                 {
-                    return element.Text;
+                    if (row.Length > 0) row.Append(" | ");
+                    row.Append(element.Text);
                 }
             }
 
-            return "<nothing beside it>";
+            return row.Length == 0 ? "<nothing beside it>" : row.ToString();
         }
 
         /// <summary>

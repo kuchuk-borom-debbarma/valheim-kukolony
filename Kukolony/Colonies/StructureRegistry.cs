@@ -96,9 +96,12 @@ namespace Kukolony.Colonies
                 if (view == null || !view.IsValid()) continue;
                 if (Utils.DistanceXZ(view.transform.position, centre) > radius) continue;
                 if (!TryCapabilities(view.gameObject, out StructureCapability capabilities)) continue;
-                string persistentId = PersistentZdoReference.Ensure(view.GetZDO());
-                if (string.IsNullOrEmpty(persistentId)) continue;
-                found.Add(new StructureRecord { Id = view.GetZDO().m_uid, PersistentId = persistentId,
+                // Deliberately no token here. Minting one requires owning the object, so doing
+                // it while listing would take ownership of - and write a GUID onto - every
+                // chest, cart, smelter and ship within the radius, every time a player opened
+                // the list. A candidate is not a registration.
+                found.Add(new StructureRecord { Id = view.GetZDO().m_uid,
+                    PersistentId = PersistentZdoReference.Get(view.GetZDO()),
                     Name = DisplayName(view.gameObject),
                     Prefab = Utils.GetPrefabName(view.gameObject), Capabilities = capabilities });
             }
@@ -115,11 +118,11 @@ namespace Kukolony.Colonies
         {
             if (candidate == null || !candidate.TryGetComponent(out ZNetView view) || !view.IsValid()) return null;
             if (!TryCapabilities(candidate, out StructureCapability capabilities)) return null;
-            string persistentId = PersistentZdoReference.Ensure(view.GetZDO());
-            if (string.IsNullOrEmpty(persistentId)) return null;
+            // Describing is not registering, so no token is minted and none is required. The
+            // registration path claims the object and mints one deliberately, once.
             return new StructureRecord
             {
-                Id = view.GetZDO().m_uid, PersistentId = persistentId,
+                Id = view.GetZDO().m_uid, PersistentId = PersistentZdoReference.Get(view.GetZDO()),
                 Name = DisplayName(candidate), Prefab = Utils.GetPrefabName(candidate),
                 Capabilities = capabilities
             };
@@ -168,8 +171,8 @@ namespace Kukolony.Colonies
             if (candidate.GetComponent<ItemDrop>() != null) return "is a loose item";
             if (!TryCapabilities(candidate, out StructureCapability capabilities))
                 return "no usable component (children: " + ChildComponents(candidate) + ")";
-            if (string.IsNullOrEmpty(PersistentZdoReference.Ensure(view.GetZDO())))
-                return "not owned, so no durable id could be minted";
+            // Get, never Ensure: a diagnostic that explains why something was refused must not
+            // change the world in the course of answering.
             return string.Empty;
         }
 
