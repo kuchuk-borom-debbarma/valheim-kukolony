@@ -41,6 +41,45 @@ namespace Kukolony.Villagers
         /// <summary>
         ///     Rolls an appearance and writes it to the ZDO. Caller must own the ZDO.
         /// </summary>
+        /// <summary>
+        ///     Forces the rig to draw its equipment again.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         A chest and legs are not attached meshes - they are textures the game sets on
+        ///         the body material (<c>_ChestTex</c>, <c>_LegsTex</c>). The rig this clones
+        ///         renders with the Fallen Warrior shader, which has no such properties, so the
+        ///         clothing had nowhere to land and every villager came out bare no matter what
+        ///         its ZDO said.
+        ///     </para>
+        ///     <para>
+        ///         Repainting the body with the player's material gives those properties a home,
+        ///         but by then <c>VisEquipment</c> has cached the hashes it thinks it has already
+        ///         drawn and returns early. Clearing the cache is what makes it draw them onto
+        ///         the new material.
+        ///     </para>
+        ///     <para>
+        ///         Measured, because none of it was guessable: the ZDO held five complete and
+        ///         distinct appearances while the screen showed a naked villager, and disabling
+        ///         the repaint left it naked <em>and</em> grey - which is what ruled the repaint
+        ///         in as the fix rather than out as the cause.
+        ///     </para>
+        /// </remarks>
+        internal static void Redraw(VisEquipment vis)
+        {
+            if (vis == null) return;
+
+            // A hash no item can have, so the next update sees every slot as changed.
+            const int nothingMatches = -1;
+            vis.m_currentChestItemHash = nothingMatches;
+            vis.m_currentLegItemHash = nothingMatches;
+            vis.m_currentHelmetItemHash = nothingMatches;
+            vis.m_currentShoulderItemHash = nothingMatches;
+            vis.m_currentHairItemHash = nothingMatches;
+            vis.m_currentBeardItemHash = nothingMatches;
+            vis.m_currentUtilityItemHash = nothingMatches;
+        }
+
         internal static void Randomise(VisEquipment vis)
         {
             // Model 0 and 1 are the two player body types.
@@ -86,6 +125,24 @@ namespace Kukolony.Villagers
         ///     a villager in golem armour is.
         /// </remarks>
         private static readonly HashSet<string> Craftable = new HashSet<string>();
+
+        /// <summary>
+        ///     Whether a worn hash belongs to something a player could craft.
+        /// </summary>
+        /// <remarks>
+        ///     Zero counts as craftable because it means "nothing worn", which is a legitimate
+        ///     answer for an optional slot. The check that matters is that a *worn* slot holds
+        ///     something with a recipe - villagers once turned up in golem plate and fenring
+        ///     boots because everything wearable included armour worn by monsters.
+        /// </remarks>
+        internal static bool IsCraftableHash(int hash)
+        {
+            if (hash == 0) return true;
+            EnsureCraftable();
+            foreach (string name in Craftable)
+                if (name.GetStableHashCode() == hash) return true;
+            return false;
+        }
 
         private static void EnsureCraftable()
         {

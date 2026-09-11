@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using Kukolony.Colonies;
 using Kukolony.Gui;
 using UnityEngine;
@@ -128,6 +129,40 @@ namespace Kukolony.Debug
             ScreenAudit.Result picker = ScreenAudit.Inspect(screen.Content);
             report.Check(picker.Clean, "the picker has no layout faults",
                 picker.Clean ? picker.Summary : picker.FirstFault);
+
+            // The villager screens, which were built without an audit entry and shipped a
+            // truncated label on their first run - "something they no longer have" rendered as
+            // "something they no". A screen nobody audits is a screen with no clipping check.
+            screen.Root(new ColonyHomeScreen());
+            screen.Push(new VillagerListScreen());
+            yield return null;
+            ScreenAudit.Result roster = ScreenAudit.Inspect(screen.Content);
+            report.Check(roster.Clean, "the villagers list has no layout faults",
+                roster.Clean ? roster.Summary : roster.FirstFault);
+
+            List<ZDOID> people = colony.State.GetMembers(ColonyMemberKind.Villager);
+            if (people.Count > 0)
+            {
+                screen.Push(new VillagerDetailScreen(people[0]));
+                yield return null;
+                ScreenAudit.Result person = ScreenAudit.Inspect(screen.Content);
+                report.Check(person.Clean, "a villager's screen has no layout faults",
+                    person.Clean ? person.Summary : person.FirstFault);
+
+                screen.ShowPageForTest(1);
+                yield return null;
+                ScreenAudit.Result paged = ScreenAudit.Inspect(screen.Content);
+                report.Check(paged.Clean, "a villager's second page has no layout faults",
+                    paged.Clean ? paged.Summary : paged.FirstFault);
+                screen.ShowPageForTest(0);
+            }
+            else
+            {
+                report.Check(false, "control: there was a villager whose screen could be audited");
+            }
+
+            screen.Root(new ColonyHomeScreen());
+            yield return null;
 
             // The control. Without it a silently empty audit passes forever.
             screen.Push(new BrokenScreen());

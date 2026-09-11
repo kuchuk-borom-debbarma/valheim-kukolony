@@ -165,6 +165,8 @@ namespace Kukolony.Debug
             yield return CheckOutpostStaysLoaded(report, colony);
             Trace(colony, "CheckOutpostStaysLoaded");
             yield return CheckSettingsAndIndex(report, colony, origin);
+            yield return CheckAppearance(report, colony);
+            yield return CheckVillagerLiving(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
@@ -653,6 +655,174 @@ namespace Kukolony.Debug
         ///         since to this peer they are the same situation.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     A villager's bed is its home, and its clothes come off its own bag.
+        /// </summary>
+        private static IEnumerator CheckVillagerLiving(TestReport report, Colony colony, Vector3 origin = default(Vector3))
+        {
+            Villager villager = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+            if (villager == null || !villager.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "living check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            ZDO zdo = view.GetZDO();
+
+            // Home, before any bed.
+            Vector3 spawnHome = villager.ResolveHomeForTest();
+            report.Check(spawnHome != Vector3.zero,
+                "control: a villager without a bed calls its spawn point home",
+                $"home={spawnHome}");
+
+            GameObject bedObject = SpawnFirst(origin + new Vector3(4f, 0f, -8f), "bed", "piece_bed", "bed_wood");
+            yield return null;
+            StructureRecord bed = Register(colony, bedObject, "A bed of one's own");
+            if (bed != null)
+            {
+                VillagerRoster.Assign(colony, bed, new List<string> { who.ToString() });
+                yield return null;
+
+                ZDO bedZdo = ZDOMan.instance.GetZDO(bed.Id);
+                Vector3 bedHome = villager.ResolveHomeForTest();
+                report.Check(bedZdo != null &&
+                             Utils.DistanceXZ(bedHome, bedZdo.GetPosition()) < 1f,
+                    "a villager given a bed calls the bed home",
+                    $"home={bedHome} bed={(bedZdo == null ? "none" : bedZdo.GetPosition().ToString())}");
+            }
+            else
+            {
+                report.Check(false, "living check could register a bed");
+            }
+
+            // Clothes come off the bag, and only off the bag.
+            Container bag = VillagerInventory.Attach(villager.gameObject, view);
+            Add(bag.GetInventory(), "ArmorLeatherChest");
+            yield return null;
+
+            ItemDrop.ItemData worn = null;
+            foreach (ItemDrop.ItemData item in VillagerInventory.Stored(zdo).GetAllItems())
+                if (item?.m_dropPrefab != null &&
+                    Utils.GetPrefabName(item.m_dropPrefab) == "ArmorLeatherChest") worn = item;
+
+            report.Check(worn != null, "control: the villager owns the chestpiece before wearing it");
+
+            if (worn != null && villager.TryGetComponent(out VisEquipment vis))
+            {
+                VillagerWardrobe.Set(vis, WearSlot.Chest, worn);
+                yield return null;
+                report.Check(VillagerWardrobe.Worn(zdo, WearSlot.Chest) ==
+                             "ArmorLeatherChest".GetStableHashCode(),
+                    "a villager wears what it is given, and the ZDO says so",
+                    $"worn={VillagerWardrobe.Worn(zdo, WearSlot.Chest)}");
+
+                VillagerWardrobe.Set(vis, WearSlot.Chest, null);
+                yield return null;
+                report.Check(VillagerWardrobe.Worn(zdo, WearSlot.Chest) == 0,
+                    "control: a slot can be bared again",
+                    $"worn={VillagerWardrobe.Worn(zdo, WearSlot.Chest)}");
+            }
+
+            // The item must never be in the creature's own inventory: the game strips that on
+            // load, which would silently undress a villager - and later, disarm one.
+            Humanoid humanoid = villager.GetComponent<Humanoid>();
+            report.Check(humanoid == null || humanoid.GetInventory() == null ||
+                         humanoid.GetInventory().NrOfItems() == 0,
+                "nothing is put in the creature's own inventory, which the game strips on load",
+                $"items={(humanoid?.GetInventory()?.NrOfItems() ?? -1)}");
+
+            VillagerLifecycle.Remove(colony, who);
+            if (bedObject != null) Release(bedObject);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Villagers are dressed, and they do not all look the same.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The roadmap's "done when" is five villagers who each look different, and
+        ///         until now nothing asserted any of it - the only appearance check was that a
+        ///         boolean flag survived a reload. A photograph then showed a villager wearing
+        ///         nothing but a loincloth while the code that dresses them had already run, and
+        ///         the missing assertion is exactly why that survived four milestones.
+        ///     </para>
+        ///     <para>
+        ///         Asserted on the ZDO values rather than on the live component: that is what
+        ///         persists and replicates, and the component's fields are documented to trail
+        ///         the ZDO by several frames while models attach.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckAppearance(TestReport report, Colony colony)
+        {
+            const int wanted = 5;
+            List<ZDOID> born = new List<ZDOID>();
+            for (int i = 0; i < wanted; i++)
+            {
+                Villager villager = VillagerLifecycle.Spawn(colony);
+                if (villager != null && villager.TryGetComponent(out ZNetView view) && view.IsValid())
+                    born.Add(view.GetZDO().m_uid);
+            }
+
+            // Appearance is rolled on the first owned tick, not at spawn.
+            yield return new WaitForSecondsRealtime(1f);
+
+            report.Check(born.Count == wanted, "control: five villagers were spawned to compare",
+                $"spawned={born.Count}");
+
+            List<string> looks = new List<string>();
+            int dressed = 0;
+            int uncraftable = 0;
+            foreach (ZDOID id in born)
+            {
+                ZDO zdo = ZDOMan.instance.GetZDO(id);
+                if (zdo == null) continue;
+
+                int chest = zdo.GetInt(ZDOVars.s_chestItem, 0);
+                int legs = zdo.GetInt(ZDOVars.s_legItem, 0);
+                if (chest != 0 && legs != 0) dressed++;
+                if (!VillagerAppearance.IsCraftableHash(chest) || !VillagerAppearance.IsCraftableHash(legs))
+                    uncraftable++;
+
+                looks.Add($"{zdo.GetInt(ZDOVars.s_modelIndex, 0)}/{chest}/{legs}/" +
+                          $"{zdo.GetInt(ZDOVars.s_hairItem, 0)}/{zdo.GetInt(ZDOVars.s_beardItem, 0)}");
+            }
+
+            report.Check(dressed == born.Count,
+                "every villager is wearing a chest and legs",
+                $"dressed={dressed} of {born.Count}; looks={string.Join(" ", looks.ToArray())}");
+
+            report.Check(uncraftable == 0,
+                "control: nothing worn is an item a player could not craft",
+                $"uncraftable={uncraftable}");
+
+            // Across the set, not per villager: five identical rolls would pass any check that
+            // only asked whether each one had something on.
+            HashSet<string> distinct = new HashSet<string>(looks);
+            report.Check(distinct.Count > 1,
+                "villagers do not all look the same",
+                $"distinct={distinct.Count} of {looks.Count}");
+
+            // Control: the same villager read twice is the same villager, so "different" above
+            // means different people rather than a value that changes on every read.
+            if (born.Count > 0)
+            {
+                ZDO first = ZDOMan.instance.GetZDO(born[0]);
+                string again = first == null ? string.Empty :
+                    $"{first.GetInt(ZDOVars.s_modelIndex, 0)}/{first.GetInt(ZDOVars.s_chestItem, 0)}/" +
+                    $"{first.GetInt(ZDOVars.s_legItem, 0)}/{first.GetInt(ZDOVars.s_hairItem, 0)}/" +
+                    $"{first.GetInt(ZDOVars.s_beardItem, 0)}";
+                report.Check(again == looks[0],
+                    "control: re-reading one villager gives the same appearance",
+                    $"first='{looks[0]}' again='{again}'");
+            }
+
+            foreach (ZDOID id in born) VillagerLifecycle.Remove(colony, id);
+            yield return new WaitForSecondsRealtime(.3f);
+        }
+
         /// <summary>
         ///     Settings stick to the record, and the index answers from them.
         /// </summary>

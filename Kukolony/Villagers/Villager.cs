@@ -110,6 +110,7 @@ namespace Kukolony.Villagers
 
             // Identity first: everything below reports by name, and taming used to log
             // an empty one because it ran before the villager had been named.
+            EnsureSoftEdges();
             EnsureIdentity();
             EnsureHumanSkin();
             EnsureAppearance();
@@ -313,6 +314,41 @@ namespace Kukolony.Villagers
         ///     Gives a new villager its name and home. Runs once - afterwards both are on
         ///     the ZDO and survive save, reload and ownership transfer.
         /// </summary>
+        /// <summary>
+        ///     Stops a villager shoving the player around.
+        /// </summary>
+        /// <remarks>
+        ///     A villager is built on a creature rig and keeps its colliders, so standing in a
+        ///     doorway it pushes the player out of the way - which reads as the settlement
+        ///     fighting you rather than living with you. Collisions against the world are left
+        ///     alone, so villagers still walk on the ground and not through walls.
+        ///
+        ///     Re-checked rather than done once at spawn: the player can die, respawn and
+        ///     arrive with new colliders, and a villager loaded long before them never met the
+        ///     old ones.
+        /// </remarks>
+        private void EnsureSoftEdges()
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null || ReferenceEquals(player, _ignoringPlayer)) return;
+
+            Collider[] mine = GetComponentsInChildren<Collider>(true);
+            Collider[] theirs = player.GetComponentsInChildren<Collider>(true);
+            foreach (Collider a in mine)
+            {
+                if (a == null || a.isTrigger) continue;
+                foreach (Collider b in theirs)
+                {
+                    if (b == null || b.isTrigger) continue;
+                    Physics.IgnoreCollision(a, b, true);
+                }
+            }
+
+            _ignoringPlayer = player;
+        }
+
+        private Player _ignoringPlayer;
+
         private void EnsureIdentity()
         {
             VillagerState state = State;
@@ -377,8 +413,25 @@ namespace Kukolony.Villagers
         /// <summary>
         ///     Where this villager idles when no queued job can run.
         /// </summary>
+        /// <summary>
+        ///     Where this villager belongs: its bed if it has one, else where it was born.
+        /// </summary>
+        /// <remarks>
+        ///     Read from the colony's record rather than from a loaded bed, so a villager can
+        ///     walk home to a bed whose zone has not been instantiated. The spawn point remains
+        ///     the answer for anyone unassigned, which is what it has always been.
+        /// </remarks>
         private Vector3 ResolveHome(VillagerState state)
         {
+            Colonies.Colony colony = Colonies.Colony.FindFor(_nview.GetZDO());
+            if (colony != null)
+            {
+                Colonies.StructureRecord bed =
+                    Colonies.SettlementIndex.BedOf(colony, _nview.GetZDO().m_uid);
+                ZDO bedZdo = bed == null ? null : ZDOMan.instance?.GetZDO(bed.Id);
+                if (bedZdo != null && bedZdo.IsValid()) return bedZdo.GetPosition();
+            }
+
             return state.Home;
         }
 

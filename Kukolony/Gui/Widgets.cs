@@ -134,10 +134,11 @@ namespace Kukolony.Gui
         ///     The chosen value is shown on the row itself, so a screen full of these reads as
         ///     a summary rather than as a row of identical "Choose" buttons.
         /// </remarks>
-        internal static void Choice(Row row, string label, string chosen, Action onOpen)
+        internal static void Choice(Row row, string label, string chosen, Action onOpen,
+            float width = ControlWidth)
         {
             Caption(row, label);
-            Button(row, string.IsNullOrEmpty(chosen) ? "Choose..." : chosen, ControlWidth, onOpen);
+            Button(row, string.IsNullOrEmpty(chosen) ? "Choose..." : chosen, width, onOpen);
         }
 
         internal static Text Title(Transform parent, string text) =>

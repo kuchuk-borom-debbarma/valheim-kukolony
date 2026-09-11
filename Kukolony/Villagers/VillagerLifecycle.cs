@@ -41,7 +41,11 @@ namespace Kukolony.Villagers
                 return null;
             }
 
-            Vector3 position = SpawnPoint(colony);
+            if (!TrySpawnPoint(colony, out Vector3 position))
+            {
+                Core.Report.Say("There is no solid ground beside the hearth to put a villager on.");
+                return null;
+            }
 
             // Instantiate directly rather than ZNetScene.SpawnObject, which broadcasts an
             // RPC to everyone. ZNetView.Awake creates the ZDO and we become its owner.
@@ -121,17 +125,35 @@ namespace Kukolony.Villagers
         ///     snapped onto a cart, a boat, or another creature. Falls back to the hearth,
         ///     which is on real ground by definition.
         /// </summary>
-        private static Vector3 SpawnPoint(Colony colony)
+        /// <summary>
+        ///     Where a new villager stands, and a complaint when that cannot be established.
+        /// </summary>
+        /// <remarks>
+        ///     Uses the reporting <c>GetSolidHeight</c> overload: the plain one returns the
+        ///     height it was given when the ray misses, which would put a villager in mid-air,
+        ///     and the reporting form also refuses colliders with a rigidbody so nobody spawns
+        ///     onto a cart or a boat.
+        ///
+        ///     A miss used to fall back to the hearth in silence. That is the worst place for
+        ///     silence in this file: the spawn point becomes the villager's home on its first
+        ///     tick and is permanent, so a miss is a villager who will walk to the wrong place
+        ///     forever, and nothing said so.
+        /// </remarks>
+        private static bool TrySpawnPoint(Colony colony, out Vector3 position)
         {
             Vector3 hearth = colony.transform.position;
-            Vector3 position = hearth + colony.transform.forward * 3f;
+            position = hearth + colony.transform.forward * 3f;
+
             if (ZoneSystem.instance != null &&
                 ZoneSystem.instance.GetSolidHeight(position, out float ground))
             {
                 position.y = ground + .2f;
-                return position;
+                return true;
             }
-            return hearth;
+
+            Log.Warning($"[villager] no solid ground beside '{colony.State.Name}' at {position}; " +
+                        "refusing to spawn rather than making that spot a permanent home");
+            return false;
         }
 
         /// <summary>Spills a loaded villager's bag where it stands.</summary>

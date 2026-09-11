@@ -9,7 +9,28 @@ namespace Kukolony.Villagers
     /// </summary>
     internal static class VillagerNames
     {
-        private static readonly string[] Pool =
+        private static List<string> _gamePool;
+
+        /// <summary>
+        ///     Replaces the written pool with the game's own names.
+        /// </summary>
+        /// <remarks>
+        ///     Taken off the rig before the component holding them is stripped. The written
+        ///     list stays as the fallback rather than being deleted: a game update that renames
+        ///     or removes that component should cost a colony its variety of names, not its
+        ///     ability to name anyone at all.
+        /// </remarks>
+        internal static void UseGamePool(List<string> names)
+        {
+            if (names == null || names.Count == 0) return;
+            _gamePool = new List<string>(names);
+        }
+
+        private static string[] Pool => _gamePool != null && _gamePool.Count > 0
+            ? _gamePool.ToArray()
+            : Written;
+
+        private static readonly string[] Written =
         {
             "Bjorn", "Sigrun", "Hakon", "Astrid", "Ivar", "Freydis", "Olaf", "Thora",
             "Leif", "Gudrun", "Erik", "Solveig", "Ragnar", "Ingrid", "Sten", "Hilda",

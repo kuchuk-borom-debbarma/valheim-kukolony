@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Reflection;
 using Jotunn.Configs;
 using Jotunn.Entities;
 using Jotunn.Managers;
@@ -93,10 +94,12 @@ namespace Kukolony.Villagers
             }
 
             RemoveIfPresent<CharacterDrop>(prefab);
+            HarvestNames(prefab);
             RemoveIfPresent<WarriorNames>(prefab);
             RemoveIfPresent<NpcTalk>(prefab);
             Deghost(prefab);
             ClearInheritedCombatGear(humanoid);
+            WearLikeAPlayer(prefab);
 
             // Enforce colony persistence even if vanilla changes the source prefab.
             Log.Info($"Base ZNetView: persistent={nview.m_persistent} type={nview.m_type} distant={nview.m_distant}");
@@ -157,6 +160,90 @@ namespace Kukolony.Villagers
         ///         assets is how the last few asset-shaped problems here started.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     Takes the game's own names off the rig before the component carrying them goes.
+        /// </summary>
+        /// <remarks>
+        ///     The roadmap asks for names from the game's pool rather than a list written by
+        ///     hand, and the rig arrives with one - but the component is stripped, so the names
+        ///     have to be read first or they leave with it.
+        ///
+        ///     Read by reflection because <c>WarriorNames</c> is absent from the decompiled
+        ///     reference while being present in the shipped assembly, which is the third time
+        ///     that reference has been found stale. Whatever is found is reported, so the shape
+        ///     is answered by the build rather than assumed from a decompile that does not have
+        ///     it.
+        /// </remarks>
+        private static void HarvestNames(GameObject prefab)
+        {
+            WarriorNames names = prefab.GetComponentInChildren<WarriorNames>(true);
+            if (names == null)
+            {
+                Log.Info("[villager] the rig carries no WarriorNames; keeping the written pool");
+                return;
+            }
+
+            // Only the two name arrays. The component also holds m_prefixes and m_suffixes,
+            // which the game combines with a name rather than using alone - taking every
+            // string field gathered 370 "names", most of them fragments like a suffix, and
+            // would have produced villagers called "the Bold". Found by logging the shape
+            // instead of assuming it, which is why the field names are still reported.
+            List<string> found = new List<string>();
+            foreach (FieldInfo field in names.GetType()
+                         .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                Log.Info($"[villager] WarriorNames.{field.Name} : {field.FieldType.Name}");
+                if (field.Name != "m_maleNames" && field.Name != "m_femaleNames") continue;
+
+                if (field.GetValue(names) is IEnumerable<string> strings)
+                {
+                    foreach (string name in strings)
+                        if (!string.IsNullOrWhiteSpace(name)) found.Add(name.Trim());
+                }
+            }
+
+            if (found.Count == 0)
+            {
+                Log.Warning("[villager] WarriorNames held no readable names; keeping the written pool");
+                return;
+            }
+
+            VillagerNames.UseGamePool(found);
+            Log.Info($"[villager] took {found.Count} name(s) from the game's own pool");
+        }
+
+        /// <summary>
+        ///     Makes the rig render what it is wearing.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <c>VisEquipment.UpdateVisuals</c> applies the body model, the skin and hair
+        ///         colours, and reads the hair and beard hashes from the ZDO <em>only</em> when
+        ///         <c>m_isPlayer</c> is set. The source rig is a creature, so it is not - which
+        ///         meant a villager wrote a complete appearance to its ZDO and then rendered
+        ///         bald and bare.
+        ///     </para>
+        ///     <para>
+        ///         That is why the data looked right everywhere it was checked: the hashes were
+        ///         all there, all distinct, all craftable. Only a photograph disagreed. The flag
+        ///         is reported rather than assumed, because it is asset data the managed
+        ///         assembly cannot answer for.
+        ///     </para>
+        /// </remarks>
+        private static void WearLikeAPlayer(GameObject prefab)
+        {
+            VisEquipment vis = prefab.GetComponentInChildren<VisEquipment>(true);
+            if (vis == null)
+            {
+                Log.Error("[villager] the rig has no VisEquipment; it cannot be dressed");
+                return;
+            }
+
+            Log.Info($"[villager] VisEquipment.m_isPlayer was {vis.m_isPlayer}, " +
+                     $"bodyModel={(vis.m_bodyModel == null ? "none" : vis.m_bodyModel.name)}");
+            vis.m_isPlayer = true;
+        }
+
         private static void Deghost(GameObject prefab)
         {
             List<string> removed = new List<string>();

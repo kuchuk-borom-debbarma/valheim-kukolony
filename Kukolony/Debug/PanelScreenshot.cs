@@ -139,6 +139,24 @@ namespace Kukolony.Debug
             }
 
             screen.Root(new ColonyHomeScreen());
+            screen.Push(new VillagerListScreen());
+            yield return new WaitForSecondsRealtime(.4f);
+            yield return Capture("colony-screen-villagers.png");
+
+            List<ZDOID> people = colony.State.GetMembers(ColonyMemberKind.Villager);
+            if (people.Count > 0)
+            {
+                screen.Push(new VillagerDetailScreen(people[0]));
+                yield return new WaitForSecondsRealtime(.4f);
+                yield return Capture("colony-screen-villager.png");
+            }
+            else
+            {
+                Log.Error("[Screenshot] no villager to photograph a detail screen for");
+                _captureFailed = true;
+            }
+
+            screen.Root(new ColonyHomeScreen());
             screen.Push(new RegisterNearbyScreen());
             yield return new WaitForSecondsRealtime(.4f);
             yield return Capture("colony-screen-register-nearby.png");
@@ -253,6 +271,24 @@ namespace Kukolony.Debug
             subject.transform.position = spot;
             subject.transform.rotation = Quaternion.LookRotation(eye.position - spot);
             yield return new WaitForSecondsRealtime(1f);
+
+            // Say which figure is which, and what it is wearing.
+            //
+            // The shot contains the player as well as the villager on purpose, and nothing in
+            // it says so - which is how I spent several runs diagnosing the player's bare chest
+            // as a villager bug, and wrote "villagers are undressed" into two documents. The
+            // villager stands to the RIGHT of frame; the centre figure is the player. The log
+            // line below is what the image has to be read against.
+            if (subject.TryGetComponent(out ZNetView subjectView) && subjectView.IsValid())
+            {
+                ZDO zdo = subjectView.GetZDO();
+                Log.Info($"[Screenshot] colony-villager.png: the villager is the RIGHT figure, " +
+                         $"name='{subject.DisplayName()}' model={zdo.GetInt(ZDOVars.s_modelIndex, 0)} " +
+                         $"chest={zdo.GetInt(ZDOVars.s_chestItem, 0)} legs={zdo.GetInt(ZDOVars.s_legItem, 0)} " +
+                         $"helmet={zdo.GetInt(ZDOVars.s_helmetItem, 0)} cape={zdo.GetInt(ZDOVars.s_shoulderItem, 0)} " +
+                         $"hair={zdo.GetInt(ZDOVars.s_hairItem, 0)}; the centre figure is the player");
+            }
+
             yield return Capture("colony-villager.png");
         }
 

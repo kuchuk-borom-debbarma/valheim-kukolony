@@ -53,7 +53,8 @@ namespace Kukolony.Gui
             if (column.TryRow(out Row people))
             {
                 Widgets.Caption(people, "Villagers");
-                Widgets.Label(people, state.CountMembers(ColonyMemberKind.Villager).ToString());
+                Widgets.Caption(people, state.CountMembers(ColonyMemberKind.Villager).ToString(), 80f);
+                Widgets.Button(people, "Manage", 160f, () => host.Push(new VillagerListScreen()));
             }
 
             if (column.TryRow(out Row reach))
