@@ -171,13 +171,13 @@ namespace Kukolony.Villagers
             // so the question has to be asked while it is still alive.
             Vector2s standingIn = ZoneSystem.GetZone(transform.position);
             bool zoneHeld = KeepAlive.KeepAliveZones.Contains(standingIn);
-            bool zoneSkipped = KeepAlive.Patches.ZDOManKeepAlivePatch.WasSkipped(standingIn);
+            bool appended = KeepAlive.Patches.ZDOManKeepAlivePatch.AppendedFrom(standingIn);
             bool allowed = _nview != null && _nview.IsValid() &&
                            KeepAlive.LoadAllowlist.Contains(_nview.GetZDO().GetPrefab());
 
             Log.Info($"[travel] {State.Name}: {remaining:0}m to go, " +
                      $"{covered / TraceSeconds:0.0}m/s {(reckoning ? "unseen" : "walking")}, " +
-                     $"'{Activity}' zoneHeld={zoneHeld} skipped={zoneSkipped} allowed={allowed}" +
+                     $"'{Activity}' zoneHeld={zoneHeld} appended={appended} allowed={allowed}" +
                      (result == MoveResult.PathFailed ? " - STUCK" : string.Empty));
 
             _tracedAt = transform.position;

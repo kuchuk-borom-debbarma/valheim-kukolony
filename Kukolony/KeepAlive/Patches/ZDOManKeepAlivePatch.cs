@@ -38,9 +38,26 @@ namespace Kukolony.KeepAlive.Patches
         ///     by reading, because the reference decompile is a different build from the one
         ///     installed.
         /// </remarks>
-        private static readonly HashSet<Vector2s> Skipped = new HashSet<Vector2s>();
+        private static readonly HashSet<Vector2s> Appended = new HashSet<Vector2s>();
 
-        internal static bool WasSkipped(Vector2s zone) => Skipped.Contains(zone);
+        /// <summary>
+        ///     Our own visited-sector set, deliberately not the game's.
+        /// </summary>
+        /// <remarks>
+        ///     <c>ZDOMan.FindObjects</c> requires a set of sectors already visited and skips any
+        ///     that are in it. Handing it <c>m_visitedSectorIndices</c> - the game's own, which
+        ///     vanilla has just finished filling in during the call we are a postfix to - means
+        ///     every sector vanilla looked at is one we cannot enumerate. For a zone vanilla
+        ///     visited but chose to put nothing in the near list, our append therefore finds
+        ///     nothing to add and says nothing about it, and the objects there are destroyed.
+        ///
+        ///     Cleared per pass, so we still do not append the same zone twice ourselves.
+        /// </remarks>
+        private static readonly HashSet<ZoneSystem.SectorIndex> Visited =
+            new HashSet<ZoneSystem.SectorIndex>();
+
+        /// <summary>Whether anything was actually appended from this zone in the last pass.</summary>
+        internal static bool AppendedFrom(Vector2s zone) => Appended.Contains(zone);
 
         /// <summary>
         ///     True only while ZNetScene.CreateDestroyObjects is on the stack. Harmony
@@ -57,7 +74,8 @@ namespace Kukolony.KeepAlive.Patches
             private static void Prefix()
             {
                 _inCreateDestroy = true;
-                Skipped.Clear();
+                Appended.Clear();
+                Visited.Clear();
             }
 
             // Finalizer rather than Postfix: it runs even if the original throws, so an
@@ -108,21 +126,18 @@ namespace Kukolony.KeepAlive.Patches
             /// </summary>
             private static void Append(ZDOMan zdoMan, Vector2s zone, List<ZDO> destination)
             {
-                if (!ModConfig.KeepAliveFilterObjects.Value || !LoadAllowlist.IsReady)
-                {
-                    zdoMan.FindObjects(zone, destination, zdoMan.m_visitedSectorIndices);
-                    return;
-                }
-
                 Buffer.Clear();
-                zdoMan.FindObjects(zone, Buffer, zdoMan.m_visitedSectorIndices);
+                zdoMan.FindObjects(zone, Buffer, Visited);
+                if (Buffer.Count == 0) return;
 
+                bool filter = ModConfig.KeepAliveFilterObjects.Value && LoadAllowlist.IsReady;
                 foreach (ZDO zdo in Buffer)
                 {
-                    if (zdo != null && LoadAllowlist.Contains(zdo.GetPrefab()))
-                    {
-                        destination.Add(zdo);
-                    }
+                    if (zdo == null) continue;
+                    if (filter && !LoadAllowlist.Contains(zdo.GetPrefab())) continue;
+
+                    destination.Add(zdo);
+                    Appended.Add(zone);
                 }
             }
         }

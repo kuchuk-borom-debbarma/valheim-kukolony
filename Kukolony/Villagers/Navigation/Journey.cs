@@ -160,7 +160,7 @@ namespace Kukolony.Villagers.Navigation
                 next.y = here.y;
             }
 
-            Place(body, next);
+            Place(body, next, reckoning: true);
             return remaining - step <= 0f;
         }
 
@@ -169,17 +169,36 @@ namespace Kukolony.Villagers.Navigation
         /// </summary>
         internal void Resume(Character body)
         {
-            if (body == null || Pathfinding.instance == null) return;
+            if (body == null) return;
 
-            if (Pathfinding.instance.FindValidPoint(out Vector3 valid, body.transform.position,
+            if (Pathfinding.instance != null &&
+                Pathfinding.instance.FindValidPoint(out Vector3 valid, body.transform.position,
                     ResumeSearch, _ai.m_pathAgentType))
             {
-                Place(body, valid);
+                Place(body, valid, reckoning: false);
+                return;
             }
+
+            // Hand physics back even when there was nowhere better to stand, or the villager
+            // walks around weightless for the rest of its life.
+            if (body.m_body != null) body.m_body.isKinematic = false;
         }
 
-        private static void Place(Character body, Vector3 position)
+        private static void Place(Character body, Vector3 position, bool reckoning)
         {
+            // Physics off while covering ground unseen, and on again the moment it walks.
+            //
+            // Setting a position every tick and letting the character controller resolve it is
+            // a fight the controller wins: at the first slope the villager was pushed back
+            // exactly as far as it was moved, and sat at 0.0m/s for five minutes insisting it
+            // was travelling. Nobody can see this happen - that is the precondition for
+            // reckoning at all - so there is nothing to be gained by colliding with scenery,
+            // and everything to be lost.
+            if (body.m_body != null && body.m_body.isKinematic != reckoning)
+            {
+                body.m_body.isKinematic = reckoning;
+            }
+
             // Both, and in this order. Moving only the transform lets the rigidbody drag the
             // character back next physics step; moving only the body leaves everything that
             // reads the transform a frame behind.

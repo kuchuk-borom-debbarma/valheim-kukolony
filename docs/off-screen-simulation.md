@@ -191,7 +191,46 @@ so read them at runtime rather than assuming.
 
 ---
 
-## Open: a travelling villager unloads and does not come back
+## Fixed: never hand `FindObjects` the game's own visited-sector set
+
+**This is the one that made a travelling villager vanish**, and it is invisible by inspection.
+
+`ZDOMan.FindObjects(zone, list, visitedSectorIndices)` skips any sector already in the set it is
+given. The keep-alive append passed `zdoMan.m_visitedSectorIndices` — *the game's own*, which
+vanilla has just finished filling in during the very call we postfix. So every sector vanilla
+looked at was one we could not enumerate. For a zone vanilla visited but chose to put **nothing**
+in the near list, our append therefore found nothing to add, said nothing about it, and everything
+in it was destroyed.
+
+The symptom: a villager walking away from its settlement unloaded at about a hundred metres, every
+run, while reporting `zoneHeld=True allowed=True`. The halo was right, the allowlist was right, the
+record was right, and the append was quietly enumerating an empty set.
+
+Use a private set, cleared per `CreateDestroyObjects` pass, so the append is independent of
+vanilla's bookkeeping while still not appending the same zone twice. Measured: `unloadedTimes` went
+from 1-and-never-returns to **0**.
+
+## Unobserved movement must turn physics off
+
+Dead reckoning sets a position every tick. The character controller resolves it, and on any slope
+it wins: the villager was pushed back exactly as far as it was moved and sat at **0.0 m/s** for
+five minutes insisting it was travelling.
+
+So the rigidbody goes kinematic while covering ground unseen, and back the moment it walks again.
+Nobody can see this happen — that is the precondition for reckoning at all — so there is nothing
+to gain by colliding with scenery and a whole journey to lose.
+
+## Open: travel is reliable but slow
+
+**Status: no longer loses villagers; does not yet complete a journey in reasonable time.**
+
+With both fixes above, a villager sent 160m covers about 117m in 300s without ever unloading. That
+is roughly **0.39 m/s** against a walking speed of 1.6 — so it is advancing about a quarter as
+often as it should. The arithmetic is right (`Reckoning.StepLength` is unit-tested and the AI delta
+is passed correctly), which points at how often `TryTakeOver` runs for a villager far from the
+player rather than at what it does when it runs.
+
+The benchmark check fails on purpose while this is true.
 
 **Status: reproducible, automated, unfixed.** The benchmark check
 `a villager sent out to open country beyond the settlement arrives` fails on purpose while this
