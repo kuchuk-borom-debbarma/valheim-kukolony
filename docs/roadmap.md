@@ -158,9 +158,12 @@ indistinguishable from one that inspects nothing.
 
 ---
 
-## Milestone 3 — Registration
+## Milestone 3 — Registration — **done**
 
 Turning a thing in the world into something the settlement uses.
+
+Verified 11 September 2026. See [structure-registry.md](structure-registry.md) for the built
+result and [ui.md](ui.md) for the screens.
 
 ### What may be registered
 
@@ -210,10 +213,17 @@ resolves to nothing — this cost four benchmark runs to find and is not to be r
 - **Registering requires being inside the radius.** Reach is what a settlement can use.
 - **Falling out of radius does not deregister.** The structure goes dormant, stays listed,
   and says so. It comes back when the settlement reaches it again.
-- **Removal happens on positive evidence only.** Measured: an unloaded structure still
-  resolves, and a destroyed one does not and is additionally listed as dead. So a lookup
-  failing already means destroyed. A record is never dropped because something could not be
-  found — walking away from an outpost must not delete its configuration.
+- **Removal happens on positive evidence only.** A record is dropped when the game's own dead
+  list says the object was destroyed, and never because a lookup failed — walking away from an
+  outpost must not delete its configuration.
+
+  This is the line that contradicted "smash it and watch the record go" below, and the
+  reconciliation is that dead-listed goes and merely-absent stays. Two corrections came out of
+  building it: the dead list is **server-only**, so the reaper does not exist for joining
+  clients and fails closed; and it is **cleared on world load rather than pruned**, so
+  destruction is evidence only within the session that saw it. A structure smashed while nobody
+  was logged in is never reaped, which makes the manual Remove the common path rather than the
+  corner case.
 - **A structure may belong to one colony at a time.** Registering it elsewhere moves it, and
   says so.
 - **Names default to what the game calls the thing**, not to its prefab: rows reading
@@ -224,6 +234,29 @@ resolves to nothing — this cost four benchmark runs to find and is not to be r
 You look at a chest, register it, see it listed as Storage; walk out of range and watch it go
 dormant rather than vanish; smash it and watch the record go; and try to register a boar and
 be told why not.
+
+**Result.** All of it. A bed registers as Rest and a kiln as Processing — neither had ever been
+checked, only containers had. A creature is refused *as a creature*, which needed a fix nobody
+had noticed: the look-at ray did not include the character layers, so pointing at a boar
+answered "nothing in reach" and the roadmap's own acceptance case was unreachable.
+
+Two things found here outranked the milestone.
+
+`PersistentZdoReference.Resolve` trusted the raw runtime address whenever it resolved to
+anything, without checking the object carried the token being resolved — so it returned live,
+valid, entirely unrelated objects. Fixed first, and demonstrated by removing the guard and
+watching a paired check fail while its three controls passed.
+
+And the plan's own ownership step was wrong: claiming before minting in the *listing* paths
+would have taken ownership of every chest, cart, smelter and ship within the radius each time a
+player opened the list, and claimed every record at once on any rename. Minting is now one
+deliberate act at registration.
+
+The reaper is the only thing in the mod that deletes a player's configuration, so its control
+matters more than the feature: a record pointing at an id the world never issued — unresolvable
+and not dead-listed, exactly how an unloaded outpost looks to a peer that cannot see it — must
+survive every sweep. Making the reaper delete on absence alone fails that control, which is how
+the safety argument was demonstrated rather than asserted.
 
 ---
 

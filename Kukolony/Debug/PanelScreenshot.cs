@@ -89,8 +89,59 @@ namespace Kukolony.Debug
             yield return new WaitForSecondsRealtime(.4f);
             yield return Capture("colony-screen-picker.png");
 
+            screen.Root(new ColonyHomeScreen());
+            screen.Push(new StructureListScreen());
+            yield return new WaitForSecondsRealtime(.4f);
+            yield return Capture("colony-screen-structures.png");
+
+            // The detail screen is photographed on a named subject chosen exactly, not on
+            // whichever record happens to sort first - index-based selection photographed the
+            // wrong subject once already.
+            StructureRecord subject = colony.State.GetStructures()
+                .Find(r => r.Name == "Renamed storage");
+            if (subject != null)
+            {
+                screen.Push(new StructureDetailScreen(subject.PersistentId, subject.Id));
+                yield return new WaitForSecondsRealtime(.4f);
+                yield return Capture("colony-screen-structure.png");
+            }
+            else
+            {
+                Log.Error("[Screenshot] no named structure to photograph");
+                _captureFailed = true;
+            }
+
+            // Something for the list to offer. Everything nearby is registered by the time
+            // this runs, so without a fresh candidate this photographs "nothing left to
+            // register" - true, and evidence of nothing. A screenshot must frame its subject.
+            GameObject candidate = Spawn("piece_chest_wood",
+                colony.transform.position + new Vector3(4f, 0f, 4f));
+            GameObject secondCandidate = Spawn("piece_chest_wood",
+                colony.transform.position + new Vector3(-4f, 0f, 4f));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            screen.Root(new ColonyHomeScreen());
+            screen.Push(new RegisterNearbyScreen());
+            yield return new WaitForSecondsRealtime(.4f);
+            yield return Capture("colony-screen-register-nearby.png");
+
+            Discard(candidate);
+            Discard(secondCandidate);
+            yield return null;
+
             screen.Close();
             yield return null;
+        }
+
+        /// <summary>
+        ///     Removes a fixture this phase spawned. Ownership first - destroying something we
+        ///     do not own is a silent no-op, and the leftover would be registerable next run.
+        /// </summary>
+        private static void Discard(GameObject target)
+        {
+            if (target == null) return;
+            if (target.TryGetComponent(out ZNetView view) && view.IsValid()) view.ClaimOwnership();
+            ZNetScene.instance.Destroy(target);
         }
 
         private static List<PickerScreen.Option> Items(string filter)

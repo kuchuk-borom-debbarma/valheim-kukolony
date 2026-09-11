@@ -25,8 +25,26 @@ the game has stopped instantiating, so **a lookup that fails already means destr
 `ZDOMan.m_deadZDOs` confirms it independently but no bookkeeping of our own is required.
 
 Consequence: a colony may safely delete a record when its lookup fails — but the rule adopted
-is stricter, *never infer destruction from absence*, because the dead list is pruned over time
-and the cost of being wrong is deleting an outpost's configuration.
+is stricter, *never infer destruction from absence*, because the cost of being wrong is deleting
+an outpost's configuration.
+
+**Two corrections to the above, found while building the reaper.**
+
+*The dead list is server-only.* `m_deadZDOs` is written inside an `IsServer()` branch, so on a
+joining client it is always empty. Anything reading it must be server-gated or it silently does
+nothing — which is the safe direction, but it means the feature does not exist for clients.
+
+*It is cleared on world load, not pruned by time.* The earlier note that it "is pruned over
+time" was asserted rather than measured, and is wrong for this build. The consequence is the
+opposite of what that implied: within a session the list is reliable, but destruction is never
+evidence across a reload, so a structure smashed while nobody was logged in is never reaped and
+must be removed by hand.
+
+*The id you check matters.* A record loaded from disk carries last session's address. It
+resolves through its token while the object lives, and the moment the object dies that lookup
+fails and resolution falls back to the stale address — which is not the id the game listed as
+dead. Anything reaping must remember where each record was last seen alive this session, or it
+never fires for records it did not create, while looking correct because new ones reap fine.
 
 Note that vanilla does not fully trust this either: `CreatureSpawner` pairs the check with an
 `alive_time` heartbeat so a wrong answer only delays a respawn.
@@ -35,11 +53,29 @@ Neither earlier Kuku mod made this distinction; both treated a missing *instance
 loaded" and teleported to it, and the newer one's answer to the whole problem was a comment
 requiring players to install a third-party chunk loader.
 
+## A durable reference must outrank the address beside it
+
+`Resolve` returned the raw runtime id whenever that id resolved to *anything*, without checking
+the object it found carried the token being resolved. Handed a chest's token and another live
+object's address, it answered with the other object — one session, both loaded, no reload
+involved. Demonstrated by removing the guard and watching the paired check fail while its three
+controls passed.
+
+Stale addresses are reachable because **loading rewrites ZDOIDs**: the benchmark's villager is
+`597515522:9013` before a save and `1:2605` after it, and records persist whatever they last
+resolved to. How often a stale address lands on a live object was not measured; the guard is one
+string compare and does not depend on knowing.
+
 ## Durable references need ownership to mint
 
 A cross-session reference is a token written **on the target's ZDO**. `PersistentZdoReference.Ensure`
 returns empty for a ZDO this peer does not own, because a token written by a non-owner is
 discarded on the next sync.
+
+Which makes *where* you mint a design decision, not a detail. Minting while merely listing
+candidates takes ownership of everything listed — every chest, cart, smelter and ship in the
+radius, each time a player opens the list — and minting inside a whole-list writer claims every
+record at once on any edit. Mint once, at the deliberate act, on the one object.
 
 A reference minted without ownership **looks fine for the rest of the session** — the raw
 runtime ZDOID still resolves — and fails only after a reload, when loading renumbers it. This

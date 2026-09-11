@@ -45,7 +45,6 @@ namespace Kukolony
         /// <summary>Development aid. Off by default so it never fires for a normal install.</summary>
         internal static ConfigEntry<bool> DebugSpawnEnabled { get; private set; }
         internal static ConfigEntry<KeyCode> ColonyScreenHotkey { get; private set; }
-        internal static ConfigEntry<KeyCode> MarkStructureHotkey { get; private set; }
 
         /// <summary>One-shot prefab diagnostic. Replaces the acceptance test for that run.</summary>
         internal static ConfigEntry<bool> DebugProbeEnabled { get; private set; }
@@ -149,17 +148,12 @@ namespace Kukolony
                 nameof(DebugSpawnEnabled),
                 false,
                 "Enable the Ctrl+Shift+K hotkey that spawns a colony-less villager in front of you. "
-                + "Development aid for the unassigned-villager path; players add villagers "
-                + "from the hearth's Members tab, which this does not affect.");
+                + "Development aid for the unassigned-villager path, which this does not affect.");
 
             ColonyScreenHotkey = config.Bind(
                 "1 - Colony", nameof(ColonyScreenHotkey), KeyCode.C,
                 "Press this key (outside chat) to open the colony screen on the nearest colony.");
 
-            MarkStructureHotkey = config.Bind(
-                "1 - Colony", nameof(MarkStructureHotkey), KeyCode.G,
-                "Look at a container, station or cart and press this key to register it to the "
-                + "nearest colony, or to remove it again. Says what happened either way.");
 
             DebugProbeEnabled = config.Bind(
                 "9 - Development",

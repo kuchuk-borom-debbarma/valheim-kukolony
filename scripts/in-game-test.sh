@@ -119,7 +119,7 @@ run_stage create
 run_stage reload
 
 if [ "${BENCHMARK_SCREENSHOTS:-true}" = "true" ]; then
-  expected='colony-villager.png colony-screen-home.png colony-screen-gallery.png colony-screen-paged.png colony-screen-picker.png'
+  expected='colony-villager.png colony-screen-home.png colony-screen-gallery.png colony-screen-paged.png colony-screen-picker.png colony-screen-structures.png colony-screen-structure.png colony-screen-register-nearby.png'
   for image in $expected; do [ -s "$OUTPUT/$image" ] || { echo "missing screenshot: $image"; exit 1; }; done
 fi
 mkdir -p /Users/kuku/Desktop/kukolony

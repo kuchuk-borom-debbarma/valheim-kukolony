@@ -83,6 +83,27 @@ Rendering is destroy-and-rebuild, never diffing. A colony changes underneath the
 several directions — other players, villagers, the world — and a diff that is wrong shows stale
 state convincingly.
 
+## The structure screens
+
+Three, reached from the colony screen:
+
+- **Structures** — everything registered: name, what it is, status, and a way in. Paged.
+- **A structure** — its name (editable), what it registered as, its status, the prefab behind
+  it, and Remove. Keyed on the durable token rather than the runtime address, because the
+  address is only valid while the object stays loaded and this screen outlives that.
+- **Register nearby** — everything within reach that could be registered, searchable, each row
+  saying what it *would become*.
+
+Registering what the player was looking at is a row on the colony screen itself, offered only
+when there is something to offer. Both routes call `ColonyOperations.Register`, so neither can
+accept what the other refuses, and both report the outcome — including refusal and why.
+
+**Remove is a footgun on a client and is worded as one.** A structure that was never replicated
+to this peer reads "not found" there, identically to one that was destroyed. The button says
+"Remove anyway" and the row says the structure may still exist, because a player hand-deleting a
+live outpost's records is the same loss the *never infer destruction from absence* rule exists
+to prevent, just routed through a person.
+
 ## Saying things
 
 `Core.Report.Say` is the one place the mod tells the player what happened, including refusal

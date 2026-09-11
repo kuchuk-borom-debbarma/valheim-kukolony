@@ -524,9 +524,15 @@ Settled, with the reason.
   disagree: on the **host**, an unloaded object still resolves, so a failed lookup does mean
   destroyed ([valheim-findings.md](valheim-findings.md)). The rule stands anyway, for a
   different reason than it was written for. A multiplayer **client** is only told about part
-  of the world, so absence there is ordinary rather than evidence; and the dead list the host
-  could corroborate with is pruned over time. So: absence may drive *behaviour*, which is
-  reversible if it turns out to be wrong, and must never drive *deletion*, which is not.
+  of the world, so absence there is ordinary rather than evidence. So: absence may drive
+  *behaviour*, which is reversible if it turns out to be wrong, and must never drive
+  *deletion*, which is not.
+
+  Milestone 3 gave this a second worked example. Structure records are removed only when the
+  game's own dead list says the object was destroyed — never because a lookup failed. The
+  earlier claim here that the dead list "is pruned over time" was wrong: it is cleared on world
+  load and not pruned, so destruction is evidence only within the session that saw it. Anything
+  smashed while nobody was logged in is never reaped, and the player removes it by hand.
 
   Milestone 1's orphaned villager is the worked example — it stops and says it has no colony,
   and does not clear its own membership.
