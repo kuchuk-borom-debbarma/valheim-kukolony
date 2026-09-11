@@ -31,6 +31,8 @@ namespace Kukolony.Villagers
         private Character _character;
         private ZNetView _nview;
         private VisEquipment _visEquipment;
+        private Navigation.VillagerWalk _walk;
+        private VillagerAnimation _animation;
         private Container _bag;
 
         private bool _pathFailureReported;
@@ -116,6 +118,8 @@ namespace Kukolony.Villagers
             EnsureAppearance();
             EnsureTamed();
 
+            if (TryWork()) return true;
+
             // A villager whose hearth was destroyed has nowhere to belong. Walking to
             // where the hearth used to be would look like ordinary behaviour, so it stops
             // and says what is wrong instead.
@@ -172,6 +176,11 @@ namespace Kukolony.Villagers
             }
 
             TryGetComponent(out _visEquipment);
+
+            // Both hold state for this villager alone, so they are built once here rather
+            // than looked up per tick.
+            _walk = new Navigation.VillagerWalk(_ai);
+            _animation = new VillagerAnimation(gameObject);
             return true;
         }
 
@@ -394,6 +403,81 @@ namespace Kukolony.Villagers
         ///     walk home to a bed whose zone has not been instantiated. The spawn point remains
         ///     the answer for anyone unassigned, which is what it has always been.
         /// </remarks>
+        /// <summary>
+        ///     Runs the job at the front of this villager's queue, if it has one.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Returns false when there is no work, so the villager falls through to going
+        ///         home — an empty queue is idle, not an error.
+        ///     </para>
+        ///     <para>
+        ///         Deciding is throttled; walking is not. A job that yields is asked again after
+        ///         a pause rather than on the next tick, so a settlement with nothing to do
+        ///         costs almost nothing. Movement still runs at the full rate, because a
+        ///         villager that thinks twenty times a second and walks five would move in
+        ///         visible steps.
+        ///     </para>
+        /// </remarks>
+        private bool TryWork()
+        {
+            Colonies.Colony colony = Colonies.Colony.FindFor(_nview.GetZDO());
+            if (colony == null) return false;
+
+            if (Time.time < _nextWorkTick) return _working;
+
+            VillagerState state = State;
+            List<Jobs.JobDefinition> jobs = colony.State.GetJobs();
+            Jobs.JobDefinition job = Jobs.QueueRunner.Current(state, jobs);
+            if (job == null)
+            {
+                _working = false;
+                return false;
+            }
+
+            Jobs.JobResult result = Run(colony, job, state, out string doing);
+            Jobs.QueueRunner.Apply(state, jobs, result);
+
+            // Only a yield backs off. Everything else is progress, and progress should not be
+            // made to wait.
+            if (result == Jobs.JobResult.Skipped) _nextWorkTick = Time.time + IdlePauseSeconds;
+
+            SetActivity(doing);
+            _working = true;
+            return true;
+        }
+
+        private Jobs.JobResult Run(Colonies.Colony colony, Jobs.JobDefinition job,
+            VillagerState state, out string doing)
+        {
+            switch (job.Kind)
+            {
+                case Jobs.JobKind.Haul:
+                    return Jobs.Haul.HaulJob.Tick(new Jobs.Haul.HaulContext
+                    {
+                        Villager = this,
+                        Colony = colony,
+                        Bag = _bag,
+                        Walk = _walk,
+                        Animation = _animation,
+                        Job = job,
+                        State = state
+                    }, out doing);
+
+                default:
+                    // Work with no engine is work somebody has not finished adding. Failing
+                    // loudly beats a villager standing still for a reason nothing reports.
+                    doing = "I do not know how to do that";
+                    return Jobs.JobResult.Failed;
+            }
+        }
+
+        /// <summary>How long to wait before asking a job that had nothing to do.</summary>
+        private const float IdlePauseSeconds = .5f;
+
+        private float _nextWorkTick;
+        private bool _working;
+
         private Vector3 ResolveHome(VillagerState state)
         {
             Colonies.Colony colony = Colonies.Colony.FindFor(_nview.GetZDO());

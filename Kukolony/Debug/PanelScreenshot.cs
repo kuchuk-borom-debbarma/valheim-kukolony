@@ -94,11 +94,21 @@ namespace Kukolony.Debug
             yield return new WaitForSecondsRealtime(.4f);
             yield return Capture("colony-screen-structures.png");
 
-            // The detail screen is photographed on a named subject chosen exactly, not on
-            // whichever record happens to sort first - index-based selection photographed the
-            // wrong subject once already.
+            // The detail screen brings its own subject rather than borrowing one, for the
+            // same reason the register-nearby capture spawns its candidates: a photograph must
+            // frame what it claims to show. Naming an existing fixture made this capture depend
+            // on that chest outliving every check in the run, and the reaper legitimately
+            // removes a structure something else destroyed - so the picture went missing and
+            // failed the phase for a reason that had nothing to do with it. Choosing "whatever
+            // is registered" instead was no better: it landed on the same kiln the settings
+            // capture uses, and the storage settings stopped being photographed at all.
+            GameObject portrait = Spawn("piece_chest_wood", colony.transform.position + new Vector3(0f, 0f, 5f));
+            yield return new WaitForSecondsRealtime(.3f);
+            if (portrait != null) ColonyOperations.Register(colony, portrait);
+
             StructureRecord subject = colony.State.GetStructures()
-                .Find(r => r.Name == "Renamed storage");
+                .FindLast(r => (r.Capabilities & StructureCapability.Storage) != 0 &&
+                               r.StatusIn(colony) == StructureStatus.Ready);
             if (subject != null)
             {
                 screen.Push(new StructureDetailScreen(subject.PersistentId, subject.Id));
@@ -107,7 +117,7 @@ namespace Kukolony.Debug
             }
             else
             {
-                Log.Error("[Screenshot] no named structure to photograph");
+                Log.Error("[Screenshot] the chest spawned for the detail capture did not register");
                 _captureFailed = true;
             }
 
@@ -163,6 +173,11 @@ namespace Kukolony.Debug
 
             Discard(candidate);
             Discard(secondCandidate);
+            if (portrait != null)
+            {
+                colony.RemoveStructure(subject != null ? subject.Id : ZDOID.None);
+                Discard(portrait);
+            }
             yield return null;
 
             screen.Close();

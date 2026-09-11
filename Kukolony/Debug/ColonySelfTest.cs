@@ -169,6 +169,7 @@ namespace Kukolony.Debug
             yield return CheckAppearance(report, colony);
             yield return CheckVillagerLiving(report, colony, origin);
             yield return CheckJobQueue(report, colony);
+            yield return CheckHauling(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
@@ -657,6 +658,138 @@ namespace Kukolony.Debug
         ///         since to this peer they are the same situation.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     A villager picks something off the ground and puts it where it belongs.
+        /// </summary>
+        /// <remarks>
+        ///     The first end-to-end proof that the settlement does work: the decision table,
+        ///     selection, claiming, walking, the manual take and the deposit, all together
+        ///     against a real chest and a real dropped item.
+        /// </remarks>
+        private static IEnumerator CheckHauling(TestReport report, Colony colony, Vector3 origin)
+        {
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(6f, 0f, 6f));
+            yield return null;
+            StructureRecord store = Register(colony, chest, "Wood shed");
+            if (store == null)
+            {
+                report.Check(false, "haul check could register a chest");
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, store.Id, s => s.Accepts = new List<string> { "Wood" });
+
+            // Dropped between the villager and the chest, well inside the colony's reach.
+            Vector3 where = origin + new Vector3(3f, 0f, 3f);
+            if (ZoneSystem.instance.GetSolidHeight(where, out float ground)) where.y = ground + .5f;
+            // Instantiated rather than dropped through ItemDrop.DropItem: a prefab's item
+            // data has no m_dropPrefab until it has been in an inventory, and DropItem
+            // instantiates exactly that - so the call throws, which killed the coroutine and
+            // stalled the whole phase rather than failing a check.
+            GameObject prefab = ObjectDB.instance.GetItemPrefab("Wood");
+            ItemDrop dropped = null;
+            if (prefab != null)
+            {
+                GameObject spawned = UnityEngine.Object.Instantiate(prefab, where, Quaternion.identity);
+                if (spawned.TryGetComponent(out dropped)) dropped.SetStack(5);
+            }
+
+            report.Check(dropped != null, "control: there is wood on the ground to haul",
+                $"dropped={(dropped == null ? "none" : "yes")}");
+            if (dropped == null) yield break;
+
+            List<JobDefinition> jobs = new List<JobDefinition>
+            {
+                new JobDefinition { Id = "haul", Name = "Haul", Kind = JobKind.Haul, Repeat = 8 }
+            };
+            colony.State.SetJobs(jobs);
+
+            Villager hauler = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (hauler == null || !hauler.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "haul check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "haul" });
+
+            // Plant a garment rather than relying on what this villager happened to be born
+            // wearing - clothing is rolled, so asserting on it would pass or fail by luck.
+            // A bag item that is not this trip's cargo must never be delivered: clothing lives
+            // in the same bag as the goods, and a hauler that shipped "the bag" would file its
+            // own shirt in the chest. That shipped once.
+            // Attach is idempotent and returns the bag already hanging off the villager. Asked
+            // for by name rather than with GetComponent, which finds nothing: the container
+            // lives on a child object, and a null bag here made this control pass by default.
+            Container haulerBag = VillagerInventory.Attach(hauler.gameObject, view);
+            GameObject garment = ObjectDB.instance.GetItemPrefab("ArmorLeatherChest");
+            if (haulerBag != null && garment != null && garment.TryGetComponent(out ItemDrop garmentDrop))
+            {
+                // Item data taken straight off a prefab has no m_dropPrefab - the field is
+                // filled in when an item passes through an inventory - so a clone of it has no
+                // identity and nothing can name it. The same gap made picked-up ground items
+                // unhaulable.
+                ItemDrop.ItemData planted = garmentDrop.m_itemData.Clone();
+                planted.m_dropPrefab = garment;
+                haulerBag.GetInventory().AddItem(planted);
+                VillagerInventory.Persist(haulerBag, view);
+            }
+
+            report.Check(haulerBag != null && Carrying.Cargo(haulerBag.GetInventory(), "ArmorLeatherChest").Count > 0,
+                "haul check could plant a garment on the villager to test against");
+
+            // Long enough to walk a few metres, pick up and deliver. Reported as what actually
+            // happened rather than just pass or fail, because "it did not finish" and "it never
+            // started" are different problems.
+            int inChest = 0;
+            string doing = string.Empty;
+            for (int attempt = 0; attempt < 60 && inChest == 0; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                inChest = StructureInventory.Count(store.Id, "Wood");
+                doing = hauler.Activity;
+            }
+
+            // Say what it is holding and what the settlement thinks of it. "Nowhere to put
+            // this" is the same sentence whether the villager grabbed the wrong thing, the
+            // chest stopped being an answer, or the item lost its identity - and those are
+            // three different bugs.
+            System.Text.StringBuilder holding = new System.Text.StringBuilder();
+            Inventory carried = VillagerInventory.Stored(view.GetZDO());
+            foreach (ItemDrop.ItemData held in carried.GetAllItems())
+            {
+                string name = held?.m_dropPrefab == null ? "<no prefab>" : Utils.GetPrefabName(held.m_dropPrefab);
+                holding.Append(name).Append('x').Append(held?.m_stack ?? 0).Append(' ');
+            }
+
+            report.Check(inChest > 0,
+                "a villager hauls loose wood into the chest that asked for it",
+                $"inChest={inChest} doing='{doing}' holding='{holding}' " +
+                $"shedStatus={store.StatusIn(colony)} " +
+                $"woodGoesTo={SettlementIndex.WhereDoesItGo(colony, "Wood", origin).Count} place(s)");
+
+            report.Check(ZDOMan.instance.GetZDO(view.GetZDO().m_uid) != null,
+                "control: the villager survived the job rather than being destroyed by it");
+
+            int keptOnPerson = 0;
+            if (haulerBag != null)
+            {
+                keptOnPerson = Carrying.Cargo(haulerBag.GetInventory(), "ArmorLeatherChest").Count;
+            }
+
+            report.Check(keptOnPerson > 0,
+                "control: hauling delivers its cargo and not the villager's own belongings",
+                $"garment still on the villager={keptOnPerson} " +
+                $"garmentsInChest={StructureInventory.Count(store.Id, "ArmorLeatherChest")}");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.State.SetJobs(new List<JobDefinition>());
+            if (chest != null) { colony.RemoveStructure(store.Id); Release(chest); }
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
         /// <summary>
         ///     The queue: order, repeats, yielding, missing jobs, and claims.
         /// </summary>

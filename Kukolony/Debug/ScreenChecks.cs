@@ -201,7 +201,18 @@ namespace Kukolony.Debug
             screen.Push(new StructureListScreen());
             yield return null;
 
-            string live = RowBeside(screen, "Renamed storage");
+            // Whatever is actually ready, rather than a fixture by name. Naming one made this
+            // check depend on that chest surviving every other check in the run - and the
+            // reaper legitimately removes a structure that something else destroyed.
+            string ready = string.Empty;
+            foreach (StructureRecord record in colony.State.GetStructures())
+            {
+                if (record.StatusIn(colony) != StructureStatus.Ready) continue;
+                ready = record.Name;
+                break;
+            }
+
+            string live = ready.Length == 0 ? "<nothing ready>" : RowBeside(screen, ready);
             // The unfindable record, not a destroyed one: a destroyed structure's record is
             // reaped, so it is no longer on screen to read. What must render as "not found" is
             // the record whose object cannot be located and is not known to be dead.

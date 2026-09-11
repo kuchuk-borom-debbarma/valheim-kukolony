@@ -41,6 +41,7 @@ namespace Kukolony.Villagers
         private static readonly int ClaimedSinceKey = "kukolony.job.claimed".GetStableHashCode();
         private static readonly KeyValuePair<int, int> DestinationKey = ZDO.GetHashZDOID("kukolony.job.destination");
         private static readonly int DestinationTokenKey = "kukolony.job.destination.token".GetStableHashCode();
+        private static readonly int CargoKey = "kukolony.job.cargo.v1".GetStableHashCode();
 
         private readonly ZDO _zdo;
 
@@ -123,6 +124,46 @@ namespace Kukolony.Villagers
         internal ZDOID Destination => _zdo == null ? ZDOID.None : PersistentZdoReference.Resolve(
             _zdo.GetString(DestinationTokenKey, string.Empty), _zdo.GetZDOID(DestinationKey));
 
+        /// <summary>
+        ///     What this trip is carrying: the prefab names taken as cargo, comma separated.
+        /// </summary>
+        /// <remarks>
+        ///     Cargo is recorded rather than inferred from the bag, because a villager's bag is
+        ///     also its wardrobe - equipment is a mirror of the bag, so the clothes it is
+        ///     wearing are bag items too. A hauler that read the bag picked up its own leather
+        ///     chestpiece, found that no chest in the settlement had asked for one, and
+        ///     reported that it had nowhere to put what it was carrying. It was wearing it.
+        ///
+        ///     The name is only a hint, in the usual way: it counts as cargo when the bag
+        ///     actually holds some, and a trip whose goods were taken out from under it goes
+        ///     back to choosing rather than delivering nothing.
+        /// </remarks>
+        internal string Cargo => _zdo?.GetString(CargoKey, string.Empty) ?? string.Empty;
+
+        internal void SetCargo(string manifest) => _zdo.Set(CargoKey, manifest ?? string.Empty);
+
+        /// <summary>
+        ///     Adds a kind of item to the trip's manifest.
+        /// </summary>
+        /// <remarks>
+        ///     A set rather than a single name, because a trip carries several items. When this
+        ///     held one name, taking a second kind of item overwrote the first, and everything
+        ///     picked up before it stopped being recognised as cargo - so it rode around in the
+        ///     bag forever, undeliverable and invisible to the job carrying it.
+        /// </remarks>
+        internal void AddCargo(string prefab)
+        {
+            if (string.IsNullOrEmpty(prefab)) return;
+
+            string manifest = Cargo;
+            foreach (string listed in manifest.Split(','))
+            {
+                if (listed == prefab) return;
+            }
+
+            SetCargo(manifest.Length == 0 ? prefab : manifest + "," + prefab);
+        }
+
         /// <summary>Net time the current target was taken, so a stuck claim expires.</summary>
         internal double ClaimedSince => _zdo?.GetLong(ClaimedSinceKey, 0L) ?? 0L;
 
@@ -158,6 +199,7 @@ namespace Kukolony.Villagers
         {
             SetTarget(ZDOID.None);
             SetDestination(ZDOID.None);
+            SetCargo(string.Empty);
             SetWorkState(0);
         }
 
