@@ -260,33 +260,6 @@ namespace Kukolony.Debug
             }
             ZDOMan.instance.SetDirtySector(zdo);
 
-            // The colony's registered structures need the same treatment, and for the same
-            // reason: ZDOMan.Save walks its sector index rather than its id dictionary, so a
-            // ZDO missing from that index is silently not written. The villager has been
-            // repaired here since it was first found; the structures were fine until this run
-            // spawned enough of them to expose it, which is the sort of thing that looks like
-            // "registration stopped persisting" rather than like a fixture problem.
-            int repaired = 0;
-            foreach (StructureRecord record in colony.State.GetStructures())
-            {
-                ZDO structureZdo = ZDOMan.instance.GetZDO(record.Id);
-                if (structureZdo == null || !structureZdo.IsValid()) continue;
-
-                uint structureSector = structureZdo.GetSectorIndex().Sector;
-                bool structureIndexed = sectors != null && structureSector < sectors.Length &&
-                                        sectors[structureSector] != null &&
-                                        sectors[structureSector].Contains(structureZdo);
-                if (!structureIndexed)
-                {
-                    ZDOMan.instance.AddToSector(structureZdo, structureZdo.GetSectorIndex());
-                    repaired++;
-                }
-
-                ZDOMan.instance.SetDirtySector(structureZdo);
-            }
-
-            Core.Log.Info($"[Benchmark] structures before save: {colony.State.GetStructures().Count}, " +
-                          $"sector index repaired on {repaired}");
             Core.Log.Info("[Benchmark] final villager persistence snapshot written");
         }
 
@@ -1100,6 +1073,77 @@ namespace Kukolony.Debug
             }
 
             yield return null;
+        }
+
+        /// <summary>
+        ///     Makes sure every registered structure will actually be written by the save.
+        /// </summary>
+        /// <remarks>
+        ///     <c>ZDOMan.Save</c> walks its sector index rather than its id dictionary, so a ZDO
+        ///     missing from that index is silently not written - which presents as "registration
+        ///     stopped persisting" rather than as a fixture problem. The villager has had this
+        ///     repair since it was first found.
+        ///
+        ///     Called immediately before the save rather than at snapshot time. Doing it earlier
+        ///     fixed it once and then stopped working: there is a grace period between the two,
+        ///     and zones unloading during it can drop a ZDO back out of the index. Repairing at
+        ///     the last possible moment leaves nothing in between.
+        /// </remarks>
+        internal static int PrepareStructuresForSave(Colony colony)
+        {
+            if (colony == null || ZDOMan.instance == null) return 0;
+
+            var sectorsField = typeof(ZDOMan).GetField("m_objectsBySector",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var sectors = sectorsField?.GetValue(ZDOMan.instance) as List<ZDO>[];
+
+            int repaired = 0;
+            int total = 0;
+            foreach (StructureRecord record in colony.State.GetStructures())
+            {
+                ZDO zdo = ZDOMan.instance.GetZDO(record.Id);
+                if (zdo == null || !zdo.IsValid()) continue;
+                total++;
+
+                uint sector = zdo.GetSectorIndex().Sector;
+                bool indexed = sectors != null && sector < sectors.Length &&
+                               sectors[sector] != null && sectors[sector].Contains(zdo);
+                if (!indexed)
+                {
+                    ZDOMan.instance.AddToSector(zdo, zdo.GetSectorIndex());
+                    repaired++;
+                }
+
+                ZDOMan.instance.SetDirtySector(zdo);
+            }
+
+            // Written to the run directory, not just the log: the game log is per-launch and
+            // the reload overwrites it, so evidence about what happened before the save was
+            // being destroyed by the very relaunch it was needed to explain.
+            // Appended, and named. Every loaded colony passes through here, and writing the
+            // file instead of appending meant reading whichever happened to be last - the same
+            // "one writer per piece of state" mistake that made a persistence failure name the
+            // wrong object once before.
+            List<string> missing = new List<string>();
+            foreach (StructureRecord record in colony.State.GetStructures())
+            {
+                ZDO check = ZDOMan.instance.GetZDO(record.Id);
+                if (check == null || !check.IsValid())
+                    missing.Add($"{record.Name}(dead={KnownDead(record.Id)})");
+            }
+
+            string note = $"colony '{colony.State.Name}': {total} resolvable of " +
+                          $"{colony.State.GetStructures().Count}, {repaired} repaired, " +
+                          $"missing: {(missing.Count == 0 ? "none" : string.Join("|", missing.ToArray()))}";
+            Core.Log.Info("[Benchmark] " + note);
+            try
+            {
+                System.IO.File.AppendAllText(System.IO.Path.Combine(
+                    ModConfig.BenchmarkOutputPath.Value, "before-save.txt"), note + System.Environment.NewLine);
+            }
+            catch (System.Exception e) { Core.Log.Warning("could not write before-save note: " + e.Message); }
+
+            return repaired;
         }
 
         /// <summary>The colony's record for an object, or null.</summary>

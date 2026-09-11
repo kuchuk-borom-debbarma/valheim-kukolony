@@ -120,6 +120,24 @@ namespace Kukolony.Debug
                 colony.transform.position + new Vector3(-4f, 0f, 4f));
             yield return new WaitForSecondsRealtime(.3f);
 
+            // A structure with settings worth looking at: the kiln is the one that shows every
+            // processing row, and it is chosen by name rather than by position in the list.
+            StructureRecord station = colony.State.GetStructures()
+                .Find(r => (r.Capabilities & StructureCapability.Processing) != 0);
+            if (station != null)
+            {
+                screen.Root(new ColonyHomeScreen());
+                screen.Push(new StructureListScreen());
+                screen.Push(new StructureDetailScreen(station.PersistentId, station.Id));
+                yield return new WaitForSecondsRealtime(.4f);
+                yield return Capture("colony-screen-settings.png");
+            }
+            else
+            {
+                Log.Error("[Screenshot] no processing structure to photograph settings on");
+                _captureFailed = true;
+            }
+
             screen.Root(new ColonyHomeScreen());
             screen.Push(new RegisterNearbyScreen());
             yield return new WaitForSecondsRealtime(.4f);

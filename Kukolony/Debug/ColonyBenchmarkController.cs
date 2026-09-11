@@ -244,6 +244,13 @@ namespace Kukolony.Debug
         private IEnumerator SaveAndLogout()
         {
             Write("heartbeat.txt", "saving " + DateTime.UtcNow.ToString("O"));
+
+            // Last thing before the save, because anything between the two can undo it.
+            foreach (Colony colony in Colony.Instances)
+            {
+                if (colony != null) BenchmarkFunctionalScenario.PrepareStructuresForSave(colony);
+            }
+
             if (Game.instance == null)
             {
                 Fail(new InvalidOperationException("Cannot persist benchmark fixtures because Game.instance is unavailable."));

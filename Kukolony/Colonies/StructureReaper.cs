@@ -43,6 +43,17 @@ namespace Kukolony.Colonies
         /// </remarks>
         private static readonly Dictionary<string, ZDOID> LastSeen = new Dictionary<string, ZDOID>();
 
+        // KNOWN GAP, measured 11 September 2026. A record whose object dies before any sweep
+        // has seen it alive is never reaped: with nothing in LastSeen, the address falls back
+        // to the record's own, which after a failed token lookup is the stale one the game
+        // never listed as dead. Observed in the benchmark, where a chest was destroyed between
+        // registration and the first sweep and its record outlived it.
+        //
+        // It fails in the safe direction - the record stays as "not found" and the player can
+        // remove it - so this is a gap rather than a defect, but it means the reaper is weakest
+        // exactly when a structure is short-lived. Closing it properly means remembering the
+        // address at registration rather than at first sweep.
+
         private static ZDOMan _owner;
 
         /// <summary>

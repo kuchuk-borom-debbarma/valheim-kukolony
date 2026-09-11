@@ -81,6 +81,53 @@ nothing would ever notice. In neither is visible and one registration from corre
 holding colony cannot be reached — on a client it may never have been replicated — the move
 fails whole rather than half.
 
+## Settings
+
+Settings belong to the **record**, not the object, so a structure that goes dormant keeps its
+configuration. Every component's fields live in one `StructureSettings` rather than a blob per
+capability — a structure can carry more than one capability, and unused fields sitting at their
+defaults cost a few bytes and remove a class of "which decoder is this" mistakes.
+
+| Component | Settings |
+|---|---|
+| **Storage** | what belongs here (empty means *anything*, which is what an overflow chest is), and whether the settlement may take from it |
+| **Processing** | what to keep it fuelled with, what to feed it, and how full to keep it |
+| **Rest** | who sleeps here |
+
+**What a station accepts is read from the prefab.** A smelter's fuel and conversion list are
+asset data, identical on every instance, so the answer needs nothing loaded and there is no
+cache to go stale — an outpost's kiln is configurable from home. A station with no fuel item
+(a charcoal kiln) shows no fuel row at all, because a job cannot offer a setting the structure
+ignores.
+
+"How full" is a **fraction**, not a count: the cap belongs to the structure, and a count would be
+wrong the moment the same setting met a different station.
+
+**Bed assignment is ours.** Valheim's own bed owner is a `long` player id used for spawn points;
+writing a villager into it would stop a player claiming that bed themselves. One villager sleeps
+in one bed, so assigning someone who already has one moves them and says which bed they left.
+
+## The settlement index
+
+Jobs do not search the settlement, they ask it: *where does wood go*, *what wants feeding*,
+*which beds are free*. With no population cap, a hundred villagers each walking every chest is
+the difference between a settlement and a slideshow.
+
+Built once from the records and reused. It rebuilds when a revision the colony bumps on write
+changes — a revision rather than a timer, so an edit shows immediately and a quiet settlement
+costs nothing, and read from the colony's ZDO so another peer's edit invalidates it here too.
+
+Two chests claiming the same item is not a conflict: both are valid answers and the nearest
+usable one wins.
+
+**Capacity is part of the question**, because discovering a chest is full on arrival wastes the
+walk. Capacity can only be read from a loaded container — see
+[valheim-findings.md](valheim-findings.md), contents are not on the ZDO — but a colony keeps its
+own registered structures loaded, so in practice it is nearly always answerable. When it is not,
+the container counts as *room* rather than none: refusing to answer would cost the settlement a
+destination it really had. Taking *from* a container is the opposite case, and an unreadable one
+is not an answer there — a fetch with nothing at the end of it is worse than no fetch.
+
 ## Status, and removal
 
 A record is **ready** (resolves, in reach), **out of reach** (resolves, outside the radius —
