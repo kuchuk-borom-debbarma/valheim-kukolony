@@ -7,16 +7,25 @@ namespace Kukolony.Colonies
     ///     Persistent colony root. Villagers are explicit members; placed structures are
     ///     named records whose live eligibility is bounded by the hearth radius.
     ///
-    ///     Format version 1: the redesign at docs/roadmap.md milestone 1 reset it. Nothing
-    ///     written by the earlier design is readable, deliberately - the key was renamed as
-    ///     well as the version raised, so an old record is not found rather than misparsed.
+    ///     Format version 2 adds per-structure settings. The key was renamed alongside the
+    ///     version, as at version 1, so a record written by an older build is not found rather
+    ///     than misparsed - registrations have to be redone, which was the deliberate choice
+    ///     over carrying a second decoder for a format nothing has shipped on.
     /// </summary>
     internal readonly struct ColonyState
     {
         private static readonly int NameKey = "kukolony.colony.name".GetStableHashCode();
 
         private static readonly int VillagersKey = "kukolony.colony.villagers".GetStableHashCode();
-        private static readonly int StructuresKey = "kukolony.colony.structures.v1".GetStableHashCode();
+        /// <summary>
+        ///     Bumped on every structure write, so anything caching the records can tell it is
+        ///     looking at a stale copy. On the colony's own ZDO rather than in memory, so an
+        ///     edit made by another peer invalidates the cache here too.
+        /// </summary>
+        private static readonly int StructuresRevisionKey =
+            "kukolony.colony.structures.revision".GetStableHashCode();
+
+        private static readonly int StructuresKey = "kukolony.colony.structures.v2".GetStableHashCode();
 
         private readonly ZDO _zdo;
 
@@ -41,7 +50,7 @@ namespace Kukolony.Colonies
             try
             {
                 ZPackage p = new ZPackage(encoded);
-                if (p.ReadInt() != 1) return result;
+                if (p.ReadInt() != 2) return result;
                 int count = p.ReadInt();
                 if (count < 0 || count > 4096) return result;
                 for (int i = 0; i < count; i++)
@@ -50,7 +59,8 @@ namespace Kukolony.Colonies
                     string persistentId = p.ReadString();
                     result.Add(new StructureRecord { Id = PersistentZdoReference.Resolve(persistentId, saved),
                         PersistentId = persistentId, Name = p.ReadString(), Prefab = p.ReadString(),
-                        Capabilities = (StructureCapability)p.ReadInt() & StructureCapabilities.Known });
+                        Capabilities = (StructureCapability)p.ReadInt() & StructureCapabilities.Known,
+                        Settings = StructureSettings.Read(p) });
                 }
             }
             catch (System.Exception e) { Core.Log.Warning("[colony] invalid structure registry: " + e.Message); }
@@ -59,7 +69,7 @@ namespace Kukolony.Colonies
 
         internal void SetStructures(List<StructureRecord> records)
         {
-            ZPackage p = new ZPackage(); p.Write(1); p.Write(records.Count);
+            ZPackage p = new ZPackage(); p.Write(2); p.Write(records.Count);
             foreach (StructureRecord r in records)
             {
                 // Records arrive with their token already minted, by the one path that claims
@@ -79,9 +89,13 @@ namespace Kukolony.Colonies
 
                 p.Write(r.Id); p.Write(r.PersistentId ?? string.Empty); p.Write(r.Name ?? string.Empty);
                 p.Write(r.Prefab ?? string.Empty); p.Write((int)r.Capabilities);
+                (r.Settings ?? new StructureSettings()).Write(p);
             }
             _zdo.Set(StructuresKey, p.GetBase64());
+            _zdo.Set(StructuresRevisionKey, StructuresRevision + 1);
         }
+
+        internal int StructuresRevision => _zdo?.GetInt(StructuresRevisionKey, 0) ?? 0;
 
         internal List<ZDOID> GetMembers(ColonyMemberKind kind) =>
             kind == ColonyMemberKind.Villager

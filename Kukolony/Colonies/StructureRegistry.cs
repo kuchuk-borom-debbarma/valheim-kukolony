@@ -34,6 +34,13 @@ namespace Kukolony.Colonies
         internal StructureCapability Capabilities;
 
         /// <summary>
+        ///     What this structure is for. Never null - a record with no settings yet is a
+        ///     record with default ones, and a null here would mean every reader had to guess
+        ///     which it was looking at.
+        /// </summary>
+        internal StructureSettings Settings = new StructureSettings();
+
+        /// <summary>
         ///     Whether this record can be used, and if not, why not.
         /// </summary>
         /// <remarks>

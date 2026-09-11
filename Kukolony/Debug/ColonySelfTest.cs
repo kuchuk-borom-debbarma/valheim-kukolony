@@ -129,6 +129,7 @@ namespace Kukolony.Debug
             yield return CheckReaper(report, colony, origin);
             yield return CheckStoredContents(report, colony, origin);
             yield return CheckOutpostStaysLoaded(report, colony);
+            yield return CheckSettingsAndIndex(report, colony, origin);
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
 
@@ -171,9 +172,23 @@ namespace Kukolony.Debug
             if (storage != null)
             {
                 ZDO storageZdo = ZDOMan.instance.GetZDO(storage.Id);
+
+                // Say what was actually found. An id in session form here means the token did
+                // not resolve and the stale address was used, which is a different fault from
+                // the object having been destroyed - and they print identically otherwise.
+                int carrying = 0;
+                foreach (ZDOID candidate in ZDOExtraData.GetAllZDOIDsWithHash(
+                             ZDOExtraData.Type.String, "kukolony.persistent-id.v1".GetStableHashCode()))
+                {
+                    ZDO carrier = ZDOMan.instance.GetZDO(candidate);
+                    if (carrier != null &&
+                        Core.PersistentZdoReference.Get(carrier) == storage.PersistentId) carrying++;
+                }
+
                 report.Check(storageZdo != null && storageZdo.IsValid(),
                     "registered structure reference still resolves after save and relaunch",
-                    $"id={storage.Id} token={(string.IsNullOrEmpty(storage.PersistentId) ? "none" : storage.PersistentId)}");
+                    $"id={storage.Id} token={(string.IsNullOrEmpty(storage.PersistentId) ? "none" : storage.PersistentId)} " +
+                    $"zdosCarryingThatToken={carrying} structuresInColony={state.GetStructures().Count}");
             }
             List<ZDOID> members = state.GetMembers(ColonyMemberKind.Villager);
             report.Check(members.Count > 0, "member list survived save and relaunch");
@@ -244,6 +259,34 @@ namespace Kukolony.Debug
                 Core.Log.Warning("Repaired missing villager sector index before save");
             }
             ZDOMan.instance.SetDirtySector(zdo);
+
+            // The colony's registered structures need the same treatment, and for the same
+            // reason: ZDOMan.Save walks its sector index rather than its id dictionary, so a
+            // ZDO missing from that index is silently not written. The villager has been
+            // repaired here since it was first found; the structures were fine until this run
+            // spawned enough of them to expose it, which is the sort of thing that looks like
+            // "registration stopped persisting" rather than like a fixture problem.
+            int repaired = 0;
+            foreach (StructureRecord record in colony.State.GetStructures())
+            {
+                ZDO structureZdo = ZDOMan.instance.GetZDO(record.Id);
+                if (structureZdo == null || !structureZdo.IsValid()) continue;
+
+                uint structureSector = structureZdo.GetSectorIndex().Sector;
+                bool structureIndexed = sectors != null && structureSector < sectors.Length &&
+                                        sectors[structureSector] != null &&
+                                        sectors[structureSector].Contains(structureZdo);
+                if (!structureIndexed)
+                {
+                    ZDOMan.instance.AddToSector(structureZdo, structureZdo.GetSectorIndex());
+                    repaired++;
+                }
+
+                ZDOMan.instance.SetDirtySector(structureZdo);
+            }
+
+            Core.Log.Info($"[Benchmark] structures before save: {colony.State.GetStructures().Count}, " +
+                          $"sector index repaired on {repaired}");
             Core.Log.Info("[Benchmark] final villager persistence snapshot written");
         }
 
@@ -580,6 +623,142 @@ namespace Kukolony.Debug
         ///         since to this peer they are the same situation.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     Settings stick to the record, and the index answers from them.
+        /// </summary>
+        /// <remarks>
+        ///     The index is the piece jobs will lean on, so the checks are about its answers
+        ///     being <em>usable</em> rather than merely non-empty: a chest that claims the wrong
+        ///     item, a chest that claims the right one but is full, and a station nobody
+        ///     configured all have to be absent from the answer for different reasons.
+        /// </remarks>
+        private static IEnumerator CheckSettingsAndIndex(TestReport report, Colony colony, Vector3 origin)
+        {
+            SettlementIndex.ResetForTest();
+            Vector3 at = origin + new Vector3(-10f, 0f, 6f);
+
+            GameObject woodChest = Spawn("piece_chest_wood", at);
+            GameObject coalChest = Spawn("piece_chest_wood", at + new Vector3(3f, 0f, 0f));
+            yield return new WaitForSecondsRealtime(.3f);
+            StructureRecord wood = Register(colony, woodChest, "Wood store");
+            StructureRecord coal = Register(colony, coalChest, "Coal store");
+            if (wood == null || coal == null)
+            {
+                report.Check(false, "settings check could register two chests");
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, wood.Id, s => s.Accepts = new List<string> { "Wood" });
+            ColonyOperations.EditSettings(colony, coal.Id, s => s.Accepts = new List<string> { "Coal" });
+
+            StructureRecord stored = colony.State.GetStructures().Find(r => r.Id == wood.Id);
+            report.Check(stored != null && stored.Settings.Accepts.Count == 1 &&
+                         stored.Settings.Accepts[0] == "Wood",
+                "a structure's settings are kept on its record",
+                $"accepts={(stored == null ? "none" : string.Join(",", stored.Settings.Accepts.ToArray()))}");
+
+            List<StructureRecord> forWood = SettlementIndex.WhereDoesItGo(colony, "Wood", at);
+            report.Check(forWood.Exists(r => r.Id == wood.Id) && !forWood.Exists(r => r.Id == coal.Id),
+                "the settlement says where an item goes, and does not offer a chest that refuses it",
+                $"answers={forWood.Count}");
+
+            // Control, scoped to this check's own chests. Asserting the whole colony has
+            // nowhere to put Flint depends on what every earlier check happened to leave
+            // registered - and an earlier one leaves a chest claiming nothing, which by design
+            // claims everything. A control an unrelated check can break is not a control.
+            List<StructureRecord> forFlint = SettlementIndex.WhereDoesItGo(colony, "Flint", at);
+            report.Check(!forFlint.Exists(r => r.Id == wood.Id) && !forFlint.Exists(r => r.Id == coal.Id),
+                "control: a chest that named its item does not accept a different one",
+                $"answers={forFlint.Count}");
+
+            ColonyOperations.EditSettings(colony, coal.Id, s => s.Accepts = new List<string>());
+            forFlint = SettlementIndex.WhereDoesItGo(colony, "Flint", at);
+            report.Check(forFlint.Exists(r => r.Id == coal.Id),
+                "a chest that claims nothing claims anything, which is what an overflow chest is",
+                $"answers={forFlint.Count}");
+
+            // Capacity is part of the question. Filling the overflow chest must remove it from
+            // the answer, or a villager walks to a chest with no room in it.
+            if (coalChest.TryGetComponent(out Container coalContainer))
+            {
+                Fill(coalContainer.GetInventory(), "Wood");
+                yield return null;
+                List<StructureRecord> afterFull = SettlementIndex.WhereDoesItGo(colony, "Flint", at);
+                report.Check(!afterFull.Exists(r => r.Id == coal.Id),
+                    "a full chest is not an answer, because arriving to find it full wastes the walk",
+                    $"answers={afterFull.Count}");
+            }
+
+            // The index rebuilds on a revision change, not per query - the whole reason it
+            // exists is that a hundred villagers must not each walk the settlement.
+            SettlementIndex.WhereDoesItGo(colony, "Wood", at);
+            int before = SettlementIndex.Rebuilds;
+            for (int i = 0; i < 5; i++) SettlementIndex.WhereDoesItGo(colony, "Wood", at);
+            report.Check(SettlementIndex.Rebuilds == before,
+                "control: repeated questions do not rebuild the index",
+                $"rebuilds={SettlementIndex.Rebuilds - before}");
+
+            ColonyOperations.EditSettings(colony, wood.Id, s => s.MayTakeFrom = false);
+            // The rebuild is lazy, so it happens on the next question rather than on the edit.
+            // Reading the counter without asking one measured nothing.
+            SettlementIndex.WhereDoesItGo(colony, "Wood", at);
+            report.Check(SettlementIndex.Rebuilds == before + 1,
+                "changing a setting rebuilds the index, once",
+                $"rebuilds={SettlementIndex.Rebuilds - before}");
+
+            Release(woodChest);
+            Release(coalChest);
+            yield return null;
+            yield return CheckBeds(report, colony, origin);
+        }
+
+        /// <summary>
+        ///     One villager sleeps in one bed, and moving them says which bed they left.
+        /// </summary>
+        private static IEnumerator CheckBeds(TestReport report, Colony colony, Vector3 origin)
+        {
+            GameObject first = SpawnFirst(origin + new Vector3(-6f, 0f, -6f), "bed", "piece_bed", "bed_wood");
+            GameObject second = SpawnFirst(origin + new Vector3(-9f, 0f, -6f), "bed", "piece_bed", "bed_wood");
+            yield return new WaitForSecondsRealtime(.3f);
+            StructureRecord bedA = Register(colony, first, "First bed");
+            StructureRecord bedB = Register(colony, second, "Second bed");
+
+            Villager villager = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (bedA == null || bedB == null || villager == null ||
+                !villager.TryGetComponent(out ZNetView villagerView) || !villagerView.IsValid())
+            {
+                report.Check(false, "bed check could register two beds and a villager");
+                yield break;
+            }
+
+            ZDOID who = villagerView.GetZDO().m_uid;
+            report.Check(SettlementIndex.FreeBeds(colony).Count >= 2,
+                "control: both beds are free before anyone is assigned",
+                $"free={SettlementIndex.FreeBeds(colony).Count}");
+
+            VillagerRoster.Assign(colony, bedA, new List<string> { who.ToString() });
+            StructureRecord assigned = SettlementIndex.BedOf(colony, who);
+            report.Check(assigned != null && assigned.Id == bedA.Id,
+                "a villager can be given a bed, and the settlement knows which",
+                $"bed={(assigned == null ? "none" : assigned.Name)}");
+
+            VillagerRoster.Assign(colony, bedB, new List<string> { who.ToString() });
+            StructureRecord moved = SettlementIndex.BedOf(colony, who);
+            List<StructureRecord> free = SettlementIndex.FreeBeds(colony);
+            report.Check(moved != null && moved.Id == bedB.Id && free.Exists(r => r.Id == bedA.Id),
+                "assigning a bed to someone who has one moves them, freeing the old bed",
+                $"bed={(moved == null ? "none" : moved.Name)} freeNow={free.Count} said='{Core.Report.Last}'");
+            report.Check(Core.Report.Last.Contains("First bed"),
+                "moving a villager says which bed they left",
+                $"said='{Core.Report.Last}'");
+
+            VillagerLifecycle.Remove(colony, who);
+            if (first != null) Release(first);
+            if (second != null) Release(second);
+            yield return null;
+        }
+
         /// <summary>
         ///     A registered structure at an outpost nobody is near stays loaded.
         /// </summary>

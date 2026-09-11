@@ -57,6 +57,29 @@ namespace Kukolony.Colonies
         ///     costs a walk, and refusing to answer costs the settlement a destination it
         ///     actually had.
         /// </remarks>
+        /// <summary>
+        ///     How many of an item a container holds, counted by prefab.
+        /// </summary>
+        /// <remarks>
+        ///     By prefab rather than by <c>Inventory.CountItems</c>, which matches on the
+        ///     shared display name - two different prefabs can share one, and a settlement that
+        ///     confuses them fetches the wrong thing.
+        /// </remarks>
+        internal static int Count(ZDOID id, string itemPrefab)
+        {
+            Inventory inventory = Live(id);
+            if (inventory == null) return 0;
+
+            int total = 0;
+            foreach (ItemDrop.ItemData item in inventory.GetAllItems())
+            {
+                if (item?.m_dropPrefab != null && Utils.GetPrefabName(item.m_dropPrefab) == itemPrefab)
+                    total += item.m_stack;
+            }
+
+            return total;
+        }
+
         internal static bool HasRoomFor(ZDOID id, string itemPrefab)
         {
             Inventory inventory = Live(id);

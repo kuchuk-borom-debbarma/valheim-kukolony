@@ -516,6 +516,29 @@ Settled, with the reason.
 - **Reach is placed, not raised.** The colony radius stays modest so the settlement remains a
   place; a **work area** is a separate placed structure with its own radius, anywhere, that
   says where a kind of work happens. Territory is a shape a player draws.
+
+  **A work area stays loaded on the same terms a colony does, and so do the structures
+  registered inside it.** Measured for colonies: a chest registered to a settlement 900m from
+  the player stays instantiated with its contents readable, while an identical unregistered
+  chest at the same distance unloads. Work areas must feed the keep-alive the same way, or a
+  villager sent to one waits forever at an outpost that only exists while somebody watches —
+  and works perfectly whenever anyone checks.
+
+  **What "only the registered ones" can and cannot mean.** Valheim loads by *zone*, roughly
+  64m, not by object. Forcing a registered chest's zone necessarily brings its neighbours with
+  it; there is no way to hold one object open and leave the one beside it closed. Two things
+  are controllable, and both already exist:
+
+  - *Which zones are forced* — driven by the positions of registered structures, so a
+    settlement holds its own ground open and nothing else. This is the part that keeps the cost
+    proportional to what a player actually built.
+  - *What is instantiated inside a forced zone* — `LoadAllowlist`, which today admits anything
+    with a `Piece`, plus containers, stations, terrain, loose items, villagers and colonies.
+    That is broad, and narrowing it to what jobs actually touch is the lever for cost, not the
+    zone list.
+
+  So the budget is measured in zones, not objects: a work area costs at least one zone whether
+  it holds one registered chest or twenty. Worth knowing before work areas are priced.
 - **Never infer destruction from absence.** A record is removed only on positive evidence:
   the object was seen destroyed, or the player said so. Anything else is dormant and visible.
   A ZDO that cannot be resolved may be destroyed *or* merely not in memory.

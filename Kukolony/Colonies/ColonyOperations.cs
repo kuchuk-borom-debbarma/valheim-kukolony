@@ -87,6 +87,31 @@ namespace Kukolony.Colonies
         }
 
         /// <summary>
+        ///     Edits a registered structure's settings.
+        /// </summary>
+        /// <remarks>
+        ///     Takes a mutation rather than a settings object, so a caller cannot hand back a
+        ///     stale copy and silently undo an edit made between reading and writing. The whole
+        ///     record list is rewritten either way - that is how it is stored - so the hearth is
+        ///     claimed first, as renaming and registering both do.
+        /// </remarks>
+        internal static bool EditSettings(Colony colony, ZDOID id, System.Action<StructureSettings> edit)
+        {
+            if (colony == null || edit == null) return false;
+
+            List<StructureRecord> records = colony.State.GetStructures();
+            StructureRecord record = records.Find(r => r.Id == id);
+            if (record == null) return false;
+
+            if (record.Settings == null) record.Settings = new StructureSettings();
+            edit(record.Settings);
+
+            if (colony.TryGetComponent(out ZNetView view) && view.IsValid()) view.ClaimOwnership();
+            colony.State.SetStructures(records);
+            return true;
+        }
+
+        /// <summary>
         ///     The one way a structure becomes a colony's. Both screen routes call this, so
         ///     neither can accept something the other refuses.
         /// </summary>

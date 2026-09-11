@@ -111,6 +111,22 @@ namespace Kukolony.Gui
                 Widgets.Label(kind, StructureCapabilities.Describe(record.Capabilities));
             }
 
+            StructureSettings settings = record.Settings;
+            if ((record.Capabilities & StructureCapability.Storage) != 0)
+            {
+                BuildStorage(host, column, colony, record, settings);
+            }
+
+            if ((record.Capabilities & StructureCapability.Processing) != 0)
+            {
+                BuildProcessing(host, column, colony, record, settings);
+            }
+
+            if ((record.Capabilities & StructureCapability.Rest) != 0)
+            {
+                BuildRest(host, column, colony, record, settings);
+            }
+
             StructureStatus status = record.StatusIn(colony);
             if (column.TryRow(out Row state))
             {
@@ -145,6 +161,146 @@ namespace Kukolony.Gui
                     host.Pop();
                 });
             }
+        }
+
+        /// <summary>
+        ///     What belongs here, and whether the settlement may take from it.
+        /// </summary>
+        /// <remarks>
+        ///     An empty list means <em>anything</em>, and says so. That is what an overflow
+        ///     chest is, so the empty state is a real setting rather than one nobody has filled
+        ///     in yet - and a row reading "nothing" would describe a chest the settlement can
+        ///     never use.
+        /// </remarks>
+        private static void BuildStorage(ColonyScreen host, Column column, Colony colony,
+            StructureRecord record, StructureSettings settings)
+        {
+            if (column.TryRow(out Row holds))
+            {
+                Widgets.Choice(holds, "Holds",
+                    settings.Accepts.Count == 0 ? "anything" : Summarise(settings.Accepts),
+                    () => host.Push(new PickerScreen("What belongs here", SearchItems,
+                        settings.Accepts, true, chosen =>
+                        {
+                            ColonyOperations.EditSettings(colony, record.Id, s => s.Accepts = chosen);
+                            host.Refresh();
+                        })));
+            }
+
+            if (column.TryRow(out Row take))
+            {
+                Widgets.Flag(take, "May take from", settings.MayTakeFrom, value =>
+                {
+                    ColonyOperations.EditSettings(colony, record.Id, s => s.MayTakeFrom = value);
+                    host.Refresh();
+                });
+            }
+        }
+
+        /// <summary>
+        ///     What to keep a station fed with, offered from what it actually accepts.
+        /// </summary>
+        /// <remarks>
+        ///     Both lists come from the prefab, so this works for a station that is nowhere
+        ///     near the player. A station with no fuel item shows no fuel row at all rather
+        ///     than an empty one: a charcoal kiln burns nothing, and offering to configure its
+        ///     fuel would be offering a setting the structure ignores.
+        /// </remarks>
+        private static void BuildProcessing(ColonyScreen host, Column column, Colony colony,
+            StructureRecord record, StructureSettings settings)
+        {
+            string fuel = ProcessingOptions.Fuel(record.Prefab);
+            if (fuel.Length > 0 && column.TryRow(out Row fuelRow))
+            {
+                bool keepFuelled = settings.Fuel.Contains(fuel);
+                Widgets.Flag(fuelRow, "Keep fuelled with " + ItemCatalogue.Label(fuel), keepFuelled, value =>
+                {
+                    ColonyOperations.EditSettings(colony, record.Id, s =>
+                        s.Fuel = value ? new List<string> { fuel } : new List<string>());
+                    host.Refresh();
+                });
+            }
+
+            List<string> inputs = ProcessingOptions.Inputs(record.Prefab);
+            if (inputs.Count > 0 && column.TryRow(out Row inputRow))
+            {
+                Widgets.Choice(inputRow, "Feed it",
+                    settings.Input.Count == 0 ? "nothing" : Summarise(settings.Input),
+                    () => host.Push(new PickerScreen("What to feed it",
+                        filter => Options(inputs, filter), settings.Input, true, chosen =>
+                        {
+                            ColonyOperations.EditSettings(colony, record.Id, s => s.Input = chosen);
+                            host.Refresh();
+                        })));
+            }
+
+            if (column.TryRow(out Row full))
+            {
+                // A fraction, shown as the count it works out to, because "half full" is the
+                // durable intent and "5 ore" is what the player can picture.
+                int max = ProcessingOptions.MaxInput(record.Prefab);
+                Widgets.Number(full, "Keep it", settings.KeepFull, 0f, 1f, .25f,
+                    v => max > 0 ? $"{v * 100f:F0}% ({Mathf.RoundToInt(v * max)})" : $"{v * 100f:F0}%",
+                    value =>
+                    {
+                        ColonyOperations.EditSettings(colony, record.Id, s => s.KeepFull = value);
+                        host.Refresh();
+                    });
+            }
+        }
+
+        /// <summary>
+        ///     Who sleeps here. One villager, and assigning a bed that is taken moves them.
+        /// </summary>
+        private static void BuildRest(ColonyScreen host, Column column, Colony colony,
+            StructureRecord record, StructureSettings settings)
+        {
+            if (!column.TryRow(out Row row)) return;
+
+            Widgets.Choice(row, "Sleeps here", Colonies.VillagerRoster.Name(settings.Sleeper),
+                () => host.Push(new PickerScreen("Who sleeps here",
+                    filter => Colonies.VillagerRoster.Options(colony, filter),
+                    settings.HasSleeper ? new[] { settings.Sleeper.ToString() } : null,
+                    false, chosen =>
+                    {
+                        Colonies.VillagerRoster.Assign(colony, record, chosen);
+                        host.Refresh();
+                    })));
+        }
+
+        private static string Summarise(List<string> items) =>
+            items.Count == 1 ? ItemCatalogue.Label(items[0]) : $"{items.Count} kinds";
+
+        private static List<PickerScreen.Option> SearchItems(string filter)
+        {
+            List<PickerScreen.Option> options = new List<PickerScreen.Option>();
+            foreach (ItemCatalogue.Entry entry in ItemCatalogue.Search(filter, 40))
+                options.Add(new PickerScreen.Option(entry.PrefabName, entry.DisplayName));
+            return options;
+        }
+
+        /// <summary>
+        ///     A fixed set of choices, filtered. Unlike the item catalogue an empty filter
+        ///     shows everything, because "everything this kiln takes" is a short list and
+        ///     hiding it until the player types would be hiding the answer.
+        /// </summary>
+        private static List<PickerScreen.Option> Options(List<string> prefabs, string filter)
+        {
+            List<PickerScreen.Option> options = new List<PickerScreen.Option>();
+            foreach (string prefab in prefabs)
+            {
+                string label = ItemCatalogue.Label(prefab);
+                if (filter.Length > 0 &&
+                    label.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0 &&
+                    prefab.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                options.Add(new PickerScreen.Option(prefab, label));
+            }
+
+            return options;
         }
 
         private StructureRecord Find(Colony colony)
