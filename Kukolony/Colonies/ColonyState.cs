@@ -25,6 +25,12 @@ namespace Kukolony.Colonies
         private static readonly int StructuresRevisionKey =
             "kukolony.colony.structures.revision".GetStableHashCode();
 
+        /// <summary>
+        ///     The jobs this colony offers. Shared by every villager queued onto them, which is
+        ///     what stops a settlement of a hundred being a hundred configurations.
+        /// </summary>
+        private static readonly int JobsKey = "kukolony.colony.jobs.v1".GetStableHashCode();
+
         private static readonly int StructuresKey = "kukolony.colony.structures.v2".GetStableHashCode();
 
         private readonly ZDO _zdo;
@@ -93,6 +99,41 @@ namespace Kukolony.Colonies
             }
             _zdo.Set(StructuresKey, p.GetBase64());
             _zdo.Set(StructuresRevisionKey, StructuresRevision + 1);
+        }
+
+        internal List<Jobs.JobDefinition> GetJobs()
+        {
+            List<Jobs.JobDefinition> result = new List<Jobs.JobDefinition>();
+            string encoded = _zdo?.GetString(JobsKey, string.Empty) ?? string.Empty;
+            if (string.IsNullOrEmpty(encoded)) return result;
+
+            try
+            {
+                ZPackage p = new ZPackage(encoded);
+                if (p.ReadInt() != 1) return result;
+
+                int count = p.ReadInt();
+                if (count < 0 || count > 256) return result;
+                for (int i = 0; i < count; i++) result.Add(Jobs.JobDefinition.Read(p));
+            }
+            catch (System.Exception e)
+            {
+                // A corrupt job list must not take the colony down with it. An empty list is
+                // idle, which a player can see and fix.
+                Core.Log.Warning("[colony] invalid job list: " + e.Message);
+                result.Clear();
+            }
+
+            return result;
+        }
+
+        internal void SetJobs(List<Jobs.JobDefinition> jobs)
+        {
+            ZPackage p = new ZPackage();
+            p.Write(1);
+            p.Write(jobs.Count);
+            foreach (Jobs.JobDefinition job in jobs) job.Write(p);
+            _zdo.Set(JobsKey, p.GetBase64());
         }
 
         internal int StructuresRevision => _zdo?.GetInt(StructuresRevisionKey, 0) ?? 0;

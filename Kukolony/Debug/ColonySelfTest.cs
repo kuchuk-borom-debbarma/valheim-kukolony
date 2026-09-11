@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Kukolony.Colonies;
+using Kukolony.Jobs;
 using Kukolony.Gui;
 using Kukolony.Villagers;
 using UnityEngine;
@@ -167,6 +168,7 @@ namespace Kukolony.Debug
             yield return CheckSettingsAndIndex(report, colony, origin);
             yield return CheckAppearance(report, colony);
             yield return CheckVillagerLiving(report, colony, origin);
+            yield return CheckJobQueue(report, colony);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
@@ -655,6 +657,114 @@ namespace Kukolony.Debug
         ///         since to this peer they are the same situation.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     The queue: order, repeats, yielding, missing jobs, and claims.
+        /// </summary>
+        /// <remarks>
+        ///     Outcomes are applied directly rather than by running real work, because what is
+        ///     under test is the scheduling - that Skipped costs nothing and yields, that Failed
+        ///     costs a repetition so impossible work runs out, and that a deleted job does not
+        ///     strand the villager. Staging those through real hauling would prove them slowly
+        ///     and prove them together.
+        /// </remarks>
+        private static IEnumerator CheckJobQueue(TestReport report, Colony colony)
+        {
+            Villager villager = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (villager == null || !villager.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "queue check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            VillagerState state = new VillagerState(view.GetZDO());
+
+            List<JobDefinition> jobs = new List<JobDefinition>
+            {
+                new JobDefinition { Id = "a", Name = "First", Kind = JobKind.Haul, Repeat = 2 },
+                new JobDefinition { Id = "b", Name = "Second", Kind = JobKind.Haul, Repeat = 1 }
+            };
+            colony.State.SetJobs(jobs);
+
+            report.Check(colony.State.GetJobs().Count == 2,
+                "a colony's jobs survive being written and read back",
+                $"jobs={colony.State.GetJobs().Count}");
+
+            state.SetQueue(new List<string> { "a", "b" });
+            report.Check(QueueRunner.Current(state, jobs)?.Id == "a",
+                "control: a villager starts at the front of its queue");
+
+            // Failed consumes a repetition, so work that cannot succeed runs out.
+            QueueRunner.Apply(state, jobs, JobResult.Failed);
+            report.Check(QueueRunner.Current(state, jobs)?.Id == "a" && state.QueueAttempt == 1,
+                "a failure consumes one repetition and stays on the entry",
+                $"attempt={state.QueueAttempt}");
+
+            QueueRunner.Apply(state, jobs, JobResult.Failed);
+            report.Check(QueueRunner.Current(state, jobs)?.Id == "b",
+                "exhausting the repetitions advances to the next entry",
+                $"current={QueueRunner.Current(state, jobs)?.Id}");
+
+            // Skipped costs nothing: an idle job must not burn its own count and drop out.
+            state.SetQueue(new List<string> { "a", "b" });
+            QueueRunner.Apply(state, jobs, JobResult.Skipped);
+            report.Check(QueueRunner.Current(state, jobs)?.Id == "b" && state.QueueAttempt == 0,
+                "a skip yields to the next entry and consumes nothing",
+                $"current={QueueRunner.Current(state, jobs)?.Id} attempt={state.QueueAttempt}");
+
+            // The ring: after the last entry comes the first.
+            QueueRunner.Apply(state, jobs, JobResult.Skipped);
+            report.Check(QueueRunner.Current(state, jobs)?.Id == "a",
+                "the queue is a ring");
+
+            // Running changes nothing at all.
+            int before = state.QueueAttempt;
+            QueueRunner.Apply(state, jobs, JobResult.Running);
+            report.Check(state.QueueAttempt == before && QueueRunner.Current(state, jobs)?.Id == "a",
+                "control: progress consumes nothing and keeps the entry");
+
+            // A deleted job is bypassed rather than stalling the villager.
+            state.SetQueue(new List<string> { "gone", "b" });
+            report.Check(QueueRunner.Current(state, jobs)?.Id == "b",
+                "a queue entry whose job was deleted is bypassed, not stalled",
+                $"current={QueueRunner.Current(state, jobs)?.Id}");
+
+            state.SetQueue(new List<string> { "gone", "alsogone" });
+            report.Check(QueueRunner.Current(state, jobs) == null,
+                "control: a queue of nothing but missing jobs terminates rather than spinning");
+
+            // Claims.
+            state.SetQueue(new List<string> { "a" });
+            Villager other = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (other != null && other.TryGetComponent(out ZNetView otherView) && otherView.IsValid())
+            {
+                ZDOID contested = otherView.GetZDO().m_uid;
+                TargetClaims.Invalidate();
+                report.Check(!TargetClaims.IsClaimedByOther(contested, other),
+                    "control: nothing is claimed before anyone takes it");
+
+                state.SetTarget(contested);
+                TargetClaims.Invalidate();
+                report.Check(TargetClaims.IsClaimedByOther(contested, other),
+                    "a villager's target is a claim other villagers can see");
+                report.Check(!TargetClaims.IsClaimedByOther(contested, villager),
+                    "control: a villager is not blocked by its own claim");
+
+                state.ResetJob();
+                TargetClaims.Invalidate();
+                report.Check(!TargetClaims.IsClaimedByOther(contested, other),
+                    "ending the job releases the claim with nothing to remember");
+
+                VillagerLifecycle.Remove(colony, contested);
+            }
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.State.SetJobs(new List<JobDefinition>());
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
         /// <summary>
         ///     A villager's bed is its home, and its clothes come off its own bag.
         /// </summary>
