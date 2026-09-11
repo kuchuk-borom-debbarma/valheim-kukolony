@@ -275,9 +275,13 @@ namespace Kukolony.Jobs.Haul
                 container.GetInventory());
             if (wanted == null)
             {
-                // Nothing left here bound for where this trip is going. Releasing the chest ends
-                // the sweep and frees it for another villager; what is already carried still
-                // gets delivered, because the trip keeps its destination.
+                // Nothing left here bound for where this trip is going. Before letting go of a
+                // chest it is standing at and has already claimed, leave it in order - moving
+                // the wrong things out is only half of organising.
+                Tidying.Organise(container);
+
+                // Releasing the chest ends the sweep and frees it for another villager; what is
+                // already carried still gets delivered, because the trip keeps its destination.
                 context.State.ClearTarget();
                 activity = "that is sorted out";
                 return JobResult.Running;
@@ -318,7 +322,14 @@ namespace Kukolony.Jobs.Haul
                 return JobResult.Running;
             }
 
-            if (carried.Count == 0) return JobOutcomes.Completed(context.State, "done hauling", out activity);
+            if (carried.Count == 0)
+            {
+                // The load is delivered and the villager is standing at the chest it filled.
+                // Packing it now is free, and a chest that was just added to is exactly the one
+                // most likely to have gained a split stack.
+                Tidying.Organise(container);
+                return JobOutcomes.Completed(context.State, "done hauling", out activity);
+            }
 
             // What the trip is holding may not all belong here. Releasing the destination sends
             // it back to choosing rather than forcing flint into the wood shed, and is also how

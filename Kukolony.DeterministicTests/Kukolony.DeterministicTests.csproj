@@ -10,5 +10,6 @@
     <Compile Include="../Kukolony/Colonies/StructureCapabilities.cs" Link="StructureCapabilities.cs" />
     <Compile Include="../Kukolony/Jobs/Haul/HaulTransitions.cs" Link="HaulTransitions.cs" />
     <Compile Include="../Kukolony/Jobs/Placement.cs" Link="Placement.cs" />
+    <Compile Include="../Kukolony/Jobs/Stacking.cs" Link="Stacking.cs" />
   </ItemGroup>
 </Project>

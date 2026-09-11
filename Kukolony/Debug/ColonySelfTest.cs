@@ -669,6 +669,12 @@ namespace Kukolony.Debug
         /// </remarks>
         private static IEnumerator CheckHauling(TestReport report, Colony colony, Vector3 origin)
         {
+            // Cleared first. Villagers wear clothes, removing one drops its bag, and earlier
+            // checks remove several - so the ground is littered with garments that this check
+            // then plants one more of and asserts nothing happens to. A villager hauling a
+            // spare shirt off the floor is behaving correctly and would fail the control.
+            SweepLooseItems(colony);
+
             GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(6f, 0f, 6f));
             yield return null;
             StructureRecord store = Register(colony, chest, "Wood shed");
@@ -932,6 +938,30 @@ namespace Kukolony.Debug
                 "a chest marked not to be taken from is never a source, even holding the wrong thing",
                 $"stillThere={CountIn(misplaced, "Wood")}");
 
+            // Packing: split stacks in a chest a villager works are merged. Applied directly
+            // rather than waited for, because what is under test is the operation on a real
+            // Valheim inventory - the decision itself is proven at a table, and staging a
+            // villager into exactly the right moment would test the scheduler instead.
+            Inventory shedInventory = into.GetInventory();
+            shedInventory.RemoveAll();
+            // Placed in two slots by hand. AddItem stacks automatically, so the obvious way to
+            // stage a split stack quietly produces a single tidy one and the check passes
+            // against a fixture that was never untidy.
+            Split(shedInventory, "Wood", 30, 0, 0);
+            Split(shedInventory, "Wood", 20, 1, 0);
+            int slotsBefore = shedInventory.GetAllItems().Count;
+
+            bool organised = Tidying.Organise(into);
+            int slotsAfter = shedInventory.GetAllItems().Count;
+
+            report.Check(organised && slotsAfter < slotsBefore && CountIn(into, "Wood") == 50,
+                "a chest a villager works has its split stacks packed together",
+                $"slots {slotsBefore} -> {slotsAfter}, wood={CountIn(into, "Wood")}");
+
+            report.Check(!Tidying.Organise(into),
+                "control: an already tidy chest is not rewritten, so watching one costs nothing",
+                $"slots={shedInventory.GetAllItems().Count}");
+
             VillagerLifecycle.Remove(colony, who);
             colony.State.SetJobs(new List<JobDefinition>());
             colony.RemoveStructure(overflow.Id);
@@ -997,6 +1027,20 @@ namespace Kukolony.Debug
             }
 
             return doomed.Count;
+        }
+
+        /// <summary>Places a stack in one grid slot, bypassing automatic stacking.</summary>
+        private static void Split(Inventory inventory, string prefabName, int count, int x, int y)
+        {
+            GameObject prefab = ObjectDB.instance?.GetItemPrefab(prefabName);
+            if (inventory == null || prefab == null || !prefab.TryGetComponent(out ItemDrop drop)) return;
+
+            ItemDrop.ItemData stack = drop.m_itemData.Clone();
+            stack.m_dropPrefab = prefab;
+            stack.m_stack = count;
+            stack.m_gridPos = new Vector2i(x, y);
+            inventory.m_inventory.Add(stack);
+            inventory.Changed();
         }
 
         /// <summary>Puts a number of an item into a container, returning how many went in.</summary>

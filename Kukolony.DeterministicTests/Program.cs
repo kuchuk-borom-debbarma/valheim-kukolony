@@ -50,6 +50,7 @@ static class Program
 
         Haul();
         Placing();
+        Packing();
 
         Console.WriteLine(_failed == 0
             ? $"RESULT: PASS ({_cases} cases)"
@@ -189,6 +190,47 @@ static class Program
         Case("control: an allowed move is always worth more than a forbidden one",
             Placement.Improvement(Placement.Overflow, Placement.Named) >
             Placement.Improvement(Placement.Named, Placement.Named));
+    }
+
+    /// <summary>
+    ///     Packing part-used stacks together. All boundaries, which is why it is here.
+    /// </summary>
+    static void Packing()
+    {
+        Console.WriteLine("stacking");
+
+        Pack("two half stacks become one", new[] { 30, 20 }, 50, new[] { 50 });
+        Pack("a full stack and a remainder is the fewest slots the total can occupy",
+            new[] { 40, 40, 20 }, 50, new[] { 50, 50 });
+        Pack("an exact multiple leaves no remainder", new[] { 25, 25, 25, 25 }, 50, new[] { 50, 50 });
+        Pack("more than fits in one slot spills into the next", new[] { 30, 30, 30 }, 50, new[] { 50, 40 });
+        Pack("a full stack beside a partial one is already minimal", new[] { 50, 30 }, 50, new int[0]);
+
+        // Nothing to do must be sayable, or a settlement rewrites every chest it looks at
+        // forever - and rewriting a container makes it save and tells every watcher it changed.
+        Pack("a single stack is left alone", new[] { 17 }, 50, new int[0]);
+        Pack("a single full stack is left alone", new[] { 50 }, 50, new int[0]);
+        Pack("already packed stacks are left alone", new[] { 50, 50, 12 }, 50, new int[0]);
+        Pack("nothing at all is nothing to do", new int[0], 50, new int[0]);
+
+        // Order is not packing's business - three stacks holding 112 occupy three slots
+        // whichever way round they sit, and putting them in a sensible order is the sorting
+        // step. Packing that rewrote for order alone would report work every time it looked.
+        Pack("the same stacks in a different order are still minimal", new[] { 12, 50, 50 }, 50, new int[0]);
+
+        // Control: the rule must actually distinguish the two. A version that always rewrote,
+        // or never did, would pass half of the lines above.
+        Case("control: packing tells tidy from untidy rather than answering the same way twice",
+            Stacking.Pack(new List<int> { 50, 50, 12 }, 50).Count == 0 &&
+            Stacking.Pack(new List<int> { 40, 40, 20 }, 50).Count > 0);
+    }
+
+    static void Pack(string what, int[] stacks, int maximum, int[] expected)
+    {
+        List<int> actual = Stacking.Pack(new List<int>(stacks), maximum);
+        bool same = actual.Count == expected.Length;
+        for (int i = 0; same && i < expected.Length; i++) same = actual[i] == expected[i];
+        Case($"{what} (got [{string.Join(",", actual)}])", same);
     }
 
     static void Score(string what, int expected, bool names, bool takesAnything, bool takesUnclaimed, bool atCap)

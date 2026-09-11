@@ -109,12 +109,31 @@ Choosing ──► Claiming ──► Fetching ──► Collecting ──► De
   filled up mid-trip is noticed.
 - **Settling** — release claims and report.
 
+**A chest a villager finishes with is left in order**: split stacks packed together and
+contents laid out in a stable order. Moving the wrong things out is only half of organising,
+and it costs nothing — the villager is already standing at a chest it has already claimed.
+Skipped when there is nothing to gain, because rewriting a container makes it save itself and
+tells every watcher it changed; a settlement that rewrote every chest it looked at would pay
+for tidiness twenty times a second.
+
 **One destination per trip.** The destination is chosen first and the trip is built around it, so
 every claim has an obvious owner and a destination that vanishes invalidates exactly one trip
 rather than a tangle of half-committed deliveries.
 
 **Any state falls back to Choosing when its target stops being valid**, which is most of the edge
 cases below rather than a special case for each.
+
+## Getting there
+
+**A destination the pathfinder refuses is not a pathfinding failure.** `BaseAI.FindPath`
+requires a *complete* path, and the centre of a chest is not a point anything can stand on —
+so it returns false, `MoveTo` reports "stopped" with no waypoints, and the villager never
+takes a step. This reads exactly like an AI that walks into walls, and is the opposite.
+
+Every destination is snapped onto the navmesh before anyone walks to it, and arrival is judged
+against the *thing wanted* rather than the point walked to. The full measurements and the API
+that does it are in [valheim-findings.md](valheim-findings.md); it applies to every job, not
+just this one.
 
 ## Edge cases, named before building
 
