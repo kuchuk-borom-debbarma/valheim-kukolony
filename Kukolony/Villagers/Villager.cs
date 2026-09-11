@@ -177,11 +177,14 @@ namespace Kukolony.Villagers
 
             Log.Info($"[travel] {State.Name}: {remaining:0}m to go, " +
                      $"{covered / TraceSeconds:0.0}m/s {(reckoning ? "unseen" : "walking")}, " +
-                     $"'{Activity}' zoneHeld={zoneHeld} appended={appended} allowed={allowed}" +
+                     $"'{Activity}' ticks={_ticks / TraceSeconds:0.0}/s dt={_tickTime / Mathf.Max(1, _ticks):0.000} " +
+                     $"zoneHeld={zoneHeld} appended={appended} allowed={allowed}" +
                      (result == MoveResult.PathFailed ? " - STUCK" : string.Empty));
 
             _tracedAt = transform.position;
             _nextTrace = Time.time + TraceSeconds;
+            _ticks = 0;
+            _tickTime = 0f;
         }
 
         private const float TraceSeconds = 3f;
@@ -190,6 +193,8 @@ namespace Kukolony.Villagers
         private bool _tracedReckoning;
         private Vector3 _tracedAt;
         private float _nextTrace;
+        private int _ticks;
+        private float _tickTime;
 
         /// <summary>Whether this villager is partway through a journey longer than one hop.</summary>
         internal bool IsTravelling => _walk != null && _walk.Travelling;
@@ -233,6 +238,9 @@ namespace Kukolony.Villagers
             EnsureHumanSkin();
             EnsureAppearance();
             EnsureTamed();
+
+            _ticks++;
+            _tickTime += deltaTime;
 
             if (_onErrand)
             {

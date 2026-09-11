@@ -72,12 +72,26 @@ namespace Kukolony.Villagers.Navigation
         internal bool Travelling => _travelling;
 
         /// <summary>Prepares the ground between here and there. Call before walking.</summary>
-        internal void Prepare(Vector3 destination)
+        /// <param name="arriveWithin">
+        ///     How close counts as arrived. A journey ends here or when somebody can see it -
+        ///     never at a distance threshold.
+        /// </param>
+        /// <remarks>
+        ///     <b>Travelling latches.</b> It begins when the destination is further off than the
+        ///     settlement is wide and ends only on arrival; it does not switch off again partway
+        ///     because the remaining distance dropped below the same number that started it.
+        ///     That version oscillated: at exactly 45m out the villager announced it had finished
+        ///     travelling, handed over to walking, failed to walk across ground with no navmesh,
+        ///     and was immediately far enough away to start travelling again - back and forth,
+        ///     stuck at 45m, at full speed, reporting nothing wrong.
+        /// </remarks>
+        internal void Prepare(Vector3 destination, float arriveWithin)
         {
             Vector3 here = _ai.transform.position;
             float remaining = Utils.DistanceXZ(here, destination);
 
-            _travelling = remaining > HopLength;
+            if (!_travelling && remaining > HopLength) _travelling = true;
+            if (_travelling && remaining <= arriveWithin) _travelling = false;
             if (!_travelling) return;
 
             Vector3 bearing = destination - here;

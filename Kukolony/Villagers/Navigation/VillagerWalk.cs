@@ -57,6 +57,17 @@ namespace Kukolony.Villagers.Navigation
         /// </remarks>
         private const float NearbyStallSeconds = 4f;
 
+        /// <summary>
+        ///     How long a journey must be getting nowhere before the ground is given up on.
+        /// </summary>
+        /// <remarks>
+        ///     Long enough that the navmesh has had its chance - tiles are built one per cycle
+        ///     and a path across new ground measured up to fifteen seconds to appear - and short
+        ///     enough that a villager does not spend a minute of a player's evening standing in
+        ///     a bush. Progress resets it, so a journey that is merely slow is never rescued.
+        /// </remarks>
+        private const float RescueAfterSeconds = 15f;
+
         private readonly MonsterAI _ai;
         private readonly Journey _journey;
 
@@ -102,13 +113,39 @@ namespace Kukolony.Villagers.Navigation
             // one where something has asked to walk. Near targets take the same route through
             // this with the destination unchanged, so there is one movement call in the mod
             // and it does not matter whether the caller knows the distance.
-            _journey.Prepare(target);
+            _journey.Prepare(target, stopDistance);
 
-            // A long journey nobody can see is covered by dead reckoning rather than by
-            // walking. Walking needs a navmesh, a navmesh needs loaded colliders, and ground no
-            // player has visited may never have either - so the one thing a settlement cannot
-            // rely on is a villager walking somewhere alone. This takes exactly as long.
-            if (_journey.Travelling && !_journey.Observed(_ai.transform.position))
+            // Walking is the way a villager travels. Reckoning is what rescues it when walking
+            // has stopped working, and nothing else does.
+            //
+            // Measured, same terrain and same destination on different runs: walking covered 83m
+            // at a metre a second on one, and two metres in five minutes on the next. So it is
+            // right often enough to be the default and wrong often enough that something has to
+            // catch it - which is the whole argument for making this a rescue rather than the
+            // primary mechanism. Reckoning ignores terrain; a villager should only be excused
+            // from the ground when the ground has failed it.
+            //
+            // Gated on having made no progress rather than on distance. The earlier version
+            // asked "is this a long journey and is nobody watching", which deadlocked: a
+            // villager has to walk clear of the settlement before nobody is watching, so one
+            // that stalled on its way out was never far enough away to be rescued.
+            // Stalled in view: put it back on the navmesh where it stands, and let it try again.
+            //
+            // A villager that cannot walk is usually standing somewhere the navmesh does not
+            // cover, and FindValidPoint answers "the nearest place an agent of this kind can be"
+            // - a correction of a metre or two, which is not worth hiding from. Reckoning is not
+            // used here: a player watching would see it glide, and the whole reason reckoning is
+            // allowed at all is that nobody can see it.
+            if (_journey.Travelling && StalledFor > RescueAfterSeconds &&
+                _journey.Observed(_ai.transform.position))
+            {
+                _journey.Resume(_ai.m_character);
+                Forget();
+                return MoveResult.Moving;
+            }
+
+            if (_journey.Travelling && StalledFor > RescueAfterSeconds &&
+                !_journey.Observed(_ai.transform.position))
             {
                 _wasReckoning = true;
                 VillagerMovement.Stop(_ai);
