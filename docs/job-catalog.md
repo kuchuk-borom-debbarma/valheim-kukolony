@@ -84,8 +84,18 @@ Choosing ──► Claiming ──► Fetching ──► Collecting ──► De
 - **Fetching** — walk to the first source.
 - **Collecting** — take items, up to bag capacity, with the pickup animation. Several per trip,
   not one.
+
+  **What a trip carries is recorded, not read off the bag.** A villager's clothing lives in the
+  same inventory as its cargo — equipment is a mirror of the bag — so a hauler that delivered
+  "everything it is holding" files its own shirt in the chest. The manifest is a *set* of prefab
+  names: with a single name, taking a second kind of item erases the first and everything picked
+  up before it stops being recognised as cargo, riding around undeliverable. The name is a hint
+  in the usual way — it is cargo only while the bag actually holds some.
 - **Delivering** — walk to the destination.
 - **Depositing** — put them in. Partial deposits are fine; what will not fit stays in the bag.
+  The head of the load is re-checked against the destination before each deposit, because the
+  rest of a load can be bound somewhere else entirely — and that same check is how a chest that
+  filled up mid-trip is noticed.
 - **Settling** — release claims and report.
 
 **One destination per trip.** The destination is chosen first and the trip is built around it, so
