@@ -385,6 +385,18 @@ static class Program
         Case("control: a journey that is over stops being rescued",
             Locomotor.Decide(new TravelFacts(true, false, false, false, false, false, true))
                 == Locomotion.BackOnFoot);
+
+        // ...and does so even where there is nowhere good to stand, because otherwise whether a
+        // villager walks in or slides in depends on whether the navmesh at its destination has
+        // finished building. That is how a check comes to pass one run and fail the next.
+        Case("a villager always finishes a journey on its feet",
+            Locomotor.Decide(new TravelFacts(true, false, false, false, false, false, false))
+                == Locomotion.BackOnFoot);
+
+        // Control: mid-journey with nowhere to stand is still the case that must keep going.
+        Case("control: nowhere to stand mid-journey still keeps covering ground",
+            Locomotor.Decide(new TravelFacts(true, true, true, false, true, false, false))
+                == Locomotion.CoverGround);
     }
 
     static void Burst(string what, int consecutive, float expected)

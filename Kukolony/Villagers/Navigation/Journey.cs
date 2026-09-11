@@ -232,10 +232,17 @@ namespace Kukolony.Villagers.Navigation
         /// </remarks>
         internal bool Resume(Character body)
         {
-            if (!TryFindStanding(body, out Vector3 valid)) return false;
+            if (TryFindStanding(body, out Vector3 valid))
+            {
+                Place(body, valid, reckoning: false);
+                return true;
+            }
 
-            Place(body, valid, reckoning: false);
-            return true;
+            // Physics comes back even when there was nowhere better to stand. A villager left
+            // kinematic cannot be moved by anything - not the character controller, not gravity -
+            // so failing to find a landing spot must never also leave it frozen.
+            if (body != null && body.m_body != null) body.m_body.isKinematic = false;
+            return false;
         }
 
         /// <summary>

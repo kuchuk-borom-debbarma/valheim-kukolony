@@ -937,6 +937,18 @@ namespace Kukolony.Debug
                 $"control: it still exists after travelling {what}",
                 destroyed ? "its record was deleted en route" : $"record intact, unloaded {unloads} time(s)");
 
+            // Give it a moment to finish. The loop above stops as soon as the villager is
+            // near enough for this check's purposes, which is not the same instant the journey
+            // itself considers the trip over - and sampling in that gap asked whether a villager
+            // was on its feet while it was still in the act of landing. Three separate failures
+            // in this suite have been a check and the code disagreeing about "arrived".
+            float landing = 0f;
+            while (landing < 5f && walker != null && walker.IsReckoning)
+            {
+                yield return new WaitForSecondsRealtime(.25f);
+                landing += .25f;
+            }
+
             if (expectHandover)
             {
                 // The property worth holding is not that a handover happened - a villager that

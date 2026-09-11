@@ -81,11 +81,17 @@ namespace Kukolony.Villagers.Navigation
         {
             if (facts.Rescuing)
             {
-                // Stop when the rescue is spent, or when somebody can see it and it has not yet
-                // earned the right to be seen doing this - but only where there is ground to
-                // stand on. Otherwise keep going, because the alternative is standing still.
-                bool wantsToWalk = facts.BurstSpent || !facts.Travelling ||
-                                   (facts.Observed && facts.PoliteRescuesLeft);
+                // The journey is over: stop, whether or not there is anywhere good to stand.
+                // Continuing to cover ground towards somewhere already reached is pointless, and
+                // the villager would arrive sliding - which made the whole thing flaky, because
+                // whether the navmesh at the destination had finished building decided whether
+                // it walked in or skated in. A villager always finishes on its feet.
+                if (!facts.Travelling) return Locomotion.BackOnFoot;
+
+                // Otherwise stop when the rescue is spent, or when somebody can see it and it has
+                // not yet earned the right to be seen doing this - but only where there is ground
+                // to stand on. Otherwise keep going, because the alternative is standing still.
+                bool wantsToWalk = facts.BurstSpent || (facts.Observed && facts.PoliteRescuesLeft);
 
                 return wantsToWalk && facts.CanStand ? Locomotion.BackOnFoot : Locomotion.CoverGround;
             }
