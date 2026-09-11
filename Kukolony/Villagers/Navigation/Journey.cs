@@ -54,6 +54,12 @@ namespace Kukolony.Villagers.Navigation
 
         private const float PokeSeconds = 1f;
 
+        /// <summary>How far around the projected next stretch to look for walkable ground.</summary>
+        private const float LegSearch = 15f;
+
+        /// <summary>How much closer a snapped leg must be before it counts as the way forward.</summary>
+        private const float MinimumLegGain = 10f;
+
         /// <summary>
         ///     How far to look for standable ground, widening until something is found.
         /// </summary>
@@ -113,6 +119,24 @@ namespace Kukolony.Villagers.Navigation
                 _waypoint.y = ground;
             }
 
+            // Snapped to somewhere an agent of this kind can actually be. A straight line
+            // projected forty-five metres ahead lands in a lake or against a cliff often enough
+            // to matter, and a leg the villager cannot walk to is no better than a destination it
+            // cannot walk to - it produces the same unanswerable path query and the same journey
+            // spent entirely on rescues. Wide, because the point of the leg is to be roughly
+            // ahead rather than exactly there.
+            if (Pathfinding.instance != null &&
+                Pathfinding.instance.FindValidPoint(out Vector3 walkable, _waypoint, LegSearch,
+                    _ai.m_pathAgentType) &&
+                Utils.DistanceXZ(walkable, destination) < remaining - MinimumLegGain)
+            {
+                // Only if it is still progress. FindValidPoint answers "the nearest place an
+                // agent can be", which can be to the side of the route or behind it - and a
+                // villager sent sideways walks perfectly well while getting no closer to where
+                // it was going, which reads exactly like being stuck.
+                _waypoint = walkable;
+            }
+
             PokeAhead(here, destination);
         }
 
@@ -163,7 +187,10 @@ namespace Kukolony.Villagers.Navigation
             bearing.y = 0f;
 
             float remaining = bearing.magnitude;
-            float step = Reckoning.StepLength(remaining, body.m_walkSpeed, deltaTime);
+            // The same pace it would have travelled at, which is a jog: covering ground unseen
+            // must take as long as doing it properly, or it stops being a simulation of the
+            // journey and becomes a way of skipping it.
+            float step = Reckoning.StepLength(remaining, Pace(body), deltaTime);
 
             if (step <= 0f) return remaining <= 0f;
 
@@ -238,6 +265,15 @@ namespace Kukolony.Villagers.Navigation
 
             return false;
         }
+
+        /// <summary>How fast this villager covers ground on a journey.</summary>
+        /// <remarks>
+        ///     Run speed, because a travelling villager runs. A creature with no run speed
+        ///     configured falls back to walking rather than standing still, which is the failure
+        ///     a zero here would cause.
+        /// </remarks>
+        private static float Pace(Character body) =>
+            body.m_runSpeed > 0f ? body.m_runSpeed : body.m_walkSpeed;
 
         private static void Place(Character body, Vector3 position, bool reckoning)
         {

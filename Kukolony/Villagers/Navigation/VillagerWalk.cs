@@ -82,7 +82,28 @@ namespace Kukolony.Villagers.Navigation
         ///     enough that a villager does not spend a minute of a player's evening standing in
         ///     a bush. Progress resets it, so a journey that is merely slow is never rescued.
         /// </remarks>
-        private const float RescueAfterSeconds = 15f;
+        /// <remarks>
+        ///     <para>
+        ///         Forty-five seconds, and the number is a measurement rather than a preference.
+        ///         The first thing a villager does on a new route is wait for the navmesh to be
+        ///         built for ground nobody has walked, and asking the pathfinder while it waits
+        ///         says exactly how long that takes:
+        ///     </para>
+        ///     <code>
+        ///     stalled  5s: waypoints=0   fullPath=False  -> PathFailed
+        ///     stalled 15s: waypoints=0   fullPath=False  -> PathFailed
+        ///     stalled 20s: waypoints=1   fullPath=False  -> Moving
+        ///     stalled 25s: waypoints=20  fullPath=True   -> Moving
+        ///     </code>
+        ///     <para>
+        ///         Twenty-five seconds for a forty-four metre stretch, which is what one tile per
+        ///         cycle with a five second minimum age comes to. Nothing was wrong; the villager
+        ///         was waiting for the world. Rescuing at fifteen or thirty seconds meant every
+        ///         journey gave up on walking a moment before walking became possible, and the
+        ///         villager covered the whole distance without touching the ground.
+        ///     </para>
+        /// </remarks>
+        private const float RescueAfterSeconds = 45f;
 
         /// <summary>
         ///     How far the next stretch must move before it is worth re-snapping to the navmesh.
@@ -127,6 +148,7 @@ namespace Kukolony.Villagers.Navigation
         private Vector3 _errand = new Vector3(float.MaxValue, 0f, float.MaxValue);
         private Vector3 _leg = new Vector3(float.MaxValue, 0f, float.MaxValue);
         private Vector3 _legStanding;
+        private float _nextComplaint;
 
         internal VillagerWalk(MonsterAI ai)
         {
@@ -166,6 +188,17 @@ namespace Kukolony.Villagers.Navigation
                 _errand = target;
                 _rescues = 0;
                 _bursts = 0;
+
+                // And end any rescue in progress. Resetting only the counters left a villager
+                // that arrived mid-rescue still covering ground, so it began its next errand
+                // gliding and never touched the ground again - a hundred and fifty metres home
+                // in twenty-one seconds. Every errand starts on foot.
+                if (_reckoning)
+                {
+                    _reckoning = false;
+                    _journey.Resume(_ai.m_character);
+                    Forget();
+                }
             }
 
             _journey.Prepare(target, stopDistance);
@@ -265,8 +298,24 @@ namespace Kukolony.Villagers.Navigation
                 _legStanding = Approach.Standing(_ai, leg);
             }
 
+            // Villagers jog when crossing country and walk when working. Measured: walking a
+            // hundred and sixty metres takes most of five minutes once the route bends round a
+            // hill, because a villager closes about a metre of straight-line distance for every
+            // three it actually walks. A settlement whose workers amble between outposts reads
+            // as broken even when it is not.
             MoveResult stepped = VillagerMovement.MoveTowards(_ai, _legStanding,
-                VillagerMovement.MinimumStopDistance, run);
+                VillagerMovement.MinimumStopDistance, run || _journey.Travelling);
+
+            // Says what the pathfinder thinks of the stretch it was asked to walk, while it is
+            // still failing to walk it. A journey that never starts looks identical to one that
+            // is merely slow, and the difference is in here.
+            if (_journey.Travelling && StalledFor > 5f && Time.time > _nextComplaint)
+            {
+                _nextComplaint = Time.time + 5f;
+                Core.Log.Info($"[leg] {Utils.DistanceXZ(_ai.transform.position, _legStanding):0}m to the " +
+                              $"next stretch, stalled {StalledFor:0}s, stepped {stepped}, " +
+                              VillagerMovement.Explain(_ai, _legStanding));
+            }
 
             // Inside the grace, a stop means the throttled pathfinder has not considered this
             // target yet. There is nothing to conclude from it either way.

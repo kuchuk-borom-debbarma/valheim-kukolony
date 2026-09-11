@@ -240,20 +240,40 @@ patch early in a journey does not leave a villager gliding for the rest of it.
 **Measured, both legs, repeatably:** out 160m to 8m in 186s, home 152m to 8m in 98s, unloaded
 zero times. Before any of this, a villager stopped existing at about a hundred metres, every run.
 
-## Open: walking stalls near the settlement, so the last stretch is gliding
+## Resolved: walking was never broken, it was being interrupted
 
-**Status: arrival is reliable; the way it arrives is not yet right.**
+The last of it, and the measurement that settled it. Asking the pathfinder about the stretch
+ahead **while the villager was failing to walk it**:
 
-The return leg reports `cameIntoView=False` - the villager reckoned the whole way home rather
-than handing back to walking when it came into view. It is not a fault in the handover, which
-works: it is that walking stalls dead at seventy to ninety metres from the settlement, so the
-ladder escalates and keeps gliding.
+```
+stalled  5s: waypoints=0   fullPath=False  -> PathFailed
+stalled 15s: waypoints=0   fullPath=False  -> PathFailed
+stalled 20s: waypoints=1   fullPath=False  -> Moving
+stalled 25s: waypoints=20  fullPath=True   -> Moving
+```
 
-That stall is almost certainly the same fault as the intermittent
-`cannot get there (stopped 7.2m away, needed 5.0m ... fullPath=False partialPath=True)` seen in
-hauling, which suggests one navigation problem near the colony rather than two. The benchmark
-check `coming home, a villager stops covering ground unseen and walks the last of it` fails on
-purpose until it is fixed.
+**Twenty-five seconds to build the navmesh for a forty-four metre stretch of ground nobody had
+walked** - exactly what one tile per cycle with a five second minimum age comes to. Nothing was
+broken. The villager was waiting for the world, and the rescue kept firing a moment before
+walking became possible, so the journey was covered without touching the ground.
+
+Patience is now forty-five seconds, which is a measurement rather than a preference.
+
+Three other things had to be true before it worked:
+
+- **Walk towards the next stretch, not the far end.** `GetPath` snaps both ends and fails
+  outright if either will not snap, so a destination in unloaded terrain makes the whole question
+  unanswerable. See [valheim-findings.md](valheim-findings.md).
+- **The next stretch must itself be walkable, and must be progress.** Snapping it to the nearest
+  standable ground is right; accepting a snap that lands sideways is not, and sends a villager
+  walking perfectly well while getting no closer.
+- **Every errand starts on foot.** A villager that arrived mid-rescue used to keep covering
+  ground into its next journey - a hundred and fifty metres home in twenty-one seconds without
+  touching the ground once.
+
+Measured, both legs, walking: out 160m to 7m in 62s, home 153m to 6m in 37s, unloaded zero times.
+
+
 
 **Status: no longer loses villagers; does not yet complete a journey in reasonable time.**
 

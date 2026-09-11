@@ -924,7 +924,7 @@ namespace Kukolony.Debug
                 if (now < closest) closest = now;
             }
 
-            string story = $"{startedAt:0}m to {closest:0}m in {elapsed:0}s, unseen={wentUnseen}" +
+            string story = $"{startedAt:0}m to {closest:0}m in {elapsed:0}s, walkedMostly={!wentUnseen}" +
                            (expectHandover ? $" cameIntoView={cameIntoView}" : string.Empty) +
                            $" unloadedTimes={unloads}" +
                            (destroyed ? " - ZDO GONE, TRULY DESTROYED" : string.Empty);
@@ -939,9 +939,14 @@ namespace Kukolony.Debug
 
             if (expectHandover)
             {
-                report.Check(cameIntoView,
-                    "coming home, a villager stops covering ground unseen and walks the last of it",
-                    story);
+                // The property worth holding is not that a handover happened - a villager that
+                // walked the whole way never needed one - but that it finished on its feet.
+                // Arriving mid-glide means the last thing a player sees is a villager sliding
+                // into the settlement, which is the one thing covering ground unseen must never
+                // do.
+                report.Check(!walker.IsReckoning,
+                    "a villager arrives on its feet rather than sliding in",
+                    story + $" reckoningAtArrival={walker.IsReckoning}");
             }
 
             arrived(reached);
@@ -1113,14 +1118,23 @@ namespace Kukolony.Debug
                 "control: the villager ran out of work before stillness was measured",
                 $"doing '{keeper.Activity}' after {settling:0}s");
 
-            // Everything is where it belongs. Nothing should move again.
-            string before = $"{CountIn(misplaced, "Wood")}/{CountIn(into, "Wood")}";
+            // Everything is where it belongs, so nothing should come BACK out of the chest that
+            // names it and nothing should reappear in the one that does not.
+            //
+            // Asserted as "no wood moves anywhere" before, which is a different and wrong claim:
+            // a villager that finds a stray log on the floor and files it correctly is doing its
+            // job, and the shed gaining two wood during the window failed a check about
+            // ping-ponging for a settlement that was behaving perfectly. What ping-ponging looks
+            // like is wood leaving the right chest, or arriving back in the wrong one.
+            int shedBefore = CountIn(into, "Wood");
             yield return new WaitForSecondsRealtime(3f);
-            string after = $"{CountIn(misplaced, "Wood")}/{CountIn(into, "Wood")}";
+            int shedAfter = CountIn(into, "Wood");
+            int strayAfter = CountIn(misplaced, "Wood");
 
-            report.Check(before == after,
-                "a sorted settlement stops moving, which is what proves nothing ping-pongs",
-                $"before={before} after={after} doing='{keeper.Activity}'");
+            report.Check(shedAfter >= shedBefore && strayAfter == 0,
+                "a sorted settlement never moves wood back out of the chest that asked for it",
+                $"shed {shedBefore} -> {shedAfter}, back in the overflow chest={strayAfter}, " +
+                $"doing='{keeper.Activity}'");
 
             // The control that makes the line above mean anything: a villager that has stopped
             // because everything is sorted must still start again when something is not.
