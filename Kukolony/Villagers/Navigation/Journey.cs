@@ -54,8 +54,14 @@ namespace Kukolony.Villagers.Navigation
 
         private const float PokeSeconds = 1f;
 
-        /// <summary>How far to look for standable ground when a journey becomes observed.</summary>
-        private const float ResumeSearch = 20f;
+        /// <summary>
+        ///     How far to look for standable ground, widening until something is found.
+        /// </summary>
+        /// <remarks>
+        ///     Nearest first, so a villager is put down as close as possible to where it actually
+        ///     is rather than flung to the far side of whatever it was standing on.
+        /// </remarks>
+        private static readonly float[] ResumeSearches = { 5f, 20f, 60f };
 
         private readonly MonsterAI _ai;
 
@@ -181,21 +187,40 @@ namespace Kukolony.Villagers.Navigation
         /// <summary>
         ///     Puts a villager back on ground the pathfinder recognises, before it walks again.
         /// </summary>
-        internal void Resume(Character body)
+        /// <summary>
+        ///     Puts a villager back on ground the pathfinder recognises, before it walks again.
+        /// </summary>
+        /// <returns>
+        ///     Whether there was anywhere to put it. False means the villager is standing where
+        ///     no agent of its kind can be, and handing it back to walking would strand it.
+        /// </returns>
+        /// <remarks>
+        ///     <b>This is the difference between a rescue and a trap.</b> Covering ground unseen
+        ///     ignores terrain, so it can set a villager down on water, inside a rock, or on a
+        ///     ledge with no route off it. <c>GetPath</c> begins by snapping the <em>start</em> of
+        ///     the route onto the navmesh and fails outright if it cannot - which is why a
+        ///     stranded villager reports no path at all rather than a bad one, and why it reports
+        ///     it forever. Widening the search is cheap; the caller keeps covering ground until
+        ///     there is somewhere to land.
+        /// </remarks>
+        internal bool Resume(Character body)
         {
-            if (body == null) return;
+            if (body == null) return false;
+            if (Pathfinding.instance == null) return false;
 
-            if (Pathfinding.instance != null &&
-                Pathfinding.instance.FindValidPoint(out Vector3 valid, body.transform.position,
-                    ResumeSearch, _ai.m_pathAgentType))
+            foreach (float radius in ResumeSearches)
             {
+                if (!Pathfinding.instance.FindValidPoint(out Vector3 valid, body.transform.position,
+                        radius, _ai.m_pathAgentType))
+                {
+                    continue;
+                }
+
                 Place(body, valid, reckoning: false);
-                return;
+                return true;
             }
 
-            // Hand physics back even when there was nowhere better to stand, or the villager
-            // walks around weightless for the rest of its life.
-            if (body.m_body != null) body.m_body.isKinematic = false;
+            return false;
         }
 
         private static void Place(Character body, Vector3 position, bool reckoning)

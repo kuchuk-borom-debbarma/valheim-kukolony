@@ -379,14 +379,30 @@ namespace Kukolony.Jobs.Haul
         ///     Whether the villager is close enough to work on this.
         /// </summary>
         /// <remarks>
-        ///     The same measure the walking used, from the same place. When arriving and having
-        ///     arrived are two different numbers, a villager walks as far as it can, is told it
-        ///     is not there yet, and tries again forever.
+        ///     <para>
+        ///         The same measure the walking used, from the same place. When arriving and
+        ///         having arrived are two different numbers, a villager walks as far as it can,
+        ///         is told it is not there yet, and tries again forever - which is precisely what
+        ///         happened: <see cref="Arrival" /> would accept a villager stopped seven metres
+        ///         from a chest while this still demanded five, so the trip never advanced and
+        ///         the wood was carried about indefinitely.
+        ///     </para>
+        ///     <para>
+        ///         Tight while the villager is still closing, so it walks right up to things in
+        ///         the ordinary case, and as generous as <see cref="Arrival" /> once it has
+        ///         stopped getting closer - because at that point this is as near as it goes.
+        ///     </para>
         /// </remarks>
-        private static bool Within(HaulContext context, GameObject thing) =>
-            thing != null &&
-            Utils.DistanceXZ(thing.transform.position, context.Villager.transform.position)
-            <= Approach.DistanceTo(thing);
+        private static bool Within(HaulContext context, GameObject thing)
+        {
+            if (thing == null) return false;
+
+            float reach = context.Walk.StalledFor >= Arrival.SettledSeconds
+                ? Arrival.WorkingReach
+                : Approach.DistanceTo(thing);
+
+            return Utils.DistanceXZ(thing.transform.position, context.Villager.transform.position) <= reach;
+        }
 
         /// <summary>
         ///     Finds what an id refers to, distinguishing destroyed from merely not loaded.

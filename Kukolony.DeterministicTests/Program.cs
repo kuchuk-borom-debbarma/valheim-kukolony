@@ -1,5 +1,6 @@
 using Kukolony.Colonies;
 using Kukolony.Jobs;
+using Kukolony.Villagers.Navigation;
 using Kukolony.Jobs.Haul;
 
 /// <summary>
@@ -52,6 +53,8 @@ static class Program
         Placing();
         Packing();
         Reckoning();
+        Arriving();
+        Rescuing();
 
         Console.WriteLine(_failed == 0
             ? $"RESULT: PASS ({_cases} cases)"
@@ -251,6 +254,78 @@ static class Program
         Case("control: a faster walker covers more ground in the same tick",
             global::Kukolony.Villagers.Navigation.Reckoning.StepLength(100f, 4f, .2f) >
             global::Kukolony.Villagers.Navigation.Reckoning.StepLength(100f, 2f, .2f));
+    }
+
+    /// <summary>
+    ///     Deciding whether a villager got there, when how close it can get depends on the world.
+    /// </summary>
+    static void Arriving()
+    {
+        Console.WriteLine("arriving");
+
+        Arrive("close enough is arrived, walking or not", false, 3f, 5f, 0f, 20f, Approaching.Arrived);
+        Arrive("still walking and not there yet keeps walking", false, 30f, 5f, 1f, 20f,
+            Approaching.KeepWalking);
+
+        // The intermittent hauling failure, as a table row: stopped 7.2m from a chest whose
+        // comfortable range is 5m, not closing. That is as near as the navmesh goes.
+        Arrive("stopped short, within reach and settled, is as arrived as it gets",
+            true, 7.2f, 5f, 4f, 20f, Approaching.Arrived);
+
+        // ...but a momentary stop is not the end of a journey.
+        Arrive("stopped short but only just, keeps walking", true, 7.2f, 5f, 1f, 20f,
+            Approaching.KeepWalking);
+
+        Arrive("stopped far away and settled is not arrival, it is being stuck",
+            true, 40f, 5f, 25f, 20f, Approaching.GaveUp);
+        Arrive("stopped far away but still within patience keeps trying",
+            true, 40f, 5f, 5f, 20f, Approaching.KeepWalking);
+
+        // Control: the two ways of arriving must be genuinely different. A rule that answered
+        // Arrived for anything stopped would pass four lines above and fail this one.
+        Case("control: stopping a long way off is never mistaken for arriving",
+            Arrival.Judge(true, 40f, 5f, 4f, 20f) != Approaching.Arrived);
+
+        // Control: and one that never answered Arrived would pass that and fail this.
+        Case("control: stopping just outside the comfortable range does count",
+            Arrival.Judge(true, 6f, 5f, 4f, 20f) == Approaching.Arrived);
+    }
+
+    /// <summary>How long a rescue lasts when the same bad ground keeps needing one.</summary>
+    static void Rescuing()
+    {
+        Console.WriteLine("rescuing");
+
+        Burst("the first rescue is short, because most only need to be", 1, 20f);
+        Burst("the second lasts twice as long", 2, 40f);
+        Burst("the third, twice again", 3, 80f);
+        Burst("and it stops doubling at the cap", 4, 160f);
+        Burst("however many times it has been needed", 9, 160f);
+
+        // A zeroth rescue is not a thing, but asking must not produce a zero-length one - that
+        // would be a rescue that rescues nobody, retried forever.
+        Burst("asking before any rescue has happened still gives a usable burst", 0, 20f);
+
+        // Control: it must actually grow. A constant would pass the first line and the cap.
+        Case("control: repeated rescues last longer than single ones",
+            Rescue.BurstSeconds(3) > Rescue.BurstSeconds(1));
+
+        // Control: and it must actually stop growing.
+        Case("control: rescues are bounded however bad the ground is",
+            Rescue.BurstSeconds(30) == Rescue.BurstSeconds(4));
+    }
+
+    static void Burst(string what, int consecutive, float expected)
+    {
+        float actual = Rescue.BurstSeconds(consecutive);
+        Case($"{what} (got {actual})", Math.Abs(actual - expected) < .001f);
+    }
+
+    static void Arrive(string what, bool stopped, float distance, float stopDistance,
+        float stalledFor, float patience, Approaching expected)
+    {
+        Approaching actual = Arrival.Judge(stopped, distance, stopDistance, stalledFor, patience);
+        Case($"{what} (got {actual})", actual == expected);
     }
 
     static void Step(string what, float remaining, float speed, float dt, float expected)

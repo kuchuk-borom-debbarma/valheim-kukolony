@@ -71,6 +71,11 @@ namespace Kukolony.Villagers.Navigation
         /// <summary>How many polite rescues to try before resorting to one a player might see.</summary>
         private const int RescuesBeforeGliding = 2;
 
+        /// <summary>
+        ///     How long one rescue lasts before walking is tried again.
+        /// </summary>
+
+
         private readonly MonsterAI _ai;
         private readonly Journey _journey;
 
@@ -80,8 +85,10 @@ namespace Kukolony.Villagers.Navigation
         private float _graceUntil;
         private float _closest;
         private float _lastProgress;
-        private bool _wasReckoning;
+        private bool _reckoning;
+        private float _reckonUntil;
         private int _rescues;
+        private int _bursts;
 
         internal VillagerWalk(MonsterAI ai)
         {
@@ -94,8 +101,8 @@ namespace Kukolony.Villagers.Navigation
 
         internal bool Travelling => _journey.Travelling;
 
-        /// <summary>Whether it is covering ground unseen rather than walking it.</summary>
-        internal bool Reckoning => _wasReckoning;
+        /// <summary>Whether it is covering ground rather than walking it.</summary>
+        internal bool Reckoning => _reckoning;
 
         /// <summary>How long the villager has been trying without getting closer.</summary>
         internal float StalledFor => _hasTarget ? Mathf.Max(0f, Time.time - _lastProgress) : 0f;
@@ -112,68 +119,54 @@ namespace Kukolony.Villagers.Navigation
         internal MoveResult MoveTowards(Vector3 target, float stopDistance, bool run = false,
             float deltaTime = 0f)
         {
-            // Anywhere further than a single hop is walked in hops, because Valheim will not
-            // answer a path across ground it has not built a navmesh for - and it only builds
-            // one where something has asked to walk. Near targets take the same route through
-            // this with the destination unchanged, so there is one movement call in the mod
-            // and it does not matter whether the caller knows the distance.
             _journey.Prepare(target, stopDistance);
 
-            // Walking is the way a villager travels. Reckoning is what rescues it when walking
-            // has stopped working, and nothing else does.
-            //
-            // Measured, same terrain and same destination on different runs: walking covered 83m
-            // at a metre a second on one, and two metres in five minutes on the next. So it is
-            // right often enough to be the default and wrong often enough that something has to
-            // catch it - which is the whole argument for making this a rescue rather than the
-            // primary mechanism. Reckoning ignores terrain; a villager should only be excused
-            // from the ground when the ground has failed it.
-            //
-            // Gated on having made no progress rather than on distance. The earlier version
-            // asked "is this a long journey and is nobody watching", which deadlocked: a
-            // villager has to walk clear of the settlement before nobody is watching, so one
-            // that stalled on its way out was never far enough away to be rescued.
-            // Stalled in view: put it back on the navmesh where it stands, and let it try again.
-            //
-            // A villager that cannot walk is usually standing somewhere the navmesh does not
-            // cover, and FindValidPoint answers "the nearest place an agent of this kind can be"
-            // - a correction of a metre or two, which is not worth hiding from. Reckoning is not
-            // used here: a player watching would see it glide, and the whole reason reckoning is
-            // allowed at all is that nobody can see it.
-            if (_journey.Travelling && StalledFor > RescueAfterSeconds &&
-                _journey.Observed(_ai.transform.position) && _rescues < RescuesBeforeGliding)
+            // A rescue already under way. Bursts are bounded so that walking is always tried
+            // again: the first version simply reckoned while it was stalled, and since nothing
+            // updated the stall clock during reckoning it never stopped being stalled - so a
+            // villager that escaped one bad patch glided the rest of the way home and reported
+            // that it had never come back into view.
+            if (_reckoning)
             {
-                _rescues++;
-                _journey.Resume(_ai.m_character);
-                Forget();
+                if (Time.time < _reckonUntil && _journey.Travelling)
+                {
+                    VillagerMovement.Stop(_ai);
+                    return _journey.Advance(_ai.m_character, target,
+                        deltaTime > 0f ? deltaTime : Time.deltaTime)
+                        ? MoveResult.Arrived
+                        : MoveResult.Moving;
+                }
+
+                // Only hand back to the ground when there is ground to hand back to. Otherwise
+                // keep covering distance: a villager set down where no path can even begin
+                // reports no path forever, and would stand there until something removed it.
+                if (!EndReckoning()) _reckonUntil = Time.time + Rescue.BurstSeconds(_bursts);
                 return MoveResult.Moving;
             }
 
-            // Last rung: glide even in view, because the alternative is worse.
-            //
-            // Being seen is normally the one thing that forbids reckoning, and it still comes
-            // last - after walking, and after being put back on the navmesh twice. But a villager
-            // that has exhausted those is not going to arrive, and a settlement that quietly
-            // loses a worker to a patch of ground is a worse outcome than a player occasionally
-            // noticing one cross it oddly. Measured: stuck dead at 77m from home, 0.0m/s, ticking
-            // twenty times a second, for five minutes.
-            if (_journey.Travelling && StalledFor > RescueAfterSeconds &&
-                (_rescues >= RescuesBeforeGliding || !_journey.Observed(_ai.transform.position)))
+            if (_journey.Travelling && StalledFor > RescueAfterSeconds)
             {
-                _wasReckoning = true;
-                VillagerMovement.Stop(_ai);
-                return _journey.Advance(_ai.m_character, target,
-                    deltaTime > 0f ? deltaTime : Time.deltaTime)
-                    ? MoveResult.Arrived
-                    : MoveResult.Moving;
-            }
+                // In view, and the gentle option has not been exhausted: put it back on the
+                // navmesh where it stands. A villager that cannot walk is usually standing
+                // somewhere the navmesh does not reach, and this is a correction of a metre or
+                // two rather than something worth hiding from.
+                if (_journey.Observed(_ai.transform.position) && _rescues < RescuesBeforeGliding)
+                {
+                    // If there is nowhere to stand, putting it back on the navmesh is not a
+                    // rescue and pretending otherwise costs fifteen seconds per attempt.
+                    if (_journey.Resume(_ai.m_character))
+                    {
+                        _rescues++;
+                        Forget();
+                        return MoveResult.Moving;
+                    }
 
-            // Coming back into view: put it down somewhere it can walk from before it tries.
-            if (_wasReckoning)
-            {
-                _wasReckoning = false;
-                _journey.Resume(_ai.m_character);
-                Forget();
+                    BeginReckoning();
+                    return MoveResult.Moving;
+                }
+
+                BeginReckoning();
+                return MoveResult.Moving;
             }
 
             Retarget(target);
@@ -184,41 +177,59 @@ namespace Kukolony.Villagers.Navigation
                 // Real progress, not the first reading of a new journey. Forgetting a route sets
                 // the closest-yet to infinity, so the tick after it every distance looks like an
                 // improvement - and the rescue that did the forgetting immediately cleared its
-                // own counter. The ladder could never climb past its second rung, which is
-                // exactly what a villager stuck at seventy metres for five minutes looked like.
+                // own counter, leaving the ladder unable to climb past its second rung.
                 bool measured = _closest < float.MaxValue;
 
                 _closest = distance;
                 _lastProgress = Time.time;
 
-                // Getting somewhere again earns back the gentler rescues. Without this, one bad
-                // patch early in a journey would leave a villager gliding for the rest of it.
-                if (measured) _rescues = 0;
+                if (measured)
+                {
+                    // Walking is working again, so the ground it was struggling with is behind
+                    // it. Both ladders start from the bottom next time.
+                    _rescues = 0;
+                    _bursts = 0;
+                }
             }
 
-            // Walk as close to the navmesh point as it can get, and judge arrival generously
-            // against the thing actually wanted. Passing the caller's tolerance to both would
-            // compound them - stopping short of a point that is already short of the chest -
-            // and the villager would arrive precisely where it was sent, still out of reach.
-            MoveResult result = VillagerMovement.MoveTowards(_ai, _standing,
+            MoveResult stepped = VillagerMovement.MoveTowards(_ai, _standing,
                 VillagerMovement.MinimumStopDistance, run);
-            if (result == MoveResult.Moving) return MoveResult.Moving;
 
-            if (distance <= stopDistance) return MoveResult.Arrived;
-
-            // Stopped, but not there. That is the ordinary state of affairs rather than a
-            // failure: BaseAI follows a *partial* path and reports "stopped" every time it
-            // reaches the end of the navmesh that has been built so far, which on any walk
-            // across unvisited ground happens over and over. The tiles ahead then build - the
-            // asking is what builds them - and the next call carries on.
-            //
-            // So a walk fails when it stops getting closer, not when it stops walking. The
-            // grace still covers the first seconds, when the throttled pathfinder is answering
-            // about a target it has not considered yet and there is no progress to measure.
-            if (Time.time < _graceUntil) return MoveResult.Moving;
+            // Inside the grace, a stop means the throttled pathfinder has not considered this
+            // target yet. There is nothing to conclude from it either way.
+            if (stepped != MoveResult.Moving && Time.time < _graceUntil) return MoveResult.Moving;
 
             float patience = _journey.Travelling ? StallSeconds : NearbyStallSeconds;
-            return StalledFor < patience ? MoveResult.Moving : MoveResult.PathFailed;
+            switch (Arrival.Judge(stepped != MoveResult.Moving, distance, stopDistance,
+                        StalledFor, patience))
+            {
+                case Approaching.Arrived:
+                    return MoveResult.Arrived;
+
+                case Approaching.GaveUp:
+                    return MoveResult.PathFailed;
+
+                default:
+                    return MoveResult.Moving;
+            }
+        }
+
+        private void BeginReckoning()
+        {
+            _reckoning = true;
+            _bursts++;
+            _reckonUntil = Time.time + Rescue.BurstSeconds(_bursts);
+        }
+
+        /// <summary>Hands the villager back to the ground: physics on, feet on the navmesh.</summary>
+        /// <returns>False when there was nowhere to stand, so the rescue must continue.</returns>
+        private bool EndReckoning()
+        {
+            if (!_journey.Resume(_ai.m_character)) return false;
+
+            _reckoning = false;
+            Forget();
+            return true;
         }
 
         internal void Stop()
