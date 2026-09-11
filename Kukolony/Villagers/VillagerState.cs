@@ -197,9 +197,14 @@ namespace Kukolony.Villagers
         /// </remarks>
         internal void ResetJob()
         {
+            // The manifest is deliberately NOT cleared here. It describes what is in the bag,
+            // and the bag survives a job being skipped, failed or restarted - so forgetting it
+            // here left real goods in a real inventory that no job recognised as cargo any
+            // more. The villager then reported nothing to haul while carrying ten wood, and
+            // dropped the lot when it was eventually removed. It clears itself in Tick, the
+            // moment the bag genuinely stops holding any of it.
             SetTarget(ZDOID.None);
             SetDestination(ZDOID.None);
-            SetCargo(string.Empty);
             SetWorkState(0);
         }
 

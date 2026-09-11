@@ -90,6 +90,30 @@ namespace Kukolony.Colonies
             return answers;
         }
 
+        /// <summary>
+        ///     The containers the settlement is allowed to reorganise.
+        /// </summary>
+        /// <remarks>
+        ///     Registered, reachable, and not marked as keeping. A chest the player told the
+        ///     settlement not to take from is never a source, which is how "this one is mine"
+        ///     is expressed - so it is excluded here rather than checked later, where a new
+        ///     caller could forget.
+        /// </remarks>
+        internal static List<StructureRecord> WhatMayBeTidied(Colony colony)
+        {
+            List<StructureRecord> answers = new List<StructureRecord>();
+            if (colony == null) return answers;
+
+            foreach (StructureRecord record in Current(colony).Storage)
+            {
+                if (!record.Settings.MayTakeFrom) continue;
+                if (record.StatusIn(colony) != StructureStatus.Ready) continue;
+                answers.Add(record);
+            }
+
+            return answers;
+        }
+
         /// <summary>Which processing stations are configured and below what they should hold.</summary>
         internal static List<StructureRecord> WhatWantsFeeding(Colony colony, Vector3 from)
         {
@@ -121,6 +145,33 @@ namespace Kukolony.Colonies
             }
 
             return answers;
+        }
+
+        /// <summary>
+        ///     The record for a registered structure, from the cached snapshot.
+        /// </summary>
+        /// <remarks>
+        ///     Asked of the index rather than of the colony, because <c>GetStructures</c>
+        ///     decodes the whole registry blob on every call - fine for a screen drawn on a key
+        ///     press, ruinous for a job that asks once per villager per tick. The settlement has
+        ///     no population cap, and this is exactly the shape that would stop being affordable.
+        /// </remarks>
+        internal static StructureRecord Find(Colony colony, ZDOID id)
+        {
+            if (colony == null || id.IsNone()) return null;
+
+            Snapshot snapshot = Current(colony);
+            return FindIn(snapshot.Storage, id) ?? FindIn(snapshot.Processing, id) ?? FindIn(snapshot.Beds, id);
+        }
+
+        private static StructureRecord FindIn(List<StructureRecord> records, ZDOID id)
+        {
+            foreach (StructureRecord record in records)
+            {
+                if (record.Id == id) return record;
+            }
+
+            return null;
         }
 
         /// <summary>The bed a villager was given, or null.</summary>

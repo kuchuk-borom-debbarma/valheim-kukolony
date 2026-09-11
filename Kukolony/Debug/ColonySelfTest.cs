@@ -170,6 +170,7 @@ namespace Kukolony.Debug
             yield return CheckVillagerLiving(report, colony, origin);
             yield return CheckJobQueue(report, colony);
             yield return CheckHauling(report, colony, origin);
+            yield return CheckTidying(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
@@ -788,6 +789,248 @@ namespace Kukolony.Debug
             colony.State.SetJobs(new List<JobDefinition>());
             if (chest != null) { colony.RemoveStructure(store.Id); Release(chest); }
             yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Organising: wood in the wrong chest moves to the right one, and then everything
+        ///     stops.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>The settlement coming to rest is the claim worth proving.</b> The shuffle
+        ///         loop - A says move this to B, B says move it back - is invisible in a short
+        ///         test, because a settlement in permanent motion looks exactly like a settlement
+        ///         being busy. So this measures stillness, and pairs it with a control that puts
+        ///         real work back and watches the same villager move again: stillness from a
+        ///         broken villager and stillness from a sorted settlement are the same picture.
+        ///     </para>
+        ///     <para>
+        ///         The ground is swept first. An overflow chest claims everything by definition,
+        ///         so a stray item left by an earlier check is a home away from home and the
+        ///         settlement would never be still - which would fail this for a reason that has
+        ///         nothing to do with tidying.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckTidying(TestReport report, Colony colony, Vector3 origin)
+        {
+            SettlementIndex.ResetForTest();
+            int swept = SweepLooseItems(colony);
+
+            // Placed where a villager has already been proven able to walk - the hauling check
+            // works this side of the colony. The first attempt put them a few metres the other
+            // way, behind the standing stones that ring the hearth, and the villager reported
+            // "cannot get there" from thirteen metres out while closing a tenth of a metre per
+            // try. A fixture the subject cannot reach fails the feature, not the fixture, and
+            // that is the third time placement has cost a run.
+            GameObject overflowChest = Spawn("piece_chest_wood", origin + new Vector3(5f, 0f, 7f));
+            GameObject woodChest = Spawn("piece_chest_wood", origin + new Vector3(8f, 0f, 7f));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            StructureRecord overflow = Register(colony, overflowChest, "Overflow");
+            StructureRecord shed = Register(colony, woodChest, "Wood shed");
+            if (overflow == null || shed == null)
+            {
+                report.Check(false, "tidy check could register two chests");
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, overflow.Id, s => s.Accepts = new List<string>());
+            ColonyOperations.EditSettings(colony, shed.Id, s => s.Accepts = new List<string> { "Wood" });
+
+            Container misplaced = overflowChest.GetComponentInChildren<Container>(true);
+            report.Check(misplaced != null && PutIn(misplaced, "Wood", 10) == 10,
+                "control: there is wood in the wrong chest to begin with",
+                $"inOverflow={(misplaced == null ? -1 : CountIn(misplaced, "Wood"))} sweptFromGround={swept}");
+            if (misplaced == null) yield break;
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "tidy", Name = "Tidy", Kind = JobKind.Haul, Repeat = 20 }
+            });
+
+            Villager keeper = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (keeper == null || !keeper.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "tidy check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "tidy" });
+
+            Container into = woodChest.GetComponentInChildren<Container>(true);
+            int moved = 0;
+
+            // The sequence of things it did, not just what it was doing when time ran out.
+            // "Still fetching after forty seconds" is the same sentence whether it walked a
+            // long way once or bounced between two decisions two hundred times, and those are
+            // different bugs.
+            List<string> story = new List<string>();
+            for (int attempt = 0; attempt < 40 && moved < 10; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                moved = into == null ? 0 : CountIn(into, "Wood");
+                if (story.Count == 0 || story[story.Count - 1] != keeper.Activity) story.Add(keeper.Activity);
+            }
+
+            report.Check(moved >= 10,
+                "wood in an overflow chest migrates to the chest that names it",
+                $"inWoodShed={moved} leftInOverflow={CountIn(misplaced, "Wood")} " +
+                $"loose={LooseItemsNear(colony)} elsewhere='{WhereTheWoodWent(colony)}' " +
+                $"steps={story.Count} did='{string.Join(" > ", story.ToArray())}'");
+
+            report.Check(CountIn(misplaced, "Wood") == 0,
+                "control: the overflow chest it came from is emptied of it, not merely copied from",
+                $"leftInOverflow={CountIn(misplaced, "Wood")}");
+
+            // Everything is where it belongs. Nothing should move again.
+            string before = $"{CountIn(misplaced, "Wood")}/{CountIn(into, "Wood")}";
+            yield return new WaitForSecondsRealtime(3f);
+            string after = $"{CountIn(misplaced, "Wood")}/{CountIn(into, "Wood")}";
+
+            report.Check(before == after,
+                "a sorted settlement stops moving, which is what proves nothing ping-pongs",
+                $"before={before} after={after} doing='{keeper.Activity}'");
+
+            // The control that makes the line above mean anything: a villager that has stopped
+            // because everything is sorted must still start again when something is not.
+            PutIn(misplaced, "Wood", 5);
+            int movedAgain = 0;
+            for (int attempt = 0; attempt < 20 && movedAgain < 5; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                movedAgain = CountIn(into, "Wood") - moved;
+            }
+
+            report.Check(movedAgain >= 5,
+                "control: the same villager moves again the moment something is misplaced",
+                $"movedAgain={movedAgain} doing='{keeper.Activity}'");
+
+            // Two chests that both name wood are equal, so there is no reason to move between
+            // them - the case that would otherwise shuffle forever.
+            ColonyOperations.EditSettings(colony, overflow.Id, s => s.Accepts = new List<string> { "Wood" });
+            SettlementIndex.ResetForTest();
+            int inShed = CountIn(into, "Wood");
+            PutIn(misplaced, "Wood", 5);
+            yield return new WaitForSecondsRealtime(3f);
+
+            report.Check(CountIn(into, "Wood") == inShed && CountIn(misplaced, "Wood") == 5,
+                "wood is not moved between two chests that both name wood",
+                $"shed={CountIn(into, "Wood")} was {inShed}, other={CountIn(misplaced, "Wood")}");
+
+            // A chest the player keeps is never a source, however badly its contents score.
+            ColonyOperations.EditSettings(colony, overflow.Id, s =>
+            {
+                s.Accepts = new List<string> { "Coal" };
+                s.MayTakeFrom = false;
+            });
+            SettlementIndex.ResetForTest();
+            yield return new WaitForSecondsRealtime(3f);
+
+            report.Check(CountIn(misplaced, "Wood") == 5,
+                "a chest marked not to be taken from is never a source, even holding the wrong thing",
+                $"stillThere={CountIn(misplaced, "Wood")}");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.State.SetJobs(new List<JobDefinition>());
+            colony.RemoveStructure(overflow.Id);
+            colony.RemoveStructure(shed.Id);
+            Release(overflowChest);
+            Release(woodChest);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Every registered container and what wood is in it.
+        /// </summary>
+        /// <remarks>
+        ///     "It did not arrive" and "it arrived somewhere else" look identical from the
+        ///     destination, and only one of them is a bug in hauling - the other is a fixture
+        ///     that left a chest registered.
+        /// </remarks>
+        private static string WhereTheWoodWent(Colony colony)
+        {
+            System.Text.StringBuilder found = new System.Text.StringBuilder();
+            foreach (StructureRecord record in colony.State.GetStructures())
+            {
+                if ((record.Capabilities & StructureCapability.Storage) == 0) continue;
+
+                int held = StructureInventory.Count(record.Id, "Wood");
+                if (held <= 0) continue;
+
+                found.Append(record.Name).Append('=').Append(held).Append(' ');
+            }
+
+            return found.Length == 0 ? "nowhere" : found.ToString();
+        }
+
+        /// <summary>How many loose items lie in the colony's reach right now.</summary>
+        private static int LooseItemsNear(Colony colony)
+        {
+            int count = 0;
+            foreach (ItemDrop drop in ItemDrop.s_instances)
+            {
+                if (drop == null) continue;
+                if (Utils.DistanceXZ(drop.transform.position, colony.transform.position) <= colony.EffectiveRadius)
+                    count++;
+            }
+
+            return count;
+        }
+
+        /// <summary>Destroys loose items in the colony's reach, so a fixture starts from nothing.</summary>
+        private static int SweepLooseItems(Colony colony)
+        {
+            List<ItemDrop> doomed = new List<ItemDrop>();
+            foreach (ItemDrop drop in ItemDrop.s_instances)
+            {
+                if (drop == null) continue;
+                if (Utils.DistanceXZ(drop.transform.position, colony.transform.position) > colony.EffectiveRadius)
+                    continue;
+                doomed.Add(drop);
+            }
+
+            foreach (ItemDrop drop in doomed)
+            {
+                if (drop.TryGetComponent(out ZNetView view) && view.IsValid()) view.Destroy();
+            }
+
+            return doomed.Count;
+        }
+
+        /// <summary>Puts a number of an item into a container, returning how many went in.</summary>
+        private static int PutIn(Container container, string prefabName, int count)
+        {
+            Inventory inventory = container?.GetInventory();
+            GameObject prefab = ObjectDB.instance?.GetItemPrefab(prefabName);
+            if (inventory == null || prefab == null || !prefab.TryGetComponent(out ItemDrop drop)) return 0;
+
+            int before = CountIn(container, prefabName);
+
+            // Built by hand rather than through Inventory.AddItem(prefab, count), so the item
+            // carries the prefab it came from. Without it the settlement cannot name what it is
+            // looking at, and a chest full of anonymous wood reads as a chest full of nothing.
+            ItemDrop.ItemData stack = drop.m_itemData.Clone();
+            stack.m_dropPrefab = prefab;
+            stack.m_stack = count;
+            inventory.AddItem(stack);
+            return CountIn(container, prefabName) - before;
+        }
+
+        private static int CountIn(Container container, string prefabName)
+        {
+            Inventory inventory = container?.GetInventory();
+            if (inventory == null) return 0;
+
+            int total = 0;
+            foreach (ItemDrop.ItemData item in inventory.GetAllItems())
+            {
+                if (item?.m_dropPrefab != null && Utils.GetPrefabName(item.m_dropPrefab) == prefabName)
+                    total += item.m_stack;
+            }
+
+            return total;
         }
 
         /// <summary>

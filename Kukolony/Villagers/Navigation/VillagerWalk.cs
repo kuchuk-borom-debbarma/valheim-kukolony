@@ -37,6 +37,7 @@ namespace Kukolony.Villagers.Navigation
         private readonly MonsterAI _ai;
 
         private Vector3 _target;
+        private Vector3 _standing;
         private bool _hasTarget;
         private float _graceUntil;
         private float _closest;
@@ -61,8 +62,15 @@ namespace Kukolony.Villagers.Navigation
                 _lastProgress = Time.time;
             }
 
-            MoveResult result = VillagerMovement.MoveTowards(_ai, target, stopDistance, run);
-            if (result != MoveResult.PathFailed) return result;
+            // Walk as close to the navmesh point as it can get, and judge arrival generously
+            // against the thing actually wanted. Passing the caller's tolerance to both would
+            // compound them - stopping short of a point that is already short of the chest -
+            // and the villager would arrive precisely where it was sent, still out of reach.
+            MoveResult result = VillagerMovement.MoveTowards(_ai, _standing,
+                VillagerMovement.MinimumStopDistance, run);
+            if (result == MoveResult.Moving) return MoveResult.Moving;
+
+            if (distance <= stopDistance) return MoveResult.Arrived;
 
             // Inside the grace a failure is most likely the throttled pathfinder answering
             // from a cache that predates this target. Keep walking and ask again.
@@ -82,6 +90,9 @@ namespace Kukolony.Villagers.Navigation
             _closest = float.MaxValue;
         }
 
+        /// <summary>The point being walked to, which is not always the thing being walked at.</summary>
+        internal Vector3 StandingAt => _standing;
+
         /// <summary>
         ///     Starts the clock again when the destination genuinely changes.
         /// </summary>
@@ -96,6 +107,11 @@ namespace Kukolony.Villagers.Navigation
 
             _target = target;
             _hasTarget = true;
+
+            // Resolved once per journey, not per tick. HavePath is a real query against the
+            // navmesh, and a villager has no reason to ask it twenty times a second about a
+            // destination that has not moved.
+            _standing = Approach.Standing(_ai, target);
             _graceUntil = Time.time + GraceSeconds;
             _closest = float.MaxValue;
             _lastProgress = Time.time;

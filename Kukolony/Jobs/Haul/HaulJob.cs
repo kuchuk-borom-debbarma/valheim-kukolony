@@ -26,9 +26,6 @@ namespace Kukolony.Jobs.Haul
     /// </summary>
     internal static class HaulJob
     {
-        /// <summary>How close counts as being at something.</summary>
-        private const float Reach = 2f;
-
         internal static JobResult Tick(HaulContext context, out string activity)
         {
             VillagerState state = context.State;
@@ -132,22 +129,43 @@ namespace Kukolony.Jobs.Haul
                 return JobResult.Running;
             }
 
-            if (!Selection.TryFindGroundWork(context.Colony, context.Job, context.Villager,
+            // Ground first, decided per villager at the moment it picks up work rather than
+            // across the whole settlement. A settlement with a permanent trickle of dropped
+            // items would otherwise never reorganise itself at all, because there would always
+            // be something on the floor somewhere.
+            if (Selection.TryFindGroundWork(context.Colony, context.Job, context.Villager,
                     out ItemDrop item, out StructureRecord destination))
             {
-                return JobOutcomes.Skipped(context.State, "nothing to haul", out activity);
+                if (!item.TryGetComponent(out ZNetView view) || !view.IsValid())
+                {
+                    return JobOutcomes.Skipped(context.State, "nothing to haul", out activity);
+                }
+
+                // Taking the target is also taking the claim, so no other villager walks here.
+                state.SetTarget(view.GetZDO().m_uid);
+                state.SetDestination(destination.Id);
+                activity = "fetching";
+                return JobResult.Running;
             }
 
-            if (!item.TryGetComponent(out ZNetView view) || !view.IsValid())
+            if (Selection.TryFindContainerWork(context.Colony, context.Job, context.Villager,
+                    out GameObject chest, out StructureRecord shouldBe))
             {
-                return JobOutcomes.Skipped(context.State, "nothing to haul", out activity);
+                // The whole chest is claimed, not the stack inside it: one villager tidies one
+                // container. Two villagers picking through the same chest is how a settlement
+                // double-handles a stack, and the claim already works per object.
+                if (!chest.TryGetComponent(out ZNetView holding) || !holding.IsValid())
+                {
+                    return JobOutcomes.Skipped(context.State, "nothing to haul", out activity);
+                }
+
+                state.SetTarget(holding.GetZDO().m_uid);
+                state.SetDestination(shouldBe.Id);
+                activity = "tidying up";
+                return JobResult.Running;
             }
 
-            // Taking the target is also taking the claim, so no other villager walks here.
-            state.SetTarget(view.GetZDO().m_uid);
-            state.SetDestination(destination.Id);
-            activity = "fetching";
-            return JobResult.Running;
+            return JobOutcomes.Skipped(context.State, "nothing to haul", out activity);
         }
 
         private static JobResult Walk(HaulContext context, GameObject target, string doing, out string activity)
@@ -159,7 +177,10 @@ namespace Kukolony.Jobs.Haul
                 return JobOutcomes.Skipped(context.State, "waiting for the world", out activity);
             }
 
-            switch (context.Walk.MoveTowards(target.transform.position, Reach))
+            // How close it can actually get depends on what it is walking to: a chest stops
+            // the villager a good metre short of its own centre, and demanding the centre is
+            // demanding a position inside the chest.
+            switch (context.Walk.MoveTowards(target.transform.position, Approach.DistanceTo(target)))
             {
                 case MoveResult.Moving:
                     activity = doing;
@@ -170,12 +191,28 @@ namespace Kukolony.Jobs.Haul
                     return JobResult.Running;
 
                 default:
-                    return JobOutcomes.Failed(context.State, "cannot get there", out activity);
+                    // Says how far short it stopped and what it was asked for. "Cannot get
+                    // there" is the same sentence whether the target is unreachable, the stop
+                    // distance is smaller than the thing being walked to, or the villager never
+                    // moved at all - and those are three different bugs.
+                    float gap = Utils.DistanceXZ(target.transform.position,
+                        context.Villager.transform.position);
+                    return JobOutcomes.Failed(context.State,
+                        $"cannot get there (stopped {gap:0.0}m away, needed {Approach.DistanceTo(target):0.0}m, " +
+                        $"{context.Villager.Explain(target.transform.position)})", out activity);
             }
         }
 
         private static JobResult Collect(HaulContext context, GameObject source, out string activity)
         {
+            // A source is either something lying on the ground or a container being tidied. The
+            // state machine does not care which - it is about where the villager is, not what it
+            // came for - so the only place the difference exists is here.
+            if (source != null && source.GetComponentInChildren<Container>(true) != null)
+            {
+                return CollectFromContainer(context, source, out activity);
+            }
+
             if (source == null || !source.TryGetComponent(out ItemDrop drop))
             {
                 context.State.ClearTarget();
@@ -207,6 +244,66 @@ namespace Kukolony.Jobs.Haul
                 default:
                     context.State.ClearTarget();
                     activity = "it was gone";
+                    return JobResult.Running;
+            }
+        }
+
+        /// <summary>
+        ///     Takes out of a container whatever belongs at this trip's destination.
+        /// </summary>
+        /// <remarks>
+        ///     What to take is worked out here, at the chest, rather than remembered from when
+        ///     the trip was chosen. The contents can change while the villager walks - another
+        ///     villager, the player, a station drawing fuel - and a remembered item is a promise
+        ///     the world never agreed to keep. Deciding on arrival also batches for free:
+        ///     everything in this chest bound for that one leaves in the same visit.
+        /// </remarks>
+        private static JobResult CollectFromContainer(HaulContext context, GameObject source, out string activity)
+        {
+            Container container = source.GetComponentInChildren<Container>(true);
+            StructureRecord from = SettlementIndex.Find(context.Colony, context.State.Target);
+            StructureRecord to = SettlementIndex.Find(context.Colony, context.State.Destination);
+
+            if (container == null || from == null || to == null)
+            {
+                context.State.ClearTarget();
+                activity = "that chest is gone";
+                return JobResult.Running;
+            }
+
+            ItemDrop.ItemData wanted = Selection.WhatToTakeFrom(context.Colony, context.Job, from, to,
+                container.GetInventory());
+            if (wanted == null)
+            {
+                // Nothing left here bound for where this trip is going. Releasing the chest ends
+                // the sweep and frees it for another villager; what is already carried still
+                // gets delivered, because the trip keeps its destination.
+                context.State.ClearTarget();
+                activity = "that is sorted out";
+                return JobResult.Running;
+            }
+
+            context.Animation.Reach();
+
+            switch (Carrying.TakeFromContainer(container, wanted, context.Bag.GetInventory(), out string lifted))
+            {
+                case TakeResult.Took:
+                    context.State.AddCargo(lifted);
+                    activity = "tidying up";
+                    return JobResult.Running;
+
+                case TakeResult.Waiting:
+                    activity = "opening the chest";
+                    return JobResult.Running;
+
+                case TakeResult.Full:
+                    context.State.ClearTarget();
+                    activity = "my bag is full";
+                    return JobResult.Running;
+
+                default:
+                    context.State.ClearTarget();
+                    activity = "that chest is gone";
                     return JobResult.Running;
             }
         }
@@ -267,9 +364,18 @@ namespace Kukolony.Jobs.Haul
             }
         }
 
+        /// <summary>
+        ///     Whether the villager is close enough to work on this.
+        /// </summary>
+        /// <remarks>
+        ///     The same measure the walking used, from the same place. When arriving and having
+        ///     arrived are two different numbers, a villager walks as far as it can, is told it
+        ///     is not there yet, and tries again forever.
+        /// </remarks>
         private static bool Within(HaulContext context, GameObject thing) =>
             thing != null &&
-            Utils.DistanceXZ(thing.transform.position, context.Villager.transform.position) <= Reach;
+            Utils.DistanceXZ(thing.transform.position, context.Villager.transform.position)
+            <= Approach.DistanceTo(thing);
 
         /// <summary>
         ///     Finds what an id refers to, distinguishing destroyed from merely not loaded.

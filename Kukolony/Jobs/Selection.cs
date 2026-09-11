@@ -82,6 +82,113 @@ namespace Kukolony.Jobs
         }
 
         /// <summary>
+        ///     The worst-placed item in the settlement's own containers, and where it belongs.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Ranked by how much the move improves things rather than by how near it is, so
+        ///         a villager fixes real mistakes before minor ones: a flint in the wood chest -
+        ///         somewhere that actively refuses it - outranks wood sitting in an overflow
+        ///         chest, and is worth walking further for. Distance breaks ties, because two
+        ///         equally wrong items are both worth fixing and the walk is then the only thing
+        ///         that separates them.
+        ///     </para>
+        ///     <para>
+        ///         <b>This is where the shuffle loop would live.</b> Nothing is chosen unless
+        ///         <see cref="Placement.MayMove" /> allows it, so two chests that both name wood
+        ///         never trade with each other and a settlement with everything in its right
+        ///         place finds no work at all - which is the behaviour worth proving.
+        ///     </para>
+        ///     <para>
+        ///         A source chest is claimed whole. One villager tidies one chest, which reuses
+        ///         the existing per-object claim exactly and makes it impossible for two
+        ///         villagers to walk to the same stack.
+        ///     </para>
+        /// </remarks>
+        internal static bool TryFindContainerWork(Colony colony, JobDefinition job, Villager asker,
+            out GameObject source, out StructureRecord destination)
+        {
+            source = null;
+            destination = null;
+            if (colony == null || asker == null || job == null || !job.TidyContainers) return false;
+
+            Vector3 from = asker.transform.position;
+            int bestImprovement = 0;
+            float bestDistance = float.MaxValue;
+
+            foreach (StructureRecord record in SettlementIndex.WhatMayBeTidied(colony))
+            {
+                GameObject instance = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(record.Id) : null;
+                if (instance == null) continue;
+                if (TargetClaims.IsClaimedByOther(record.Id, asker)) continue;
+
+                Container container = instance.GetComponentInChildren<Container>(true);
+                Inventory inventory = container != null ? container.GetInventory() : null;
+                if (inventory == null) continue;
+
+                float distance = Utils.DistanceXZ(instance.transform.position, from);
+
+                foreach (ItemDrop.ItemData held in inventory.GetAllItems())
+                {
+                    string prefab = Carrying.NameOf(held);
+                    if (prefab.Length == 0 || !Wanted(job, prefab)) continue;
+
+                    int here = SettlementIndex.ScoreOf(record, prefab);
+
+                    foreach (StructureRecord elsewhere in SettlementIndex.WhereDoesItGo(colony, prefab,
+                                 instance.transform.position))
+                    {
+                        // A chest is never a move to itself, however well it scores.
+                        if (elsewhere.Id == record.Id) continue;
+
+                        int improvement = Placement.Improvement(here, SettlementIndex.ScoreOf(elsewhere, prefab));
+                        if (improvement <= 0) continue;
+                        if (improvement < bestImprovement) continue;
+                        if (improvement == bestImprovement && distance >= bestDistance) continue;
+
+                        bestImprovement = improvement;
+                        bestDistance = distance;
+                        source = instance;
+                        destination = elsewhere;
+                        break;
+                    }
+                }
+            }
+
+            return source != null;
+        }
+
+        /// <summary>
+        ///     What may be taken out of this container and moved to that one, right now.
+        /// </summary>
+        /// <remarks>
+        ///     Re-derived at the chest rather than remembered from when the trip was chosen. The
+        ///     contents can change while the villager walks - another villager, the player, a
+        ///     processing station - and a remembered item is a promise the world need not keep.
+        ///     It also batches for free: everything in this chest bound for that one is taken in
+        ///     the same visit.
+        /// </remarks>
+        internal static ItemDrop.ItemData WhatToTakeFrom(Colony colony, JobDefinition job,
+            StructureRecord source, StructureRecord destination, Inventory contents)
+        {
+            if (colony == null || source == null || destination == null || contents == null) return null;
+
+            foreach (ItemDrop.ItemData held in contents.GetAllItems())
+            {
+                string prefab = Carrying.NameOf(held);
+                if (prefab.Length == 0 || !Wanted(job, prefab)) continue;
+
+                if (Placement.MayMove(SettlementIndex.ScoreOf(source, prefab),
+                        SettlementIndex.ScoreOf(destination, prefab)))
+                {
+                    return held;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
         ///     The first thing in a load that the settlement will actually take, and where.
         /// </summary>
         /// <remarks>

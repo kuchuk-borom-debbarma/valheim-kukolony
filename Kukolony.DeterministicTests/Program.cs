@@ -176,6 +176,19 @@ static class Program
         // one. An assertion that has never failed proves nothing.
         Case("control: the rule refuses a move that does not improve anything",
             !Placement.MayMove(Placement.Overflow, Placement.Overflow));
+
+        // Which mess gets fixed first.
+        Case("rescuing an item from a chest that refuses it beats a lesser tidy-up",
+            Placement.Improvement(Placement.Refused, Placement.Named) >
+            Placement.Improvement(Placement.Overflow, Placement.Named));
+        Case("picking an item up off the ground outranks shuffling it between chests",
+            Placement.Improvement(Placement.Ground, Placement.Named) >
+            Placement.Improvement(Placement.Overflow, Placement.Named));
+        Case("a move that is not allowed is worth nothing, never a negative",
+            Placement.Improvement(Placement.Named, Placement.Overflow) == 0);
+        Case("control: an allowed move is always worth more than a forbidden one",
+            Placement.Improvement(Placement.Overflow, Placement.Named) >
+            Placement.Improvement(Placement.Named, Placement.Named));
     }
 
     static void Score(string what, int expected, bool names, bool takesAnything, bool takesUnclaimed, bool atCap)

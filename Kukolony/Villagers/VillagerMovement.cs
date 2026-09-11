@@ -64,5 +64,21 @@ namespace Kukolony.Villagers
         }
 
         internal static void Stop(MonsterAI ai) => ai.StopMoving();
+
+        /// <summary>What the pathfinder currently thinks, for a failure worth explaining.</summary>
+        internal static string Explain(MonsterAI ai, Vector3 target)
+        {
+            if (ai == null) return "no ai";
+
+            int waypoints = ai.m_path != null ? ai.m_path.Count : -1;
+            bool full = Pathfinding.instance != null &&
+                        Pathfinding.instance.GetPath(ai.transform.position, target, null,
+                            ai.m_pathAgentType, true, false);
+            bool partial = Pathfinding.instance != null &&
+                           Pathfinding.instance.GetPath(ai.transform.position, target, null,
+                               ai.m_pathAgentType, false, false);
+
+            return $"waypoints={waypoints} agent={ai.m_pathAgentType} fullPath={full} partialPath={partial}";
+        }
     }
 }

@@ -98,6 +98,73 @@ namespace Kukolony.Jobs
         }
 
         /// <summary>
+        ///     Takes one kind of item out of a container and into a bag.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Ownership first, as everywhere else: writing a container's inventory requires
+        ///         owning it, asking is an RPC, and reporting <see cref="TakeResult.Waiting" />
+        ///         and trying again next tick is the pattern that works.
+        ///     </para>
+        ///     <para>
+        ///         A stack larger than the space left is taken in part rather than refused. The
+        ///         alternative - all or nothing - means a bag with four free slots ignores a
+        ///         chest holding one enormous stack, which is the exact case where hauling was
+        ///         wanted most.
+        ///     </para>
+        /// </remarks>
+        internal static TakeResult TakeFromContainer(Container from, ItemDrop.ItemData item, Inventory bag,
+            out string taken)
+        {
+            taken = string.Empty;
+            if (from == null || item == null || bag == null) return TakeResult.Unavailable;
+            if (!from.TryGetComponent(out ZNetView view) || !view.IsValid()) return TakeResult.Unavailable;
+
+            if (!view.IsOwner())
+            {
+                view.ClaimOwnership();
+                return TakeResult.Waiting;
+            }
+
+            Inventory contents = from.GetInventory();
+            if (contents == null) return TakeResult.Unavailable;
+
+            int room = RoomFor(bag, item);
+            if (room <= 0) return TakeResult.Full;
+
+            int amount = Mathf.Min(item.m_stack, room);
+            if (!TryFindSlot(bag, item, out int x, out int y)) return TakeResult.Full;
+
+            taken = NameOf(item);
+            return bag.MoveItemToThis(contents, item, amount, x, y) ? TakeResult.Took : TakeResult.Full;
+        }
+
+        /// <summary>
+        ///     How many of an item a bag could still take.
+        /// </summary>
+        /// <remarks>
+        ///     Counted rather than asked, because <c>CanAddItem</c> answers only yes or no for a
+        ///     whole stack and the interesting case is the partial one. Room in existing stacks
+        ///     of the same item, plus a full stack for every empty slot.
+        /// </remarks>
+        private static int RoomFor(Inventory bag, ItemDrop.ItemData item)
+        {
+            if (item.m_shared == null) return 0;
+
+            int maximum = Mathf.Max(1, item.m_shared.m_maxStackSize);
+            int room = bag.GetEmptySlots() * maximum;
+
+            string prefab = NameOf(item);
+            foreach (ItemDrop.ItemData existing in bag.GetAllItems())
+            {
+                if (NameOf(existing) != prefab || existing.m_quality != item.m_quality) continue;
+                room += Mathf.Max(0, maximum - existing.m_stack);
+            }
+
+            return room;
+        }
+
+        /// <summary>
         ///     Puts an item back on the ground.
         /// </summary>
         /// <remarks>

@@ -77,5 +77,17 @@ namespace Kukolony.Jobs
         ///     </para>
         /// </remarks>
         internal static bool MayMove(int from, int to) => to > Refused && to > from;
+
+        /// <summary>
+        ///     How much better a move makes things, or zero if it is not allowed at all.
+        /// </summary>
+        /// <remarks>
+        ///     What decides which mess a villager fixes first. A flint sitting in the wood chest
+        ///     - somewhere that actively refuses it - is a worse mistake than wood sitting in an
+        ///     overflow chest, and is worth walking further for. Zero for an illegal move rather
+        ///     than a negative number, so a caller that sorts on this can never rank one above
+        ///     doing nothing.
+        /// </remarks>
+        internal static int Improvement(int from, int to) => MayMove(from, to) ? to - from : 0;
     }
 }

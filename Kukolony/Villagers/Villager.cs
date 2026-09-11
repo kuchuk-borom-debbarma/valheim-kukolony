@@ -87,6 +87,9 @@ namespace Kukolony.Villagers
         ///     skipped. False to let vanilla run - which it does correctly, since
         ///     BaseAI.UpdateAI no-ops for non-owners anyway.
         /// </returns>
+        /// <summary>What the pathfinder thinks about a target, for a failure worth explaining.</summary>
+        internal string Explain(Vector3 target) => VillagerMovement.Explain(_ai, target);
+
         internal bool TryTakeOver(float deltaTime)
         {
             if (!Bind())
@@ -536,7 +539,12 @@ namespace Kukolony.Villagers
                 return;
             }
 
-            switch (VillagerMovement.MoveTowards(_ai, home, HomeStopDistance))
+            // Routed through VillagerWalk like every other journey, so walking home gets the
+            // same navmesh-snapped destination, the same path grace and the same progress
+            // tracking that work does. Calling the bare move wrapper here meant the one piece
+            // of movement every villager performs constantly was also the only one that could
+            // not benefit from any of it.
+            switch (_walk.MoveTowards(home, HomeStopDistance))
             {
                 case MoveResult.Moving:
                     SetActivity("walking home", $"{distance:F0}m away");
