@@ -80,12 +80,11 @@ namespace Kukolony.Debug
             chest.GetComponent<ZNetView>().GetZDO().SetPosition(originalChestPosition);
             yield return new WaitForSecondsRealtime(.2f);
 
-            GameObject deleted = Spawn("piece_chest_wood", origin + Vector3.right * 10f);
-            StructureRecord deletedRecord = Register(colony, deleted, "Deleted storage");
-            if (deleted != null) ZNetScene.instance.Destroy(deleted);
-            yield return new WaitForSecondsRealtime(.2f);
-            report.Check(deletedRecord != null && colony.State.GetStructures().Any(r => r.Id == deletedRecord.Id) &&
-                         !deletedRecord.IsLiveIn(colony), "deleted structure stays visible but is ineligible");
+            // A record that can never be found, and is not known to be dead: the state the
+            // whole "never infer destruction from absence" rule protects. It has to survive
+            // everything, so it is created here and asserted on much later, after the reaper
+            // has run over it - see CheckReaper.
+            PlantUnfindable(colony, "Unfindable storage");
 
             GameObject outside = Spawn("piece_chest_wood", origin + Vector3.right * (colony.EffectiveRadius + 12f));
             StructureRecord outsideRecord = MakeRecord(outside, "Outside");
@@ -127,6 +126,7 @@ namespace Kukolony.Debug
             yield return CheckOrphanedVillager(report, colony);
             yield return CheckDestroyedColonyLeavesStructures(report, colony, origin);
             yield return CheckRegistration(report, colony, origin);
+            yield return CheckReaper(report, colony, origin);
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
 
@@ -578,6 +578,69 @@ namespace Kukolony.Debug
         ///         since to this peer they are the same situation.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     A record goes when its structure is known destroyed, and only then.
+        /// </summary>
+        /// <remarks>
+        ///     The control is the whole safety argument, and matters more than the feature. A
+        ///     reaper that removes records for things it merely cannot find would delete an
+        ///     outpost's configuration the moment nobody stood near it - silently, permanently,
+        ///     and discovered a long way from here.
+        /// </remarks>
+        private static IEnumerator CheckReaper(TestReport report, Colony colony, Vector3 origin)
+        {
+            StructureReaper.ResetForTest();
+
+            GameObject doomed = Spawn("piece_chest_wood", origin + Vector3.right * 10f);
+            yield return null;
+            StructureRecord record = Register(colony, doomed, "Doomed storage");
+            report.Check(record != null, "control: the reaper's subject was registered before dying");
+            if (record == null) yield break;
+
+            // One sweep while it lives, so the reaper has seen where it is. That is what a
+            // record loaded from disk needs: its stored address is from the previous session
+            // and is not the id the game will list as dead.
+            StructureReaper.Sweep(colony);
+            report.Check(colony.State.GetStructures().Any(r => r.Id == record.Id),
+                "control: a living structure survives a sweep");
+
+            Release(doomed);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            int reaped = StructureReaper.Sweep(colony);
+            report.Check(reaped >= 1 && !colony.State.GetStructures().Any(r => r.Id == record.Id),
+                "a destroyed structure's record is removed", $"reaped={reaped}");
+
+            // The control. This record's object cannot be resolved and is not in the dead
+            // list - exactly what an unloaded outpost looks like to a peer that cannot see it.
+            bool survived = colony.State.GetStructures().Any(r => r.Name == "Unfindable storage");
+            report.Check(survived,
+                "control: a record that cannot be found, but is not known dead, survives the reaper");
+        }
+
+        /// <summary>
+        ///     Adds a record pointing at an id the world never issued.
+        /// </summary>
+        /// <remarks>
+        ///     Unresolvable and not dead-listed, which is precisely how a structure in an
+        ///     unloaded zone looks from a peer that has not been told about it. Built by hand
+        ///     rather than through registration because no real object can be put into this
+        ///     state on purpose - that is the point of it.
+        /// </remarks>
+        private static void PlantUnfindable(Colony colony, string name)
+        {
+            List<StructureRecord> records = colony.State.GetStructures();
+            records.Add(new StructureRecord
+            {
+                Id = new ZDOID(4242424242u, 987654321u),
+                PersistentId = "benchmark-unfindable-v1",
+                Name = name,
+                Prefab = "piece_chest_wood",
+                Capabilities = StructureCapability.Storage
+            });
+            colony.State.SetStructures(records);
+        }
+
         /// <summary>
         ///     Registering: what a colony accepts, what it refuses, and what it says.
         /// </summary>

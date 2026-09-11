@@ -167,7 +167,10 @@ namespace Kukolony.Debug
             yield return null;
 
             string live = RowBeside(screen, "Renamed storage");
-            string gone = RowBeside(screen, "Deleted storage");
+            // The unfindable record, not a destroyed one: a destroyed structure's record is
+            // reaped, so it is no longer on screen to read. What must render as "not found" is
+            // the record whose object cannot be located and is not known to be dead.
+            string gone = RowBeside(screen, "Unfindable storage");
 
             report.Check(gone.Contains("not found"), "a structure that cannot be found says so",
                 $"row read '{gone}'");
