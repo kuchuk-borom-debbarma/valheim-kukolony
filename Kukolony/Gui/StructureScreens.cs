@@ -195,6 +195,34 @@ namespace Kukolony.Gui
                     host.Refresh();
                 });
             }
+
+            if (column.TryRow(out Row dump))
+            {
+                Widgets.Flag(dump, "Take unclaimed items", settings.TakeUnclaimed, value =>
+                {
+                    ColonyOperations.EditSettings(colony, record.Id, s => s.TakeUnclaimed = value);
+                    host.Refresh();
+                });
+            }
+
+            // A cap row per item this chest was told to hold, plus one way to add another.
+            // Offered only for named items, because a cap on a chest that takes anything has
+            // nothing to name - the settings screen must not offer a setting that does nothing.
+            foreach (string item in settings.Accepts)
+            {
+                if (!column.TryRow(out Row cap)) continue;
+
+                string named = item;
+                int amount = settings.CapFor(named);
+                Widgets.Number(cap, "At most " + ItemCatalogue.Label(named), amount < 0 ? 0 : amount,
+                    0f, 9999f, 10f,
+                    value => value <= 0f ? "no limit" : ((int)value).ToString(),
+                    value => ColonyOperations.EditSettings(colony, record.Id, s =>
+                    {
+                        s.SetCap(named, value <= 0f ? -1 : (int)value);
+                        host.Refresh();
+                    }));
+            }
         }
 
         /// <summary>

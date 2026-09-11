@@ -113,13 +113,18 @@ namespace Kukolony.Jobs.Haul
             // Carrying something already: it needs a home, not a new errand.
             if (carried.Count > 0)
             {
-                // The head of the load decides where this trip goes. Everything else it is
-                // holding is delivered on a later pass, which keeps one destination per trip.
-                StructureRecord home = Selection.WhereFor(context.Colony, Carrying.NameOf(carried[0]),
-                    context.Villager.transform.position);
-                if (home == null)
+                // The first deliverable thing in the load decides where this trip goes.
+                // Everything else is delivered on a later pass, which keeps one destination per
+                // trip, and an oddment nothing claims does not hold the rest of the load hostage.
+                if (!Selection.FirstDeliverable(context.Colony, carried,
+                        context.Villager.transform.position, out ItemDrop.ItemData _, out StructureRecord home))
                 {
-                    return JobOutcomes.Skipped(context.State, "nowhere to put what I am carrying", out activity);
+                    // Nothing it holds has anywhere to go. Put one down each pass rather than
+                    // carrying them about: the bag is the villager's working space, and a load
+                    // of oddments in it is a villager that can no longer haul.
+                    context.Animation.Reach();
+                    Carrying.PutDown(context.Bag.GetInventory(), carried[0], context.Villager.transform.position);
+                    return JobOutcomes.Skipped(context.State, "nowhere to put this, so I left it", out activity);
                 }
 
                 state.SetDestination(home.Id);
@@ -218,22 +223,27 @@ namespace Kukolony.Jobs.Haul
 
             if (carried.Count == 0) return JobOutcomes.Completed(context.State, "done hauling", out activity);
 
-            // What is at the head of the load may not belong here - the trip was built around
-            // the first item, and the rest can be bound somewhere else entirely. Releasing the
-            // destination sends it back to choosing rather than forcing flint into the wood
-            // shed, and is also how a chest that filled up mid-trip is noticed.
-            StructureRecord belongs = Selection.WhereFor(context.Colony, Carrying.NameOf(carried[0]),
-                context.Villager.transform.position);
-            if (belongs == null || belongs.Id != context.State.Destination)
+            // What the trip is holding may not all belong here. Releasing the destination sends
+            // it back to choosing rather than forcing flint into the wood shed, and is also how
+            // a chest that filled up mid-trip is noticed.
+            if (!Selection.FirstDeliverable(context.Colony, carried, context.Villager.transform.position,
+                    out ItemDrop.ItemData load, out StructureRecord belongs))
             {
                 context.State.SetDestination(ZDOID.None);
-                activity = belongs == null ? "nowhere to put what I am carrying" : "this goes somewhere else";
+                activity = "nowhere to put what I am carrying";
+                return JobResult.Running;
+            }
+
+            if (belongs.Id != context.State.Destination)
+            {
+                context.State.SetDestination(ZDOID.None);
+                activity = "this goes somewhere else";
                 return JobResult.Running;
             }
 
             context.Animation.Reach();
 
-            switch (Carrying.Deposit(context.Bag.GetInventory(), carried[0], container))
+            switch (Carrying.Deposit(context.Bag.GetInventory(), load, container))
             {
                 case TakeResult.Took:
                     activity = "putting it away";

@@ -1,4 +1,5 @@
 using Kukolony.Colonies;
+using Kukolony.Jobs;
 using Kukolony.Jobs.Haul;
 
 /// <summary>
@@ -48,6 +49,7 @@ static class Program
         Label("Storage", (StructureCapability)(1 | 32));
 
         Haul();
+        Placing();
 
         Console.WriteLine(_failed == 0
             ? $"RESULT: PASS ({_cases} cases)"
@@ -130,6 +132,56 @@ static class Program
         // it, because the guard's fallback is the only path to a Yield with work available.
         Case("control: a decision is always reached with work available",
             HaulTransitions.Next(HaulState.Choosing, Facts(hasSource: true)).Action != HaulAction.Yield);
+    }
+
+    /// <summary>
+    ///     The anti-shuffle rule. Proven at a table because the symptom in-game - a settlement
+    ///     in permanent motion with nothing improving - looks exactly like villagers being busy.
+    /// </summary>
+    static void Placing()
+    {
+        Console.WriteLine("placement");
+
+        Score("a container that names the item is its best home", 2,
+            names: true, takesAnything: false, takesUnclaimed: false, atCap: false);
+        Score("a container that takes anything is a home, but a lesser one", 1,
+            names: false, takesAnything: true, takesUnclaimed: false, atCap: false);
+        Score("the settlement dump is worth the same as an overflow chest", 1,
+            names: false, takesAnything: false, takesUnclaimed: true, atCap: false);
+        Score("a container that wants none of this is not a home at all", 0,
+            names: false, takesAnything: false, takesUnclaimed: false, atCap: false);
+
+        // A cap is not a special case anywhere else: it lands here, as a zero.
+        Score("a container at its cap stops attracting more", 0,
+            names: true, takesAnything: false, takesUnclaimed: false, atCap: true);
+        Score("a cap silences the dump flag too, or the dump would never be full", 0,
+            names: false, takesAnything: false, takesUnclaimed: true, atCap: true);
+
+        Case("the ground is worse than any container that will have it",
+            Placement.Ground < Placement.Overflow && Placement.Ground < Placement.Named);
+
+        // The whole point. Equal is not good enough: equal is the shuffle.
+        Case("wood in an overflow chest may move to the wood chest",
+            Placement.MayMove(Placement.Overflow, Placement.Named));
+        Case("wood in the wood chest may not move to an overflow chest",
+            !Placement.MayMove(Placement.Named, Placement.Overflow));
+        Case("wood may not move between two chests that both name wood",
+            !Placement.MayMove(Placement.Named, Placement.Named));
+        Case("nothing moves into a container that refuses it",
+            !Placement.MayMove(Placement.Ground, Placement.Refused));
+        Case("control: picking something up off the ground is still allowed",
+            Placement.MayMove(Placement.Ground, Placement.Overflow));
+
+        // Control: a rule that permitted everything would pass every line above except this
+        // one. An assertion that has never failed proves nothing.
+        Case("control: the rule refuses a move that does not improve anything",
+            !Placement.MayMove(Placement.Overflow, Placement.Overflow));
+    }
+
+    static void Score(string what, int expected, bool names, bool takesAnything, bool takesUnclaimed, bool atCap)
+    {
+        int actual = Placement.Score(names, takesAnything, takesUnclaimed, atCap);
+        Case($"{what} (got {actual})", actual == expected);
     }
 
     static HaulFacts Facts(bool hasSource = false, bool hasDestination = false, bool atSource = false,

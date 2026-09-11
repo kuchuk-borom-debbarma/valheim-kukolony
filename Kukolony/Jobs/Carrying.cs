@@ -98,6 +98,50 @@ namespace Kukolony.Jobs
         }
 
         /// <summary>
+        ///     Puts an item back on the ground.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         For the item nothing in the settlement claims. Left in the bag it would ride
+        ///         around forever, and a villager whose bag slowly fills with oddments stops
+        ///         being able to haul at all - so the settlement's answer of "leave it where it
+        ///         is and say so" has to include putting down what was already picked up.
+        ///     </para>
+        ///     <para>
+        ///         Spawned from the prefab and given the item data by hand, the same way the
+        ///         game's own drop does. <c>ItemDrop.DropItem</c> is not used: it throws on item
+        ///         data with no <c>m_dropPrefab</c>, and a throw inside a job kills the coroutine
+        ///         driving it rather than failing anything visible.
+        ///     </para>
+        ///     <para>
+        ///         Safe from being picked straight back up, because an item with no home is
+        ///         never chosen as work in the first place.
+        ///     </para>
+        /// </remarks>
+        internal static bool PutDown(Inventory bag, ItemDrop.ItemData item, Vector3 where)
+        {
+            if (bag == null || item?.m_dropPrefab == null) return false;
+
+            GameObject spawned = Object.Instantiate(item.m_dropPrefab, where, Quaternion.identity);
+            if (spawned == null) return false;
+
+            if (!spawned.TryGetComponent(out ItemDrop drop) ||
+                !spawned.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                Object.Destroy(spawned);
+                return false;
+            }
+
+            ItemDrop.ItemData copy = item.Clone();
+            copy.m_dropPrefab = item.m_dropPrefab;
+            drop.m_itemData = copy;
+            drop.Save();
+
+            bag.RemoveItem(item);
+            return true;
+        }
+
+        /// <summary>
         ///     Moves one item from a bag into a container.
         /// </summary>
         /// <remarks>

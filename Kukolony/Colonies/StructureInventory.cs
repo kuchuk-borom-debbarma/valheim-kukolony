@@ -29,6 +29,8 @@ namespace Kukolony.Colonies
     /// </remarks>
     internal static class StructureInventory
     {
+        /// <summary>What <see cref="Count" /> answers when the container cannot be read.</summary>
+        internal const int Unknown = -1;
 
 
         /// <summary>
@@ -49,16 +51,8 @@ namespace Kukolony.Colonies
         }
 
         /// <summary>
-        ///     Whether this container has room for an item, read from its ZDO.
-        /// </summary>
-        /// <remarks>
-        ///     Answers true when the contents cannot be read at all. A structure whose capacity
-        ///     is unknown is still a candidate: sending a villager that then finds it full
-        ///     costs a walk, and refusing to answer costs the settlement a destination it
-        ///     actually had.
-        /// </remarks>
-        /// <summary>
-        ///     How many of an item a container holds, counted by prefab.
+        ///     How many of an item a container holds, counted by prefab, or -1 when that cannot
+        ///     be known.
         /// </summary>
         /// <remarks>
         ///     By prefab rather than by <c>Inventory.CountItems</c>, which matches on the
@@ -67,8 +61,11 @@ namespace Kukolony.Colonies
         /// </remarks>
         internal static int Count(ZDOID id, string itemPrefab)
         {
+            // Unknown, not none. A cap that read an unreadable container as empty would let a
+            // settlement pour everything it owns into the one chest nobody can see inside.
+            // Callers testing "has any" still read -1 correctly, because it is not positive.
             Inventory inventory = Live(id);
-            if (inventory == null) return 0;
+            if (inventory == null) return Unknown;
 
             int total = 0;
             foreach (ItemDrop.ItemData item in inventory.GetAllItems())
@@ -80,6 +77,16 @@ namespace Kukolony.Colonies
             return total;
         }
 
+        /// <summary>
+        ///     Whether this container has room for an item.
+        /// </summary>
+        /// <remarks>
+        ///     Answers true when the contents cannot be read at all. A structure whose capacity
+        ///     is unknown is still a candidate: sending a villager that then finds it full costs
+        ///     a walk, and refusing to answer costs the settlement a destination it really had.
+        ///     The opposite call to the one <see cref="Count" /> makes, and deliberately so -
+        ///     guessing "room" wastes a trip, while guessing "empty" breaks a cap.
+        /// </remarks>
         internal static bool HasRoomFor(ZDOID id, string itemPrefab)
         {
             Inventory inventory = Live(id);

@@ -34,6 +34,62 @@ namespace Kukolony.Colonies
         /// </summary>
         internal bool MayTakeFrom = true;
 
+        /// <summary>
+        ///     At most this many of an item here. Absent means no limit.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         An absolute count rather than a share of the settlement's total, which is
+        ///         what the first sketch of this called for. A cap is something a villager
+        ///         checks in one look; a share is a relationship, and satisfying it for wood can
+        ///         un-satisfy it for stone - so a settlement chasing shares never converges.
+        ///         Shares can come later, once this is proven stable.
+        ///     </para>
+        ///     <para>
+        ///         Kept as a list of pairs rather than a dictionary in the record so the encoded
+        ///         order is stable: a blob that reorders itself between writes looks like a
+        ///         change to everything downstream that watches the revision.
+        ///     </para>
+        /// </remarks>
+        internal readonly List<KeyValuePair<string, int>> Caps = new List<KeyValuePair<string, int>>();
+
+        /// <summary>
+        ///     Whether items nothing else claims may be dumped here.
+        /// </summary>
+        /// <remarks>
+        ///     A fact about the chest, so it belongs on the chest rather than being repeated on
+        ///     every job that might need somewhere to put an oddment. Without one, an unclaimed
+        ///     item is left where it lies and the villager says so - it does not invent a home.
+        /// </remarks>
+        internal bool TakeUnclaimed;
+
+        /// <summary>The cap for an item, or -1 when it has none.</summary>
+        internal int CapFor(string itemPrefab)
+        {
+            foreach (KeyValuePair<string, int> cap in Caps)
+            {
+                if (cap.Key == itemPrefab) return cap.Value;
+            }
+
+            return -1;
+        }
+
+        /// <summary>Sets or clears a cap. A negative amount removes it.</summary>
+        internal void SetCap(string itemPrefab, int amount)
+        {
+            if (string.IsNullOrEmpty(itemPrefab)) return;
+
+            for (int i = 0; i < Caps.Count; i++)
+            {
+                if (Caps[i].Key != itemPrefab) continue;
+                if (amount < 0) Caps.RemoveAt(i);
+                else Caps[i] = new KeyValuePair<string, int>(itemPrefab, amount);
+                return;
+            }
+
+            if (amount >= 0) Caps.Add(new KeyValuePair<string, int>(itemPrefab, amount));
+        }
+
         /// <summary>What to keep this fed with. Chosen from what the structure actually takes.</summary>
         internal List<string> Fuel = new List<string>();
 
@@ -68,6 +124,14 @@ namespace Kukolony.Colonies
         {
             WriteList(package, Accepts);
             package.Write(MayTakeFrom);
+            package.Write(TakeUnclaimed);
+            package.Write(Caps.Count);
+            foreach (KeyValuePair<string, int> cap in Caps)
+            {
+                package.Write(cap.Key ?? string.Empty);
+                package.Write(cap.Value);
+            }
+
             WriteList(package, Fuel);
             WriteList(package, Input);
             package.Write(KeepFull);
@@ -80,6 +144,24 @@ namespace Kukolony.Colonies
             StructureSettings settings = new StructureSettings();
             settings.Accepts = ReadList(package);
             settings.MayTakeFrom = package.ReadBool();
+            settings.TakeUnclaimed = package.ReadBool();
+
+            // Thrown rather than shrugged off. Every field after this one is read from the
+            // same stream, so a count this wrong means the position is already lost - and
+            // returning what has been read so far would decode the next record from the middle
+            // of this one. The caller discards the whole registry, which is the honest outcome.
+            int caps = package.ReadInt();
+            if (caps < 0 || caps > MaxEntries)
+            {
+                throw new System.IO.InvalidDataException($"structure settings claim {caps} caps");
+            }
+
+            for (int i = 0; i < caps; i++)
+            {
+                string item = package.ReadString();
+                settings.SetCap(item, package.ReadInt());
+            }
+
             settings.Fuel = ReadList(package);
             settings.Input = ReadList(package);
             settings.KeepFull = UnityEngine.Mathf.Clamp01(package.ReadSingle());

@@ -37,7 +37,11 @@ So every placement is scored:
 | `0` | the container will not take it, or is at its cap for it |
 | `-1` | the ground |
 
-**A move is legal only if the destination scores strictly higher than the source.**
+**A move is legal only if the destination scores strictly higher than the source** — *and* the
+destination must score above `0`. Ordering alone is not enough, and the decision table caught
+why: with the ground at `-1`, a chest that refuses the item scores higher than where the item is
+now, so "strictly higher" on its own makes moving wood into a chest that wants no wood a legal
+improvement. A refusal is a floor for destinations, not a rung on the ladder.
 
 That single rule buys three things at once. Items cannot oscillate, because every move raises a
 bounded score. Specificity beats proximity — wood sitting in an overflow chest moves to the wood
@@ -68,7 +72,14 @@ left alone.
 
 An item nothing claims goes to the dump. If there is no dump, or it is full, or it cannot be
 reached, **the villager leaves the item where it is and says so** — it does not invent a home for
-it.
+it. If it is already carrying the thing, it puts it down: left in the bag it rides around
+forever, and a villager whose bag has filled with oddments cannot haul at all.
+
+**The head of the load must not be able to block the rest of it.** The trip is built around the
+first item the settlement will actually take, not simply the first item held. Choosing on
+`carried[0]` meant one flint among the firewood parked itself at the front and the villager
+reported *"nowhere to put what I am carrying"* forever, with a full load of perfectly deliverable
+wood behind it.
 
 ## The state machine
 

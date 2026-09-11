@@ -56,7 +56,11 @@ namespace Kukolony.Colonies
             try
             {
                 ZPackage p = new ZPackage(encoded);
-                if (p.ReadInt() != 2) return result;
+                // The record format's own version, bumped whenever the settings gain a
+                // field. A blob written by an older build is discarded rather than decoded
+                // against the wrong layout, which would not fail - it would produce records
+                // full of plausible nonsense.
+                if (p.ReadInt() != 3) return result;
                 int count = p.ReadInt();
                 if (count < 0 || count > 4096) return result;
                 for (int i = 0; i < count; i++)
@@ -75,7 +79,7 @@ namespace Kukolony.Colonies
 
         internal void SetStructures(List<StructureRecord> records)
         {
-            ZPackage p = new ZPackage(); p.Write(2); p.Write(records.Count);
+            ZPackage p = new ZPackage(); p.Write(3); p.Write(records.Count);
             foreach (StructureRecord r in records)
             {
                 // Records arrive with their token already minted, by the one path that claims

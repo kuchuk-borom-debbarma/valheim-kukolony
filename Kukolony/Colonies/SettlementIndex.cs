@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Kukolony.Jobs;
 using Kukolony.Core;
 using UnityEngine;
 
@@ -49,15 +50,20 @@ namespace Kukolony.Colonies
             List<StructureRecord> answers = new List<StructureRecord>();
             if (colony == null || string.IsNullOrEmpty(itemPrefab)) return answers;
 
+            List<int> scores = new List<int>();
             foreach (StructureRecord record in Current(colony).Storage)
             {
-                if (!Accepts(record, itemPrefab)) continue;
                 if (record.StatusIn(colony) != StructureStatus.Ready) continue;
                 if (!StructureInventory.HasRoomFor(record.Id, itemPrefab)) continue;
+
+                int score = ScoreOf(record, itemPrefab);
+                if (score <= Placement.Refused) continue;
+
                 answers.Add(record);
+                scores.Add(score);
             }
 
-            Sort(answers, from);
+            SortByScoreThenDistance(answers, scores, from);
             return answers;
         }
 
@@ -127,11 +133,57 @@ namespace Kukolony.Colonies
         }
 
         /// <summary>
-        ///     Whether a structure's settings claim this item. An empty list claims everything,
-        ///     which is what an overflow chest is.
+        ///     What this container is worth as a home for one kind of item.
         /// </summary>
-        private static bool Accepts(StructureRecord record, string itemPrefab) =>
-            record.Settings.Accepts.Count == 0 || record.Settings.Accepts.Contains(itemPrefab);
+        /// <remarks>
+        ///     The cap is read against what the container actually holds, and an unreadable
+        ///     container is never treated as being at its cap - unknown is not full, and
+        ///     refusing a destination we cannot see into would cost the settlement a chest it
+        ///     really had. The walk is the cheaper mistake.
+        /// </remarks>
+        internal static int ScoreOf(StructureRecord record, string itemPrefab)
+        {
+            StructureSettings settings = record.Settings;
+            bool names = settings.Accepts.Contains(itemPrefab);
+            bool takesAnything = settings.Accepts.Count == 0;
+
+            int cap = settings.CapFor(itemPrefab);
+            int held = cap < 0 ? 0 : StructureInventory.Count(record.Id, itemPrefab);
+            bool atCap = cap >= 0 && held != StructureInventory.Unknown && held >= cap;
+
+            return Placement.Score(names, takesAnything, settings.TakeUnclaimed, atCap);
+        }
+
+        /// <summary>
+        ///     Best home first, and among equals the nearest.
+        /// </summary>
+        /// <remarks>
+        ///     Score before distance is what "organising" means: a chest that names the item
+        ///     wins over a nearer overflow chest, which is the difference between a settlement
+        ///     that sorts itself and one that merely tidies up. Two chests that score the same
+        ///     are both right, so the walk decides.
+        /// </remarks>
+        private static void SortByScoreThenDistance(List<StructureRecord> records, List<int> scores, Vector3 from)
+        {
+            for (int i = 1; i < records.Count; i++)
+            {
+                StructureRecord record = records[i];
+                int score = scores[i];
+                float distance = Distance(record, from);
+
+                int j = i - 1;
+                while (j >= 0 && (scores[j] < score ||
+                                  (scores[j] == score && Distance(records[j], from) > distance)))
+                {
+                    records[j + 1] = records[j];
+                    scores[j + 1] = scores[j];
+                    j--;
+                }
+
+                records[j + 1] = record;
+                scores[j + 1] = score;
+            }
+        }
 
         /// <summary>
         ///     Two chests claiming the same item is not a conflict - both are valid answers, and

@@ -109,6 +109,20 @@ namespace Kukolony.Debug
             StructureRecord subject = colony.State.GetStructures()
                 .FindLast(r => (r.Capabilities & StructureCapability.Storage) != 0 &&
                                r.StatusIn(colony) == StructureStatus.Ready);
+
+            // Given something to hold and a limit on it, because the cap row only exists for an
+            // item the chest actually names - a chest set to "anything" has nothing to cap, and
+            // photographing that would be evidence the rows do not render.
+            if (subject != null)
+            {
+                ColonyOperations.EditSettings(colony, subject.Id, s =>
+                {
+                    s.Accepts = new List<string> { "Wood" };
+                    s.TakeUnclaimed = true;
+                    s.SetCap("Wood", 200);
+                });
+            }
+
             if (subject != null)
             {
                 screen.Push(new StructureDetailScreen(subject.PersistentId, subject.Id));

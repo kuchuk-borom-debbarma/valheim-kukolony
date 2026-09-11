@@ -81,6 +81,37 @@ namespace Kukolony.Jobs
             return homes.Count == 0 ? null : homes[0];
         }
 
+        /// <summary>
+        ///     The first thing in a load that the settlement will actually take, and where.
+        /// </summary>
+        /// <remarks>
+        ///     <b>The head of the load must not be able to block the rest of it.</b> Choosing
+        ///     and depositing both used to take the first item held, which meant one oddment
+        ///     nothing claimed - a flint among the firewood - parked itself at the front and the
+        ///     villager reported "nowhere to put what I am carrying" forever, with a full load
+        ///     of perfectly deliverable wood behind it. Skipping past it costs one pass over a
+        ///     load that is at most a bag deep.
+        /// </remarks>
+        internal static bool FirstDeliverable(Colony colony, List<ItemDrop.ItemData> carried, Vector3 from,
+            out ItemDrop.ItemData item, out StructureRecord home)
+        {
+            item = null;
+            home = null;
+            if (carried == null) return false;
+
+            foreach (ItemDrop.ItemData held in carried)
+            {
+                StructureRecord where = WhereFor(colony, Carrying.NameOf(held), from);
+                if (where == null) continue;
+
+                item = held;
+                home = where;
+                return true;
+            }
+
+            return false;
+        }
+
         /// <summary>Whether a job handles this item. An empty list means everything.</summary>
         private static bool Wanted(JobDefinition job, string prefab) =>
             job?.Items == null || job.Items.Count == 0 || job.Items.Contains(prefab);

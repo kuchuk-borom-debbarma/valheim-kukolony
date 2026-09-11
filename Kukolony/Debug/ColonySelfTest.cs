@@ -1149,10 +1149,120 @@ namespace Kukolony.Debug
                 "changing a setting rebuilds the index, once",
                 $"rebuilds={SettlementIndex.Rebuilds - before}");
 
+            yield return CheckPlacement(report, colony, at, wood, coal, coalChest);
+
             Release(woodChest);
             Release(coalChest);
             yield return null;
             yield return CheckBeds(report, colony, origin);
+        }
+
+        /// <summary>
+        ///     Specificity, caps and the dump flag: that a setting reaches the score, and the
+        ///     score reaches the answer.
+        /// </summary>
+        /// <remarks>
+        ///     The scoring rule itself is proven at a table in the deterministic suite, where
+        ///     every branch is reachable in a second. What cannot be proven there is the wiring -
+        ///     that a cap typed into a screen ends up on the record, is read against what the
+        ///     container actually holds, and removes that container from the settlement's
+        ///     answer. This checks the wiring and nothing else.
+        ///
+        ///     <para>
+        ///         <c>coal</c> arrives here claiming nothing, which is what an overflow chest
+        ///         is, and <c>wood</c> arrives naming Wood. That is the exact pair specificity
+        ///         is about.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckPlacement(TestReport report, Colony colony, Vector3 at,
+            StructureRecord wood, StructureRecord coal, GameObject coalChest)
+        {
+            // The overflow chest was filled with wood by the check above; emptying it puts both
+            // chests back on equal terms, so what follows measures the score and not the space.
+            if (coalChest.TryGetComponent(out Container overflow)) overflow.GetInventory().RemoveAll();
+            yield return null;
+
+            List<StructureRecord> homes = SettlementIndex.WhereDoesItGo(colony, "Wood", at);
+            report.Check(homes.Count > 0 && homes[0].Id == wood.Id,
+                "the chest that names an item beats one that merely takes anything",
+                $"first={(homes.Count == 0 ? "none" : homes[0].Name)} of {homes.Count}");
+
+            report.Check(homes.Exists(r => r.Id == coal.Id),
+                "control: the overflow chest is still an answer, just a worse one",
+                $"answers={homes.Count}");
+
+            // A cap of one against a chest holding one: at its cap, not over it. The boundary
+            // is where an off-by-one would live.
+            ColonyOperations.EditSettings(colony, wood.Id, s => s.SetCap("Wood", 1));
+            GameObject woodChest = ZNetScene.instance.FindInstance(wood.Id);
+            if (woodChest != null && woodChest.TryGetComponent(out Container into))
+            {
+                GameObject prefab = ObjectDB.instance.GetItemPrefab("Wood");
+                if (prefab != null && prefab.TryGetComponent(out ItemDrop item))
+                {
+                    ItemDrop.ItemData one = item.m_itemData.Clone();
+                    one.m_dropPrefab = prefab;
+                    one.m_stack = 1;
+                    into.GetInventory().AddItem(one);
+                }
+            }
+
+            yield return null;
+            SettlementIndex.ResetForTest();
+            List<StructureRecord> capped = SettlementIndex.WhereDoesItGo(colony, "Wood", at);
+            report.Check(!capped.Exists(r => r.Id == wood.Id),
+                "a chest at its cap stops attracting more of that item",
+                $"answers={capped.Count}");
+
+            report.Check(capped.Exists(r => r.Id == coal.Id),
+                "control: the cap silences one chest, not the settlement",
+                $"answers={capped.Count}");
+
+            ColonyOperations.EditSettings(colony, wood.Id, s => s.SetCap("Wood", 50));
+            SettlementIndex.ResetForTest();
+            List<StructureRecord> raised = SettlementIndex.WhereDoesItGo(colony, "Wood", at);
+            report.Check(raised.Exists(r => r.Id == wood.Id),
+                "control: below its cap the same chest accepts again",
+                $"answers={raised.Count}");
+
+            // The dump: a chest that names something else entirely, taking what nothing claims.
+            ColonyOperations.EditSettings(colony, coal.Id, s =>
+            {
+                s.Accepts = new List<string> { "Coal" };
+                s.TakeUnclaimed = false;
+            });
+            SettlementIndex.ResetForTest();
+            List<StructureRecord> unclaimed = SettlementIndex.WhereDoesItGo(colony, "Flint", at);
+            report.Check(!unclaimed.Exists(r => r.Id == coal.Id),
+                "control: without the dump flag a chest takes only what it named",
+                $"answers={unclaimed.Count}");
+
+            ColonyOperations.EditSettings(colony, coal.Id, s => s.TakeUnclaimed = true);
+            SettlementIndex.ResetForTest();
+            unclaimed = SettlementIndex.WhereDoesItGo(colony, "Flint", at);
+            report.Check(unclaimed.Exists(r => r.Id == coal.Id),
+                "an item nothing claims goes to the settlement's dump",
+                $"answers={unclaimed.Count}");
+
+            // Settings must survive the blob, or the screen edits something the settlement
+            // never reads. The format version was bumped for exactly these two fields.
+            StructureRecord reread = colony.State.GetStructures().Find(r => r.Id == coal.Id);
+            report.Check(reread != null && reread.Settings.TakeUnclaimed,
+                "the dump flag survives being written to the colony record",
+                $"read={(reread == null ? "no record" : reread.Settings.TakeUnclaimed.ToString())}");
+
+            StructureRecord rereadWood = colony.State.GetStructures().Find(r => r.Id == wood.Id);
+            report.Check(rereadWood != null && rereadWood.Settings.CapFor("Wood") == 50,
+                "a cap survives being written to the colony record",
+                $"cap={(rereadWood == null ? -1 : rereadWood.Settings.CapFor("Wood"))}");
+
+            report.Check(rereadWood != null && rereadWood.Settings.CapFor("Stone") < 0,
+                "control: an item with no cap reads as having none rather than as zero",
+                $"cap={(rereadWood == null ? -1 : rereadWood.Settings.CapFor("Stone"))}");
+
+            ColonyOperations.EditSettings(colony, wood.Id, s => s.SetCap("Wood", -1));
+            ColonyOperations.EditSettings(colony, coal.Id, s => s.TakeUnclaimed = false);
+            yield return null;
         }
 
         /// <summary>
