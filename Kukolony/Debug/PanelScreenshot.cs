@@ -18,10 +18,11 @@ namespace Kukolony.Debug
     ///     itself instead: no OS permission is involved, and the result is exactly what a
     ///     player sees.
     ///
-    ///     There is one capture at present. The screens this photographed were removed with
-    ///     the feature layer and return from roadmap milestone 2; a villager is the only
-    ///     thing currently worth looking at, and photographing one is how a rig that glowed
-    ///     like a ghost was finally noticed.
+    ///     Photographing a villager is how a rig that glowed like a ghost was finally
+    ///     noticed - every capture before that had framed the interface, so nothing had ever
+    ///     photographed one. The screen captures below exist for what the layout audit cannot
+    ///     judge: the audit proves nothing overlaps and nothing is clipped, and says nothing
+    ///     about whether the result reads as a settlement's control panel.
     /// </summary>
     /// <summary>UI evidence phase invoked exclusively by ColonyBenchmarkController.</summary>
     internal static class BenchmarkUiScenario
@@ -44,11 +45,63 @@ namespace Kukolony.Debug
             }
 
             yield return CaptureVillager(colony);
+            yield return CaptureScreens(colony);
 
             System.IO.File.WriteAllText(
                 System.IO.Path.Combine(ModConfig.BenchmarkOutputPath.Value, "screenshots.manifest.json"),
                 "[" + string.Join(",", Captures.ToArray()) + "]");
             LastPassed = !_captureFailed && Captures.Count > 0;
+        }
+
+        /// <summary>
+        ///     Photographs each screen, driven through the same calls the buttons make.
+        /// </summary>
+        /// <remarks>
+        ///     Subjects are chosen exactly rather than by index. Index-based selection depends
+        ///     on list ordering, and photographed the wrong subject before now.
+        /// </remarks>
+        private static IEnumerator CaptureScreens(Colony colony)
+        {
+            ColonyScreen screen = ColonyScreen.Instance;
+            if (screen == null)
+            {
+                Log.Error("[Screenshot] the colony screen does not exist");
+                _captureFailed = true;
+                yield break;
+            }
+
+            screen.Open(colony, null);
+            yield return new WaitForSecondsRealtime(.4f);
+            yield return Capture("colony-screen-home.png");
+
+            screen.Push(new GalleryScreen());
+            yield return new WaitForSecondsRealtime(.4f);
+            yield return Capture("colony-screen-gallery.png");
+
+            screen.ShowPageForTest(1);
+            yield return new WaitForSecondsRealtime(.4f);
+            yield return Capture("colony-screen-paged.png");
+
+            screen.ShowPageForTest(0);
+            PickerScreen picker = new PickerScreen("Choose an item", Items, null, false, _ => { });
+            picker.SearchForTest("wood");
+            screen.Push(picker);
+            yield return new WaitForSecondsRealtime(.4f);
+            yield return Capture("colony-screen-picker.png");
+
+            screen.Close();
+            yield return null;
+        }
+
+        private static List<PickerScreen.Option> Items(string filter)
+        {
+            List<PickerScreen.Option> options = new List<PickerScreen.Option>();
+            foreach (ItemCatalogue.Entry entry in ItemCatalogue.Search(filter, 40))
+            {
+                options.Add(new PickerScreen.Option(entry.PrefabName, entry.DisplayName));
+            }
+
+            return options;
         }
 
         private static void RegisterStructure(Colony colony, GameObject structure, string name)

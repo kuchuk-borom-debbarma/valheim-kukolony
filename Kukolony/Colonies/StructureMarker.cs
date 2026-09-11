@@ -22,9 +22,6 @@ namespace Kukolony.Colonies
     /// </remarks>
     internal sealed class StructureMarker : MonoBehaviour
     {
-        /// <summary>How far the player can reach to mark something, in metres.</summary>
-        private const float Reach = 12f;
-
         internal static void Register(GameObject host) => host.AddComponent<StructureMarker>();
 
         private void Update()
@@ -40,17 +37,17 @@ namespace Kukolony.Colonies
 
         private static void Toggle(Player player)
         {
-            GameObject target = LookingAt(player);
+            GameObject target = Core.PlayerLook.Target(player);
             if (target == null)
             {
-                Say("Nothing in reach to mark.");
+                Core.Report.Say("Nothing in reach to mark.");
                 return;
             }
 
             StructureRecord record = StructureRegistry.Describe(target);
             if (record == null)
             {
-                Say($"{StructureRegistry.DisplayName(target)} is not something a colony can use.");
+                Core.Report.Say($"{StructureRegistry.DisplayName(target)} is not something a colony can use.");
                 return;
             }
 
@@ -59,18 +56,18 @@ namespace Kukolony.Colonies
             Colony colony = Nearest(target.transform.position);
             if (colony == null)
             {
-                Say("No colony hearth within range of that.");
+                Core.Report.Say("No colony hearth within range of that.");
                 return;
             }
 
             if (colony.State.GetStructures().Exists(existing => existing.Id == record.Id))
             {
                 colony.RemoveStructure(record.Id);
-                Say($"Removed {record.Name} from {colony.State.Name}.");
+                Core.Report.Say($"Removed {record.Name} from {colony.State.Name}.");
                 return;
             }
 
-            Say(colony.RegisterStructure(record)
+            Core.Report.Say(colony.RegisterStructure(record)
                 ? $"Registered {record.Name} to {colony.State.Name}."
                 : $"Could not register {record.Name}.");
         }
@@ -80,18 +77,7 @@ namespace Kukolony.Colonies
         ///     interaction, so what the player is looking at means the same thing here as it
         ///     does everywhere else.
         /// </summary>
-        private static GameObject LookingAt(Player player)
-        {
-            if (GameCamera.instance == null) return null;
-            Transform eye = GameCamera.instance.transform;
-            if (!Physics.Raycast(eye.position, eye.forward, out RaycastHit hit, Reach + 5f,
-                    LayerMask.GetMask("Default", "static_solid", "Default_small", "piece", "item", "vehicle")))
-                return null;
-            // Colliders usually hang off a child of the networked object, so walk up rather
-            // than demanding the hit be the root.
-            ZNetView view = hit.collider.GetComponentInParent<ZNetView>();
-            return view != null && view.IsValid() ? view.gameObject : null;
-        }
+
 
         /// <summary>The colony whose radius contains this point, nearest first, or null.</summary>
         private static Colony Nearest(Vector3 point)
@@ -109,11 +95,6 @@ namespace Kukolony.Colonies
             return best;
         }
 
-        private static void Say(string message)
-        {
-            Log.Info("[marker] " + message);
-            if (MessageHud.instance != null)
-                MessageHud.instance.ShowMessage(MessageHud.MessageType.Center, message);
-        }
+
     }
 }

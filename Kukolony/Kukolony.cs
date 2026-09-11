@@ -35,12 +35,14 @@ namespace Kukolony
             }
             AddLocalization();
 
+            Gui.ColonyScreen.Register();
             VillagerPrefab.Register();
             Colonies.ColonyPrefab.Register();
             _harmony.PatchAll(Assembly.GetExecutingAssembly());
 
             gameObject.AddComponent<KeepAlive.KeepAliveDriver>();
             Colonies.StructureMarker.Register(gameObject);
+            Gui.ColonyScreenHotkey.Register(gameObject);
             gameObject.AddComponent<Debug.DebugHotkeys>();
             gameObject.AddComponent<Debug.AutoBoot>();
             gameObject.AddComponent<Debug.PrefabProbe>();

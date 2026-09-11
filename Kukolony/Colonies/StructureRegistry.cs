@@ -18,6 +18,25 @@ namespace Kukolony.Colonies
     }
 
     /// <summary>A named, persistent reference to a placed (ZNet-backed) structure.</summary>
+    /// <summary>
+    ///     Whether a registered structure can be used right now.
+    /// </summary>
+    internal enum StructureStatus
+    {
+        /// <summary>Resolves, and inside the colony's reach.</summary>
+        Ready,
+
+        /// <summary>Resolves, but the settlement cannot reach it. Dormant, not lost.</summary>
+        OutOfReach,
+
+        /// <summary>
+        ///     Does not resolve. On the host that means destroyed; on a client it may only
+        ///     mean not replicated here, which is why the name says what was observed rather
+        ///     than what it implies.
+        /// </summary>
+        NotFound
+    }
+
     internal sealed class StructureRecord
     {
         internal ZDOID Id;
@@ -25,6 +44,32 @@ namespace Kukolony.Colonies
         internal string Name;
         internal string Prefab;
         internal StructureCapability Capabilities;
+
+        /// <summary>
+        ///     Whether this record can be used, and if not, why not.
+        /// </summary>
+        /// <remarks>
+        ///     Two different situations that <see cref="IsLiveIn" /> answers identically.
+        ///     Reporting both as "out of reach" tells a player their destroyed chest is merely
+        ///     distant, and reporting both as gone tells them a chest they walked away from was
+        ///     lost. Neither is true and both read as a bug in the settlement.
+        /// </remarks>
+        internal StructureStatus StatusIn(Colony colony)
+        {
+            ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(Id) : null;
+            if (zdo == null || !zdo.IsValid())
+            {
+                return StructureStatus.NotFound;
+            }
+
+            if (colony == null ||
+                Utils.DistanceXZ(zdo.GetPosition(), colony.transform.position) > colony.EffectiveRadius)
+            {
+                return StructureStatus.OutOfReach;
+            }
+
+            return StructureStatus.Ready;
+        }
 
         internal bool IsLiveIn(Colony colony)
         {

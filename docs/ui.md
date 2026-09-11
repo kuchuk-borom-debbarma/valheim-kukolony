@@ -1,103 +1,128 @@
-# Colony UI
+# The colony screen
 
-Two screens: a small colony picker and the colony management panel. Both are Jotunn wood
-panels parented to `CustomGUIFront`, rebuilt from scratch whenever Jotunn signals that
-custom GUI is available.
+One surface, opened by a hotkey, through which the settlement is managed. It is a Jotunn wood
+panel parented to `CustomGUIFront`, rebuilt from scratch whenever Jotunn signals that custom
+GUI is available.
 
 ## Opening
 
-Interacting with a placed Colony Hearth opens that colony directly; this is the primary
-route. `ColonyPickerHotkey` (default `C`) opens a searchable list of loaded colonies as a
-shortcut, and is ignored while chat or the console has focus. Opening the panel claims the
-hearth ZDO and blocks game input until it closes.
+`ColonyScreenHotkey` (default `C`) opens the screen on the nearest colony, from anywhere. It is
+ignored while chat or the console has focus. Escape goes back one screen, and closes from the
+top one.
 
-## Panel structure
+The hotkey is read by its own component on the plugin object, **not** by the screen. Its
+predecessor read the key inside the panel's own `Update`, which meant no key worked until
+Jotunn's GUI event had fired at least once — the screen could not be opened until something
+else had caused it to exist.
 
-The panel is 860x680 with a title, an editable colony name, three tabs — Structures,
-Members, Jobs — and Close. Switching tabs resets pagination and clears any drilled-in
-selection, so a tab never reopens showing a stale member or job.
+Using a placed hearth does not open the screen; it says which key does. Reach is not what
+decides whether you may manage a settlement, so there is one route rather than two.
 
-Every list paginates at four rows. Lists are built by destroying and rebuilding the content
-subtree on each refresh rather than diffing, which keeps rendering honest about current
-state at the cost of rebuilding a handful of rows.
+**Opening releases the mouse** (`GUIManager.BlockInput`) and closing gives it back, paired with
+`OnDestroy` as well as `Close`. Valheim keeps the cursor captured for looking around, so a panel
+drawn without this is visible and completely unusable — which is exactly what the old colony
+picker shipped as.
 
-## Structures tab
+## Context
 
-Search matches display name or prefab, so a renamed structure is still findable by what it
-is. Sort cycles Name, Type, Capability, Status; the capability filter narrows to one kind.
-Rows show the editable name, prefab, capabilities, live status, and Remove. Register nearby
-adds every eligible structure currently inside the colony radius.
+On opening, the screen records what the player was looking at, through
+`Core.PlayerLook.Target`. That is what will make registration possible without a held tool.
+It is captured **once**, at open: the player is looking at the panel from the moment it
+appears, so a live raycast would answer "nothing" by the time anything asked.
 
-Records that are out of range, unloaded, or destroyed stay listed and read as unavailable
-instead of disappearing. Removal is the player's decision, and a silently vanishing
-registration would look like data loss.
+Looking at nothing is an ordinary answer, not an error. The screen still opens; it just offers
+less.
 
-## Members tab
+## Layout is a system
 
-Villagers only. Each row has a selection toggle, name, current activity, and Details.
-Activity comes from the loaded villager when it exists and falls back to the persisted
-runtime phase when it does not, so the roster stays meaningful outside loaded zones. A job
-selector plus "Assign selected" applies one job to every checked villager at once.
-**+ New villager** places a villager on snapped ground beside the hearth and enrols it
-immediately — this is how a colony is populated, and it is not gated behind any debug flag.
+Nothing is hand-placed. `ScreenLayout.cs` holds every number the screen is built from, and
+there are two pieces:
 
-Details shows the villager's queue in order with the active entry highlighted, one add
-button per configured job, Clear queue, and **Remove villager**.
+- A **`Column`** hands out rows at a fixed pitch and owns paging. A screen adds every row it
+  has, unconditionally, and never counts anything; the column decides which rows fall inside
+  the current page and reports how many pages there turned out to be.
+- A **`Row`** hands out horizontal cells left to right from a cursor.
 
-Removal is a two-step inline button — it re-labels to "Confirm remove?" and only acts on a
-second click. It is deliberately not a modal dialog: a Valheim modal covers the panel, and
-the benchmark's UI capture cannot photograph the panel behind one. The armed state is
-cleared whenever the selected member changes or the tab switches, so a stale confirm can
-never delete the wrong villager.
+So two controls in a row **cannot** overlap, and two rows cannot either. Not "are checked for
+overlap" — cannot. The predecessor placed every control at an absolute `(x, y)`, and controls
+overlapping each other and spilling off the panel onto the world behind it is what that cost.
 
-Removing a villager drops whatever it was carrying rather than destroying it. A villager
-outside loaded range has no live bag to read, so its contents are decoded from its ZDO and
-dropped at the hearth instead of at its own position — items move, but none are lost. A queue entry whose job no longer exists renders
-as `(missing job)` rather than being hidden — the engine bypasses it, and hiding it would
-make a partly broken queue look correct.
+`Panel.RowsPerPage` is derived from the geometry rather than chosen. A hand-picked row count
+and a hand-picked pitch disagree the moment either changes, and the symptom is a last row drawn
+over the pager.
 
-**Outfits** opens the colony's outfits from the villager list. An outfit is one item name
-per slot; blank leaves a slot alone, because a villager already rolls its own clothes and an
-outfit that owned every slot would strip them. Item prefab names are typed, and naming
-something the colony does not own is allowed — the villagers fetch it and go without until
-they do. A villager's outfit is chosen from its detail screen.
+## Widgets
 
-## Jobs tab
+One builder per kind of value, in `Widgets.cs`, so no screen invents its own control:
 
-Lists configured jobs with which work each does, execution count, and target mode. New job
-creates one; Configure opens the job card; Saved presets toggles to the preset list, where
-Apply materialises a preset as a new job.
+| Kind | Control |
+|---|---|
+| A flag | a button reading Yes or No |
+| A number | value with − and +, clamped to its own range, formatted with its unit |
+| One of a few | a button that cycles, wrapping |
+| One of many | a picker screen with search and paging |
+| Several of many | the same picker, multi-select, **order preserved** |
+| Free text | an input field, committed on end-of-edit |
 
-The job card edits everything a job reads: which work it does, name, item filters, target
-mode and exact target selection, source and destination containers, execution count, stock
-limit, reservations, search radius, stop distance, and whether the result goes into a
-container or on the ground. It says in a sentence what the chosen work actually does and
-which structures it needs, because a player can no longer read the steps off the screen.
-Choose targets opens a picker filtered to the capability the job requires, showing each
-candidate's live status.
+No builder takes an x coordinate, and none should ever be given one.
 
-Job labels come from explicit mappings. Raw enum values must never reach the UI —
-`OperateSmelters` is not a player-facing string.
+Multi-select keeping its order is not decoration: a fuel list is a preference order, and
+re-sorting it on save would silently change what a structure burns first.
 
-## Layout rules
+The content size fitter is deliberately off on every text element. With it on, a `Text` resizes
+its own rect to fit the string, which undoes the cell it was allocated and makes the layout
+audit meaningless — the rect would always fit, having been grown to.
 
-Positioning constraints — the content column, the ±400 bound, and same-row spacing — are in
-[code-style.md](code-style.md). They are enforceable by inspection rather than by eye, and
-were added after unbounded labels rendered outside the panel onto the world behind it.
+## Navigation
 
-## Item filters
+A back stack. Every sub-screen returns where it came from, and each entry remembers the page
+the player had turned to. `Root` replaces the whole stack, so switching top-level screens
+clears sub-screens rather than stranding the player inside one whose parent is gone.
 
-`ItemCatalogue` indexes every item in `ObjectDB` for filter editing, matching both prefab
-name and localised display name so players can search by what they read. It rebuilds if the
-game reloads `ObjectDB`, since a stale catalogue would offer items that no longer resolve.
+Rendering is destroy-and-rebuild, never diffing. A colony changes underneath the screen from
+several directions — other players, villagers, the world — and a diff that is wrong shows stale
+state convincingly.
+
+## Saying things
+
+`Core.Report.Say` is the one place the mod tells the player what happened, including refusal
+and why. It draws on the screen's message line while the screen is open and as a centre message
+over the world otherwise, and logs either way — a message drawn for two seconds during an
+automated run is read by nobody.
+
+## The screen survives its subject vanishing
+
+A colony destroyed while the screen is open closes it, with a message. Every screen below
+describes a colony that no longer exists, so keeping them would be showing a stale reference.
+The old panel had no such check.
 
 ## Test seams
 
-`ShowTabForTest`, `ShowPageForTest`, `ShowMemberDetailForTest`, and `ShowJobForTest` let the
-benchmark drive the panel into a deterministic state for screenshot evidence. They set the
-same fields the buttons do, so captured UI is real panel output and not a mock. Prefer the
-overload that selects an exact member or job; index-based selection depends on member
-ordering and can photograph the wrong subject.
+`ShowPageForTest`, `SearchForTest`, and the `Open`/`Push`/`Pop`/`Root` calls themselves drive
+the screen into a deterministic state for the benchmark. They set the same fields the buttons
+do, so what is captured is real screen output rather than a mock.
 
-Screenshot review is part of verification and is described in
-[in-game-testing.md](in-game-testing.md).
+Subjects are chosen **exactly**, never by index: index-based selection depends on list ordering
+and photographed the wrong subject before now.
+
+## How the layout claim is checked
+
+`ScreenAudit` walks the live `RectTransform` tree and asserts that every element is inside the
+content column, that no two overlap, and that every string fits the cell it was given
+(`preferredWidth` against the rect).
+
+The predecessor's audit was a script that parsed the C# source for literal coordinates. It
+caught real bugs, but it lived outside the repository, and a layout computed by a system has no
+literals to find. Auditing what was built instead means it runs inside the gate and sees
+dynamic content.
+
+**`BrokenScreen` is the reason to believe any of it.** It is a fixture built wrong on purpose —
+an element outside the column, two drawn on top of each other, a string far too long for its
+cell — and the benchmark asserts the audit catches all three. It places by hand, deliberately
+bypassing `Row`, because the layout system makes these faults impossible and the only way to
+produce one is to do what the layout system exists to stop. An audit nobody has seen reject
+anything is indistinguishable from one that inspects nothing.
+
+Screenshot review remains part of verification and is described in
+[in-game-testing.md](in-game-testing.md); the audit covers overlap and clipping, and says
+nothing about whether the result reads as a settlement's control panel.

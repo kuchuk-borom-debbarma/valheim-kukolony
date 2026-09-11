@@ -52,10 +52,15 @@ The run directory contains `benchmark-create.log`, `benchmark-reload.log`,
 logs, and `failure.txt` on errors. The terminal marker is
 `BENCHMARK TERMINAL <create|reload> <PASS|FAIL> run=<id>`.
 
-Sixteen screenshots are required, covering the panel, structures and the add-a-structure
-picker, members with their detail and removal screens, the outfit list, one outfit's slots and
-the item chooser for a slot, jobs and one job's settings, a setting's chooser, preset
-application, the colony picker, and **a villager with no panel in the way**.
+Five screenshots are required: the colony screen, the widget gallery, a turned page, the item
+picker, and **a villager with no panel in the way**. The last one matters more than it looks -
+every capture before it existed framed the interface, so villagers glowing like ghosts survived
+run after run because nothing had ever photographed one.
+
+Overlap, spilling and clipped strings are no longer a reviewer's job: `ScreenAudit` asserts
+them in-game, and a deliberately broken fixture proves the audit can fail. What review is for
+is everything the audit cannot judge - whether the screen reads as a settlement's control
+panel, and whether fixture content is misleading.
 
 That last one exists because every other capture frames the interface, which is how villagers
 went on glowing like the ghost they are cloned from, run after run: nothing ever looked at

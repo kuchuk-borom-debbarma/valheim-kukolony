@@ -155,11 +155,15 @@ namespace Kukolony.Debug
             if (ZNet.instance.GetWorldName() != ModConfig.BenchmarkWorld.Value) return 0;
 
             int destroyed = 0;
+            // Every hearth, not only the run's own. Checks that need a colony they can
+            // destroy build a throwaway one with an ordinary name, and a check that failed
+            // before reaching its cleanup leaves it standing - which a name-matched purge
+            // would then skip forever.
             foreach (ZDO hearth in FindAll(ColonyPrefab.PrefabName))
             {
                 ColonyState state = new ColonyState(hearth);
-                if (!state.IsValid || state.Name != BenchmarkFunctionalScenario.PersistenceName) continue;
-                foreach (StructureRecord record in state.GetStructures()) { Destroy(record.Id); destroyed++; }
+                if (state.IsValid)
+                    foreach (StructureRecord record in state.GetStructures()) { Destroy(record.Id); destroyed++; }
                 Destroy(hearth.m_uid);
                 destroyed++;
             }

@@ -255,9 +255,22 @@ dereference the local player.
 ## Screen lessons
 
 - **Releasing the cursor is not optional.** A panel drawn without it is visible and completely
-  unusable; the game keeps the mouse captured for looking around.
+  unusable; the game keeps the mouse captured for looking around. Assert it on `Cursor.visible`,
+  which is the game's state, rather than on a flag of your own recording that you set the flag.
 - **Do not hand-place coordinates.** Rows in a column at a fixed pitch cannot overlap or spill;
-  hand-placed ones did both. A script that parses the positions catches what the eye does not.
+  hand-placed ones did both. Build the layout so the violation cannot be expressed, and audit
+  the built `RectTransform` tree rather than parsing the source - a computed layout has no
+  literal coordinates for a script to find, and the tree is what the player actually gets.
+- **Audit only what your own layout placed.** Unity controls overlap themselves on purpose: a
+  button's label sits on the button, and an input field stacks its placeholder and its text in
+  the same space because only one is ever shown. Comparing every drawn element reports all of
+  those as faults. Depth 1 is the layout's business; deeper is the control's.
+- **`preferredWidth` against the rect is how you catch a clipped string**, and it only works
+  with the content size fitter *off* - with it on, the rect grows to fit and every string
+  passes.
+- **Two states behind one boolean will be rendered wrong.** A structure that could not be found
+  and one merely out of radius both came from `IsLiveIn`, so the screen called a destroyed chest
+  "out of reach". Found by looking at a screenshot, not by any assertion.
 - **Size strings to their column.** A sentence cut off mid-word explains nothing.
 - **A fallback that looks plausible hides a bug.** A `default:` branch returning a real name
   made a new job type display as an existing one; returning empty makes it fail loudly instead.

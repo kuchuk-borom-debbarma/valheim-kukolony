@@ -148,7 +148,7 @@ namespace Kukolony.Colonies
                 $"$kukolony_colony\n<color=orange>{name}</color>\n"
                 + $"<color=grey>{state.CountMembers(ColonyMemberKind.Villager)} villagers, "
                 + $"{state.GetStructures().Count} registered structures</color>"
-                + "\n[<color=yellow><b>$KEY_Use</b></color>] manage");
+                + $"\n[<color=yellow><b>{ModConfig.ColonyScreenHotkey.Value}</b></color>] manage");
         }
 
         public bool Interact(Humanoid user, bool hold, bool alt)
@@ -158,11 +158,10 @@ namespace Kukolony.Colonies
                 return false;
             }
 
-            // The colony screen is roadmap milestone 2. Saying so beats a piece that
-            // silently ignores being used, which reads as broken rather than unfinished.
-            if (MessageHud.instance != null)
-                MessageHud.instance.ShowMessage(MessageHud.MessageType.Center,
-                    "Colony management is not built yet");
+            // The screen opens by hotkey, from anywhere, rather than by standing here. The
+            // hearth still answers, because a placed piece that ignores being used reads as
+            // broken - and the answer is the one thing the player needs, which is the key.
+            Core.Report.Say($"Press {ModConfig.ColonyScreenHotkey.Value} to manage {State.Name}.");
             return true;
         }
 

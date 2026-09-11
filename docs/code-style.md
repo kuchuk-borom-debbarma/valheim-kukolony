@@ -169,17 +169,25 @@ deadline-guarded, and new coverage follows the checklist in
 
 ## Panel layout
 
-The colony wood panel is 860x680, and every helper positions on a centre pivot, so an
-element spans `x ± width/2`. Keep elements inside `±400` to leave a visible margin: at
-`±430` copy renders on the panel edge or spills onto the world behind it. Left-aligned
-copy uses `LeftTextAt`, which pins the element to the content column and clamps its
-width, instead of a hand-tuned negative `x` that silently overflows when the string or
-font size changes.
+Nothing is placed by hand. Rows come from a `Column` at a fixed pitch; cells come from a `Row`,
+allocated left to right. Two controls in a row cannot overlap and two rows cannot either, which
+is why there is no longer a rule asking you to keep elements a certain distance apart - the
+rule is enforced by there being no way to express the violation.
 
-Controls sharing a row must not overlap. Rows are 30 tall, so treat any two elements
-within 30 units of the same `y` as sharing a line and give them a real gap. Player-facing
-strings come from an explicit label mapping; never render a raw enum value, which leaks
-camelCase names like `OperateStation` into the UI.
+Every number lives in `Panel` (`Kukolony/Gui/ScreenLayout.cs`). Nothing outside that file may
+invent a coordinate, and no widget builder takes an `x`. If a screen needs something the
+widgets cannot express, add a widget rather than a coordinate.
 
-Fixture names used for UI evidence must be unique across benchmark phases and short
-enough to survive list truncation, so two distinct records can never render identically.
+`Panel.RowsPerPage` is derived from the geometry. Do not replace it with a chosen number: a
+hand-picked row count and a hand-picked pitch disagree the moment either changes, and the
+symptom is a last row drawn over the pager.
+
+Player-facing strings come from explicit mappings; never render a raw enum value, which leaks
+camelCase names like `OperateStation` into the UI. A fallback that returns a plausible name is
+worse than none - an unnamed thing should render empty and fail loudly, because a `default:`
+branch once made a new job display as an existing one.
+
+Fixture names used for UI evidence must be unique across benchmark phases and short enough to
+survive list truncation, so two distinct records can never render identically.
+
+See [ui.md](ui.md) for the screen itself and for how the layout claim is checked.

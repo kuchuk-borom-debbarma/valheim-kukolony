@@ -1,0 +1,405 @@
+using System.Collections;
+using Kukolony.Colonies;
+using Kukolony.Gui;
+using UnityEngine;
+
+namespace Kukolony.Debug
+{
+    /// <summary>
+    ///     The colony screen, checked against the things it is easy to ship without.
+    /// </summary>
+    /// <remarks>
+    ///     A user interface is the easiest thing in this project to verify vacuously: it is
+    ///     visible, so it looks tested. Every claim here is therefore paired with a control
+    ///     that must fail, and the layout audit gets a fixture built wrong on purpose - an
+    ///     audit nobody has seen reject anything is indistinguishable from one that inspects
+    ///     nothing.
+    ///
+    ///     Checks write into the functional run's report rather than printing their own.
+    ///     TestReport.LastText is a single static slot and the controller writes only the last
+    ///     report printed, so a second report here would silently replace the first in the
+    ///     artifact.
+    /// </remarks>
+    internal static class ScreenChecks
+    {
+        internal static IEnumerator Run(TestReport report, Colony colony, Vector3 origin)
+        {
+            ColonyScreen screen = ColonyScreen.Instance;
+            report.Check(screen != null, "the colony screen exists once Jotunn's GUI is available");
+            if (screen == null)
+            {
+                yield break;
+            }
+
+            yield return Cursor(report, screen, colony);
+            yield return Context(report, screen, colony, origin);
+            yield return Layout(report, screen, colony);
+            yield return StructureStatusReads(report, screen, colony);
+            yield return Paging(report, screen, colony);
+            yield return BackStack(report, screen, colony);
+            yield return SubjectVanishes(report, screen, origin);
+
+            screen.Close();
+            yield return null;
+        }
+
+        /// <summary>
+        ///     A panel drawn without releasing the mouse is visible and completely unusable.
+        ///     Asserted on Unity's own cursor state rather than on our bookkeeping flag, which
+        ///     would only prove we remembered to set our own variable.
+        /// </summary>
+        private static IEnumerator Cursor(TestReport report, ColonyScreen screen, Colony colony)
+        {
+            screen.Close();
+            yield return null;
+            bool capturedBefore = !UnityEngine.Cursor.visible;
+
+            screen.Open(colony, null);
+            yield return null;
+            report.Check(screen.IsOpen, "the screen opens");
+            report.Check(UnityEngine.Cursor.visible, "opening the screen releases the cursor",
+                $"visible={UnityEngine.Cursor.visible} lock={UnityEngine.Cursor.lockState}");
+
+            screen.Close();
+            yield return null;
+            report.Check(capturedBefore && !UnityEngine.Cursor.visible,
+                "control: the cursor is captured again once the screen closes",
+                $"beforeCaptured={capturedBefore} visibleAfter={UnityEngine.Cursor.visible}");
+        }
+
+        /// <summary>
+        ///     What the player was looking at is what makes registration possible without a
+        ///     held tool. Looking at nothing is an ordinary answer, not an error - the control
+        ///     is what proves the screen still opens and builds in that case.
+        /// </summary>
+        private static IEnumerator Context(TestReport report, ColonyScreen screen, Colony colony, Vector3 origin)
+        {
+            GameObject chest = Fixture(origin);
+            yield return null;
+
+            screen.Open(colony, chest);
+            yield return null;
+            report.Check(screen.LookedAt == chest, "the screen records what the player was looking at",
+                $"recorded={(screen.LookedAt == null ? "nothing" : screen.LookedAt.name)}");
+
+            screen.Close();
+            screen.Open(colony, null);
+            yield return null;
+            report.Check(screen.IsOpen && screen.LookedAt == null,
+                "control: looking at nothing is not an error and still opens the screen",
+                $"open={screen.IsOpen}");
+
+            if (chest != null)
+            {
+                if (chest.TryGetComponent(out ZNetView view) && view.IsValid())
+                {
+                    view.ClaimOwnership();
+                }
+
+                ZNetScene.instance.Destroy(chest);
+            }
+
+            yield return null;
+        }
+
+        /// <summary>
+        ///     The layout audit, and the fixture that proves it can fail.
+        /// </summary>
+        private static IEnumerator Layout(TestReport report, ColonyScreen screen, Colony colony)
+        {
+            screen.Close();
+            screen.Open(colony, null);
+            yield return null;
+
+            ScreenAudit.Result home = ScreenAudit.Inspect(screen.Content);
+            report.Check(home.Elements.Count > 0, "the layout audit finds something to inspect",
+                home.Summary);
+            report.Check(home.Clean, "the colony screen has no layout faults",
+                home.Clean ? home.Summary : home.FirstFault);
+
+            screen.Push(new GalleryScreen());
+            yield return null;
+            ScreenAudit.Result gallery = ScreenAudit.Inspect(screen.Content);
+            report.Check(gallery.Clean, "the widget gallery has no layout faults",
+                gallery.Clean ? gallery.Summary : gallery.FirstFault);
+
+            screen.Push(new PickerScreen("Choose an item", Search, null, false, _ => { }));
+            yield return null;
+            ScreenAudit.Result picker = ScreenAudit.Inspect(screen.Content);
+            report.Check(picker.Clean, "the picker has no layout faults",
+                picker.Clean ? picker.Summary : picker.FirstFault);
+
+            // The control. Without it a silently empty audit passes forever.
+            screen.Push(new BrokenScreen());
+            yield return null;
+            ScreenAudit.Result broken = ScreenAudit.Inspect(screen.Content);
+            report.Check(broken.OutOfBounds.Count > 0,
+                "control: the audit catches an element outside the content column",
+                broken.Summary);
+            report.Check(broken.Overlaps.Count > 0,
+                "control: the audit catches two elements drawn on top of each other",
+                broken.Summary);
+            report.Check(broken.Clipped.Count > 0,
+                "control: the audit catches a string too long for its cell",
+                broken.Summary);
+
+            screen.Root(new ColonyHomeScreen());
+            yield return null;
+        }
+
+        /// <summary>
+        ///     A structure that cannot be found must not be reported as merely distant.
+        /// </summary>
+        /// <remarks>
+        ///     Found by looking at a screenshot: a destroyed chest read "out of reach", which
+        ///     is a sentence about a chest that still exists somewhere. The two states came
+        ///     from one boolean, so every caller had to pick one of the two meanings and be
+        ///     wrong half the time.
+        ///
+        ///     Asserted on the row the player reads rather than on the enum behind it, because
+        ///     the fault was in the rendering and an enum check would have passed throughout.
+        /// </remarks>
+        private static IEnumerator StructureStatusReads(TestReport report, ColonyScreen screen, Colony colony)
+        {
+            screen.Close();
+            screen.Open(colony, null);
+            yield return null;
+
+            string live = StatusBeside(screen, "Renamed storage");
+            string gone = StatusBeside(screen, "Deleted storage");
+
+            report.Check(gone == "not found", "a structure that cannot be found says so",
+                $"read '{gone}'");
+            report.Check(live == "ready",
+                "control: a structure that is present reads differently from one that is not",
+                $"read '{live}'");
+        }
+
+        /// <summary>
+        ///     The status drawn on the same row as a named structure. Matched by row position
+        ///     rather than by searching the whole screen for the word, which would pass on any
+        ///     row happening to carry it.
+        /// </summary>
+        private static string StatusBeside(ColonyScreen screen, string name)
+        {
+            ScreenAudit.Result built = ScreenAudit.Inspect(screen.Content);
+            float y = float.NaN;
+            foreach (ScreenAudit.Element element in built.Elements)
+            {
+                if (element.Text == name)
+                {
+                    y = element.Rect.center.y;
+                    break;
+                }
+            }
+
+            if (float.IsNaN(y))
+            {
+                return "<no such row>";
+            }
+
+            foreach (ScreenAudit.Element element in built.Elements)
+            {
+                if (Mathf.Abs(element.Rect.center.y - y) < 2f && element.Text != name &&
+                    !string.IsNullOrEmpty(element.Text))
+                {
+                    return element.Text;
+                }
+            }
+
+            return "<nothing beside it>";
+        }
+
+        /// <summary>
+        ///     A long list pages; a short one does not. The control is what stops a pager that
+        ///     always reports two pages from looking correct.
+        /// </summary>
+        private static IEnumerator Paging(TestReport report, ColonyScreen screen, Colony colony)
+        {
+            screen.Close();
+            screen.Open(colony, null);
+            yield return null;
+
+            // The control uses the colony list rather than the colony screen: the latter grows
+            // a row per registered structure, so whether it fits on one page depends on what
+            // the rest of the run happened to register. A control that can be broken by an
+            // unrelated check is not a control.
+            screen.Root(new ColonyListScreen());
+            yield return null;
+            int shortPages = screen.LastPages;
+            report.Check(shortPages == 1 && screen.LastRows <= Gui.Panel.RowsPerPage,
+                "control: a screen that fits reports a single page and shows no pager",
+                $"rows={screen.LastRows} perPage={Gui.Panel.RowsPerPage} pages={shortPages}");
+
+            screen.Root(new ColonyHomeScreen());
+            yield return null;
+
+            screen.Push(new GalleryScreen());
+            yield return null;
+            report.Check(screen.LastPages > 1, "a list longer than a page reports more than one",
+                $"rows={screen.LastRows} pages={screen.LastPages}");
+
+            string first = Fingerprint(screen);
+            screen.ShowPageForTest(1);
+            yield return null;
+            string second = Fingerprint(screen);
+            report.Check(first != second && !string.IsNullOrEmpty(second),
+                "turning the page shows different rows",
+                $"page1 {Differing(first, second)} | page2 {Differing(second, first)}");
+
+            ScreenAudit.Result paged = ScreenAudit.Inspect(screen.Content);
+            report.Check(paged.Clean, "a turned page has no layout faults",
+                paged.Clean ? paged.Summary : paged.FirstFault);
+
+            screen.ShowPageForTest(0);
+            yield return null;
+        }
+
+        /// <summary>
+        ///     Every sub-screen returns where it came from, and switching top-level screens
+        ///     clears sub-screens rather than stranding the player inside one.
+        /// </summary>
+        private static IEnumerator BackStack(TestReport report, ColonyScreen screen, Colony colony)
+        {
+            screen.Close();
+            screen.Open(colony, null);
+            yield return null;
+            int atRoot = screen.Depth;
+
+            screen.Push(new GalleryScreen());
+            yield return null;
+            bool descended = screen.Depth == atRoot + 1 && screen.Current is GalleryScreen;
+
+            screen.Pop();
+            yield return null;
+            report.Check(descended && screen.Depth == atRoot && screen.Current is ColonyHomeScreen,
+                "a sub-screen returns to the screen it came from",
+                $"depth={screen.Depth} current={Name(screen.Current)}");
+
+            screen.Push(new GalleryScreen());
+            screen.Push(new PickerScreen("Choose", Search, null, false, _ => { }));
+            yield return null;
+            int nested = screen.Depth;
+
+            screen.Root(new ColonyHomeScreen());
+            yield return null;
+            report.Check(nested > atRoot && screen.Depth == 1,
+                "control: switching top-level screens clears the sub-screens below",
+                $"nested={nested} afterSwitch={screen.Depth}");
+        }
+
+        /// <summary>
+        ///     The screen must survive its subject vanishing. Uses a throwaway hearth, because
+        ///     the claim can only be tested by destroying one and every later check needs the
+        ///     benchmark's own colony alive.
+        /// </summary>
+        private static IEnumerator SubjectVanishes(TestReport report, ColonyScreen screen, Vector3 origin)
+        {
+            Vector3 where = origin + new Vector3(0f, 0f, 26f);
+            if (ZoneSystem.instance == null || !ZoneSystem.instance.GetSolidHeight(where, out float _))
+            {
+                report.Check(false, "vanishing-colony check found ground for its own hearth");
+                yield break;
+            }
+
+            GameObject spawned = Spawn(ColonyPrefab.PrefabName, where);
+            yield return new WaitForSecondsRealtime(.3f);
+            Colony temporary = spawned != null ? spawned.GetComponent<Colony>() : null;
+            if (temporary == null)
+            {
+                report.Check(false, "vanishing-colony check kept its own hearth alive");
+                yield break;
+            }
+
+            temporary.EnsureNamed();
+            screen.Close();
+            screen.Open(temporary, null);
+            yield return null;
+            report.Check(screen.IsOpen, "control: the screen stays open while its colony is alive");
+
+            if (temporary.TryGetComponent(out ZNetView view) && view.IsValid())
+            {
+                view.ClaimOwnership();
+                ZNetScene.instance.Destroy(temporary.gameObject);
+            }
+
+            // Two frames: one for the destroy to take effect, one for the screen's own Update
+            // to notice. Checking in the same frame would test the destroy, not the screen.
+            yield return null;
+            yield return null;
+            report.Check(!screen.IsOpen, "the screen closes when its colony is destroyed");
+            report.Check(!UnityEngine.Cursor.visible,
+                "closing on a destroyed colony still gives the cursor back",
+                $"visible={UnityEngine.Cursor.visible}");
+        }
+
+        private static System.Collections.Generic.List<PickerScreen.Option> Search(string filter)
+        {
+            System.Collections.Generic.List<PickerScreen.Option> options =
+                new System.Collections.Generic.List<PickerScreen.Option>();
+            foreach (ItemCatalogue.Entry entry in ItemCatalogue.Search(filter, 40))
+            {
+                options.Add(new PickerScreen.Option(entry.PrefabName, entry.DisplayName));
+            }
+
+            return options;
+        }
+
+        /// <summary>Every string the screen is currently drawing, in order.</summary>
+        private static string Fingerprint(ColonyScreen screen)
+        {
+            System.Text.StringBuilder text = new System.Text.StringBuilder();
+            foreach (ScreenAudit.Element element in ScreenAudit.Inspect(screen.Content).Elements)
+            {
+                if (!string.IsNullOrEmpty(element.Text))
+                {
+                    text.Append(element.Text).Append('|');
+                }
+            }
+
+            return text.ToString();
+        }
+
+        private static string Name(ScreenView screen) => screen == null ? "none" : screen.GetType().Name;
+
+        /// <summary>
+        ///     The part of one page that the other does not share.
+        /// </summary>
+        /// <remarks>
+        ///     Both pages carry the same title and subtitle, so printing each from the start
+        ///     showed two identical-looking strings whether the check passed or failed - and a
+        ///     failure that prints the same thing as a pass explains nothing. Report the part
+        ///     the assertion actually turned on.
+        /// </remarks>
+        private static string Differing(string text, string other)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return "empty";
+            }
+
+            int shared = 0;
+            while (shared < text.Length && shared < other.Length && text[shared] == other[shared])
+            {
+                shared++;
+            }
+
+            string tail = text.Substring(shared);
+            return tail.Length <= 40 ? tail : tail.Substring(0, 40) + "...";
+        }
+
+        private static GameObject Fixture(Vector3 origin) => Spawn("piece_chest_wood", origin + new Vector3(0f, 0f, 6f));
+
+        private static GameObject Spawn(string prefabName, Vector3 position)
+        {
+            GameObject prefab = ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(prefabName) : null;
+            if (prefab == null)
+            {
+                return null;
+            }
+
+            position.y = ZoneSystem.instance.GetSolidHeight(position) + .2f;
+            return Object.Instantiate(prefab, position, Quaternion.identity);
+        }
+    }
+}

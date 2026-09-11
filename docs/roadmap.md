@@ -81,10 +81,16 @@ there is not evidence. This is the *never infer destruction from absence* rule i
 
 ---
 
-## Milestone 2 — The screen
+## Milestone 2 — The screen — **done**
 
 The single surface through which the settlement is managed. Built before anything it manages,
 because everything after this needs somewhere to appear.
+
+Verified 11 September 2026. See [ui.md](ui.md) for the built result.
+
+**One decision differs from what is written below:** the screen opens by hotkey only. Using a
+hearth tells you which key rather than opening anything, so there is one route to the surface
+instead of two.
 
 ### Build
 
@@ -131,6 +137,24 @@ everything after it. Every action reports its outcome, including refusal and why
 
 The screen opens anywhere, releases the mouse, knows what you were looking at, renders one of
 every widget kind, pages a long list, and survives its colony being destroyed while open.
+
+**Result.** All of it, each claim paired with a control: the cursor is released on open and
+captured again on close; looking at nothing still opens the screen; a screen that fits reports
+one page while the gallery reports several and shows different rows on each; a sub-screen
+returns where it came from while switching top-level screens clears the stack; and a colony
+destroyed underneath an open screen closes it and gives the cursor back.
+
+The layout claim is the one that needed the most care. Rows come from a column at a fixed pitch
+and cells from a row allocated left to right, so overlap is not *checked for* but impossible to
+express. What a layout system cannot promise is that a widget used it, or that a string fits
+the cell it was handed - so `ScreenAudit` walks the built `RectTransform` tree in-game and
+asserts bounds, overlap and clipping on what was actually drawn. The predecessor's audit parsed
+C# source for literal coordinates; it lived outside the repository and a computed layout has no
+literals to find.
+
+`BrokenScreen` is why any of that is believable: a fixture built wrong on purpose, which the
+benchmark asserts the audit rejects on all three counts. An audit nobody has watched fail is
+indistinguishable from one that inspects nothing.
 
 ---
 

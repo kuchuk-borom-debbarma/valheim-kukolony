@@ -125,6 +125,7 @@ namespace Kukolony.Debug
             yield return CheckZdoLifetime(report, colony);
             yield return CheckOrphanedVillager(report, colony);
             yield return CheckDestroyedColonyLeavesStructures(report, colony, origin);
+            yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
 
             // Bounds the window in which the snapshot's target can go missing: this is the

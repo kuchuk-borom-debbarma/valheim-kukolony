@@ -44,7 +44,7 @@ namespace Kukolony
 
         /// <summary>Development aid. Off by default so it never fires for a normal install.</summary>
         internal static ConfigEntry<bool> DebugSpawnEnabled { get; private set; }
-        internal static ConfigEntry<KeyCode> ColonyPickerHotkey { get; private set; }
+        internal static ConfigEntry<KeyCode> ColonyScreenHotkey { get; private set; }
         internal static ConfigEntry<KeyCode> MarkStructureHotkey { get; private set; }
 
         /// <summary>One-shot prefab diagnostic. Replaces the acceptance test for that run.</summary>
@@ -152,9 +152,9 @@ namespace Kukolony
                 + "Development aid for the unassigned-villager path; players add villagers "
                 + "from the hearth's Members tab, which this does not affect.");
 
-            ColonyPickerHotkey = config.Bind(
-                "1 - Colony", nameof(ColonyPickerHotkey), KeyCode.C,
-                "Press this key (outside chat) to open the colony picker.");
+            ColonyScreenHotkey = config.Bind(
+                "1 - Colony", nameof(ColonyScreenHotkey), KeyCode.C,
+                "Press this key (outside chat) to open the colony screen on the nearest colony.");
 
             MarkStructureHotkey = config.Bind(
                 "1 - Colony", nameof(MarkStructureHotkey), KeyCode.G,
