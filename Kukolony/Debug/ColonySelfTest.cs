@@ -36,6 +36,7 @@ namespace Kukolony.Debug
     {
         internal const string PersistenceName = "Kukolony Benchmark Persistence V1";
         private const string PersistedVillagerName = "Kukolony Persisted Villager V1";
+        private const string PersistedStructureName = "Kukolony Persisted Storage V1";
         private static readonly int RunIdKey = "kukolony.benchmark.run".GetStableHashCode();
         private static readonly int PrimaryMemberKey =
             "kukolony.benchmark.primary-member.v2".GetStableHashCode();
@@ -70,14 +71,37 @@ namespace Kukolony.Debug
             report.Check(ColonyOperations.FilterStructures(colony, string.Empty, StructureCapability.None,
                 StructureSort.Status).Count == 1, "structure status sorting retains live records");
 
-            Vector3 originalChestPosition = chest.transform.position;
-            chest.transform.position = origin + Vector3.right * (colony.EffectiveRadius + 8f);
-            chest.GetComponent<ZNetView>().GetZDO().SetPosition(chest.transform.position);
-            yield return new WaitForSecondsRealtime(.2f);
-            report.Check(colony.State.GetStructures().Count == 1 && !chestRecord.IsLiveIn(colony),
-                "registered out-of-radius structure stays visible but becomes ineligible");
-            chest.transform.position = originalChestPosition;
-            chest.GetComponent<ZNetView>().GetZDO().SetPosition(originalChestPosition);
+            // Its own chest, not the one the reload phase depends on.
+            //
+            // This used to teleport "Renamed storage" out of radius and back, and that chest is
+            // also the subject of the save-and-relaunch check. Moving a placed piece by its
+            // transform leaves it without WearNTear support, and the support check fires some
+            // seconds later and breaks it - so the structure was destroyed during the
+            // screenshot phase and the failure surfaced a phase later as "registration does not
+            // persist". Intermittent, because it is a race between that check and the end of
+            // the run; adding logging to find it was enough to make it stop happening.
+            //
+            // The lesson was already written down after a falling tree destroyed a benchmark
+            // chest: keep destructive fixtures away from other checks' subjects.
+            GameObject roamer = Spawn("piece_chest_wood", origin + Vector3.right * 5f);
+            yield return null;
+            StructureRecord roamerRecord = Register(colony, roamer, "Roaming storage");
+            if (roamerRecord != null)
+            {
+                roamer.transform.position = origin + Vector3.right * (colony.EffectiveRadius + 8f);
+                roamer.GetComponent<ZNetView>().GetZDO().SetPosition(roamer.transform.position);
+                yield return new WaitForSecondsRealtime(.2f);
+                report.Check(colony.State.GetStructures().Exists(r => r.Id == roamerRecord.Id) &&
+                             !roamerRecord.IsLiveIn(colony),
+                    "registered out-of-radius structure stays visible but becomes ineligible");
+                colony.RemoveStructure(roamerRecord.Id);
+                Release(roamer);
+            }
+            else
+            {
+                report.Check(false, "out-of-radius check could register its own chest");
+            }
+
             yield return new WaitForSecondsRealtime(.2f);
 
             // A record that can never be found, and is not known to be dead: the state the
@@ -119,17 +143,29 @@ namespace Kukolony.Debug
                 report.Check(view.GetZDO().Persistent, "live villager ZDO is persistent");
             }
 
+            Trace(colony, "before any check");
             yield return CheckLifecycle(report, colony, origin);
+            Trace(colony, "CheckLifecycle");
             CheckRegisterableContainers(report, colony);
+            Trace(colony, "CheckRegisterableContainers");
             yield return CheckDurableReference(report, colony, origin);
+            Trace(colony, "CheckDurableReference");
             yield return CheckZdoLifetime(report, colony);
+            Trace(colony, "CheckZdoLifetime");
             yield return CheckOrphanedVillager(report, colony);
+            Trace(colony, "CheckOrphanedVillager");
             yield return CheckDestroyedColonyLeavesStructures(report, colony, origin);
+            Trace(colony, "CheckDestroyedColonyLeavesStructures");
             yield return CheckRegistration(report, colony, origin);
+            Trace(colony, "CheckRegistration");
             yield return CheckReaper(report, colony, origin);
+            Trace(colony, "CheckReaper");
             yield return CheckStoredContents(report, colony, origin);
+            Trace(colony, "CheckStoredContents");
             yield return CheckOutpostStaysLoaded(report, colony);
+            Trace(colony, "CheckOutpostStaysLoaded");
             yield return CheckSettingsAndIndex(report, colony, origin);
+            Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
 
@@ -162,7 +198,7 @@ namespace Kukolony.Debug
             TestReport report = new TestReport("Colony acceptance run 2 - reload");
             ColonyState state = colony.State;
             report.Check(state.Name == PersistenceName, "colony name survived save and relaunch");
-            StructureRecord storage = state.GetStructures().FirstOrDefault(r => r.Name == "Renamed storage");
+            StructureRecord storage = state.GetStructures().FirstOrDefault(r => r.Name == PersistedStructureName);
             report.Check(storage != null, "registered structure and name survived save and relaunch");
             // The name alone would pass even if the reference to the object rotted, because
             // it is a plain string in the record. A chunked save renumbers raw runtime ids,
@@ -223,8 +259,29 @@ namespace Kukolony.Debug
         {
             if (colony == null || ZDOMan.instance == null) return;
             ZDO zdo = ZDOMan.instance.GetZDO(GetPrimaryMember(colony));
-            StructureRecord target = colony.State.GetStructures().FirstOrDefault(record => record.Name == "Renamed storage");
-            if (zdo == null || target == null) return;
+            if (zdo == null)
+            {
+                Core.Log.Error("[Benchmark] no primary villager to snapshot - the reload phase will fail");
+                return;
+            }
+
+            // The subject is registered here, immediately before the save, rather than reused
+            // from a check four minutes earlier.
+            //
+            // It used to be the chest from the first structure check, which meant the reload
+            // phase was really asking "did that chest survive the entire suite" - and when
+            // something destroyed it mid-run, three unrelated reload checks failed at once
+            // with no hint why, because this method returned silently when it could not find
+            // it. What the reload phase means to ask is whether a registered structure
+            // survives a save, so it now gets a structure of its own with nothing between its
+            // registration and the save.
+            StructureRecord target = RegisterPersistenceSubject(colony);
+            if (target == null)
+            {
+                Core.Log.Error("[Benchmark] could not register a persistence subject - " +
+                               "the reload phase will fail, and this is why");
+                return;
+            }
             Core.Log.Info($"[Benchmark] snapshot start: structures={colony.State.GetStructures().Count} " +
                           $"storage={target.Id} live={(ZDOMan.instance.GetZDO(target.Id) != null)}");
             VillagerState persisted = new VillagerState(zdo);
@@ -1134,6 +1191,7 @@ namespace Kukolony.Debug
 
             string note = $"colony '{colony.State.Name}': {total} resolvable of " +
                           $"{colony.State.GetStructures().Count}, {repaired} repaired, " +
+                          $"names: {string.Join("|", colony.State.GetStructures().ConvertAll(r => r.Name).ToArray())}, " +
                           $"missing: {(missing.Count == 0 ? "none" : string.Join("|", missing.ToArray()))}";
             Core.Log.Info("[Benchmark] " + note);
             try
@@ -1144,6 +1202,72 @@ namespace Kukolony.Debug
             catch (System.Exception e) { Core.Log.Warning("could not write before-save note: " + e.Message); }
 
             return repaired;
+        }
+
+        private static string _lostAfter = string.Empty;
+
+        /// <summary>
+        ///     Notes the first stage after which the benchmark's own storage record stops
+        ///     resolving.
+        /// </summary>
+        /// <remarks>
+        ///     Bisecting by instrumentation rather than by reading: a chest registered early was
+        ///     found destroyed by the time the world saved, and which of a dozen checks killed
+        ///     it is not answerable by inspection. Written to the run directory, because the
+        ///     game log does not survive the relaunch that needs explaining.
+        /// </remarks>
+        internal static void Trace(Colony colony, string stage)
+        {
+            if (_lostAfter.Length > 0 || colony == null || ZDOMan.instance == null) return;
+
+            StructureRecord record = colony.State.GetStructures().Find(r => r.Name == "Renamed storage");
+            if (record == null)
+            {
+                _lostAfter = stage + " (record itself gone)";
+            }
+            else if (ZDOMan.instance.GetZDO(record.Id) == null)
+            {
+                _lostAfter = $"{stage} (dead={KnownDead(record.Id)})";
+            }
+            else
+            {
+                return;
+            }
+
+            Core.Log.Error("[Benchmark] 'Renamed storage' stopped resolving after " + _lostAfter);
+            try
+            {
+                System.IO.File.AppendAllText(System.IO.Path.Combine(
+                    ModConfig.BenchmarkOutputPath.Value, "lost-at.txt"),
+                    "stopped resolving after " + _lostAfter + System.Environment.NewLine);
+            }
+            catch (System.Exception) { }
+        }
+
+        /// <summary>
+        ///     Places and registers the structure the reload phase will look for.
+        /// </summary>
+        /// <remarks>
+        ///     Its own chest, created last. Sharing a subject with an earlier check made a
+        ///     persistence failure depend on everything that ran in between - which is the
+        ///     "keep destructive fixtures away from other checks' subjects" lesson, arrived at
+        ///     a second time by a different route.
+        /// </remarks>
+        private static StructureRecord RegisterPersistenceSubject(Colony colony)
+        {
+            GameObject chest = Spawn("piece_chest_wood", colony.transform.position + new Vector3(0f, 0f, -6f));
+            if (chest == null || !chest.TryGetComponent(out ZNetView view) || !view.IsValid()) return null;
+
+            RegisterOutcome outcome = ColonyOperations.Register(colony, chest);
+            if (outcome != RegisterOutcome.Registered && outcome != RegisterOutcome.Moved)
+            {
+                Core.Log.Error($"[Benchmark] persistence subject was not registered: {outcome}");
+                return null;
+            }
+
+            ZDOID id = view.GetZDO().m_uid;
+            ColonyOperations.RenameStructure(colony, id, PersistedStructureName);
+            return colony.State.GetStructures().Find(r => r.Id == id);
         }
 
         /// <summary>The colony's record for an object, or null.</summary>
