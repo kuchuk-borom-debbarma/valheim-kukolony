@@ -5,19 +5,23 @@ using Kukolony.Colonies;
 using Kukolony.Core;
 using Kukolony.Gui;
 using Kukolony.Villagers;
-using Kukolony.Jobs;
 using UnityEngine;
 
 namespace Kukolony.Debug
 {
     /// <summary>
-    ///     Builds a populated colony, opens the panel, and screenshots it.
+    ///     Photographs what the mod puts in the world.
     ///
-    ///     The harness can prove every rule behind a button, but not whether the panel
-    ///     reads well - which is the one thing that actually needs looking at. macOS
-    ///     screen capture is blocked without Screen Recording permission, so the game
-    ///     captures itself instead: no OS permission is involved, and the result is
-    ///     exactly what a player sees.
+    ///     The harness can prove every rule behind a feature, but not whether the result
+    ///     looks right - which is the one thing that actually needs looking at. macOS screen
+    ///     capture is blocked without Screen Recording permission, so the game captures
+    ///     itself instead: no OS permission is involved, and the result is exactly what a
+    ///     player sees.
+    ///
+    ///     There is one capture at present. The screens this photographed were removed with
+    ///     the feature layer and return from roadmap milestone 2; a villager is the only
+    ///     thing currently worth looking at, and photographing one is how a rig that glowed
+    ///     like a ghost was finally noticed.
     /// </summary>
     /// <summary>UI evidence phase invoked exclusively by ColonyBenchmarkController.</summary>
     internal static class BenchmarkUiScenario
@@ -25,128 +29,26 @@ namespace Kukolony.Debug
         internal static bool LastPassed { get; private set; }
         private static bool _captureFailed;
         private static readonly List<string> Captures = new List<string>();
+
         internal static IEnumerator Run(Colony colony)
         {
             LastPassed = false;
             _captureFailed = false;
             Captures.Clear();
-            Vector3 origin = Player.m_localPlayer.transform.position;
             yield return new WaitForSecondsRealtime(1f);
 
             if (colony == null)
             {
-                Log.Error("[Screenshot] could not build a colony to photograph");
+                Log.Error("[Screenshot] no colony to photograph");
                 yield break;
             }
 
-            string[] prefabs = { "piece_chest_wood", "fire_pit", "smelter", "charcoal_kiln",
-                "piece_cookingstation", "fermenter", "piece_beehive" };
-            // Readable, phase-unique names: the functional phase already registers
-            // "Benchmark <prefab>" fixtures, and raw prefab names truncate in list rows,
-            // which made two distinct structures render identically in UI evidence.
-            string[] names = { "Showcase storage", "Showcase fire pit", "Showcase smelter",
-                "Showcase kiln", "Showcase cooking station", "Showcase fermenter",
-                "Showcase beehive" };
-            List<GameObject> structures = new List<GameObject>();
-            for (int i = 0; i < prefabs.Length; i++)
-            {
-                GameObject structure = Spawn(prefabs[i], origin + Vector3.right * (5f + i * 3f));
-                if (structure != null) structures.Add(structure);
-                RegisterStructure(colony, structure, names[i]);
-            }
-            Log.Info("[Screenshot] scenario built");
-
-            // Pagination and selection exercise persisted member records independently
-            // from rendering. Reuse existing ZNet-backed fixtures so this UI scenario
-            // creates no extra actors; the functional phase already exercises two real
-            // production NPCs concurrently.
-            List<ColonyJobConfig> configured = colony.State.GetEffectiveJobs();
-            ZDOID detailSubject = ZDOID.None;
-            for (int i = 0; i < 6; i++)
-            {
-                GameObject fixture = i < structures.Count ? structures[i] : null;
-                if (fixture != null && fixture.TryGetComponent(out ZNetView view) && view.IsValid())
-                {
-                    colony.Register(ColonyMemberKind.Villager, view);
-                    VillagerState state = new VillagerState(view.GetZDO());
-                    state.SetName("Showcase villager " + (i + 1));
-                    state.SetRuntimePhase(i % 2 == 0 ? "Finding target" : "Waiting for work");
-                    ColonyAssignments.SetQueue(view.GetZDO().m_uid,
-                        new List<string> { configured[i % configured.Count].Id, configured[(i + 1) % configured.Count].Id });
-                    if (detailSubject == ZDOID.None) detailSubject = view.GetZDO().m_uid;
-                }
-            }
-            Log.Info("[Screenshot] lightweight member records ready");
-            yield return null;
-
-            ColonyPanel panel = ColonyPanel.Instance;
-            if (panel == null)
-            {
-                Log.Error("[Screenshot] colony panel was never built");
-                yield break;
-            }
-
-            Log.Info("[Screenshot] opening panel");
-
-            panel.Open(colony);
-            yield return new WaitForSecondsRealtime(1.5f);
-
-            Log.Info("[Screenshot] capturing colony panel");
-            yield return Capture("colony-panel.png");
-
-            panel.ShowTabForTest("Structures");
-            yield return new WaitForSecondsRealtime(.5f);
-            yield return Capture("colony-structures.png");
-            panel.ShowTabForTest("Members");
-            yield return new WaitForSecondsRealtime(1f);
-            yield return Capture("colony-members.png");
-            panel.ShowPageForTest(1);
-            yield return new WaitForSecondsRealtime(1f);
-            yield return Capture("colony-members-page-2.png");
-            if (detailSubject != ZDOID.None) panel.ShowMemberDetailForTest(detailSubject);
-            else panel.ShowMemberDetailForTest(0);
-            yield return new WaitForSecondsRealtime(1f);
-            yield return Capture("colony-member-detail.png");
-            panel.ShowRemoveConfirmForTest();
-            yield return new WaitForSecondsRealtime(1f);
-            yield return Capture("colony-member-remove-confirm.png");
-            panel.ShowRegisterPickerForTest();
-            yield return new WaitForSecondsRealtime(1f);
-            yield return Capture("colony-register-picker.png");
-            panel.ShowOutfitsForTest();
-            yield return new WaitForSecondsRealtime(1f);
-            yield return Capture("colony-outfits.png");
-            panel.ShowOutfitCardForTest();
-            yield return new WaitForSecondsRealtime(1f);
-            yield return Capture("colony-outfit-card.png");
-            panel.ShowSlotPickerForTest();
-            yield return new WaitForSecondsRealtime(1f);
-            yield return Capture("colony-slot-picker.png");
-            panel.ShowTabForTest("Jobs");
-            yield return new WaitForSecondsRealtime(.5f);
-            yield return Capture("colony-jobs.png");
-            panel.ShowJobForTest(0);
-            yield return new WaitForSecondsRealtime(1f);
-            yield return Capture("colony-job-config.png");
-            panel.ShowSettingPickerForTest();
-            yield return new WaitForSecondsRealtime(1f);
-            yield return Capture("colony-structure-picker.png");
-            panel.ShowPresetsForTest();
-            yield return new WaitForSecondsRealtime(1f);
-            yield return Capture("colony-preset-application.png");
-
-            panel.Close();
             yield return CaptureVillager(colony);
-            ColonyPicker.Instance?.ShowForTest();
-            yield return new WaitForSecondsRealtime(.5f);
-            yield return Capture("colony-picker.png");
-            ColonyPicker.Instance?.HideForTest();
-            yield return new WaitForSecondsRealtime(0.5f);
 
-            Log.Info("[Screenshot] done");
-            File.WriteAllText(Path.Combine(ModConfig.BenchmarkOutputPath.Value, "screenshots.manifest.json"),
-                "{\"screenshots\":[" + string.Join(",", Captures) + "]}");
-            LastPassed = !_captureFailed;
+            System.IO.File.WriteAllText(
+                System.IO.Path.Combine(ModConfig.BenchmarkOutputPath.Value, "screenshots.manifest.json"),
+                "[" + string.Join(",", Captures.ToArray()) + "]");
+            LastPassed = !_captureFailed && Captures.Count > 0;
         }
 
         private static void RegisterStructure(Colony colony, GameObject structure, string name)

@@ -61,18 +61,9 @@ namespace Kukolony.KeepAlive
                 return;
             }
 
-            if (!Resources.ResourceIndex.IsReady)
+            if (!LoadAllowlist.IsReady)
             {
-                Resources.ResourceIndex.Rebuild();
-            }
-
-            // Whether any colony gathers decides whether trees are worth loading, and a
-            // player can turn that on at any time. Rebuilding only when the answer changes
-            // keeps this to an integer comparison on the ordinary path.
-            bool gathering = ColonyRegistry.AnyGathers();
-            if (!LoadAllowlist.IsReady || LoadAllowlist.IncludesResources != gathering)
-            {
-                LoadAllowlist.Rebuild(gathering);
+                LoadAllowlist.Rebuild();
             }
 
             _scanTimer += Time.deltaTime;
@@ -125,8 +116,6 @@ namespace Kukolony.KeepAlive
             ColonyRegistry.Clear();
             KeepAliveZones.Clear();
             LoadAllowlist.Clear();
-            Resources.ResourceIndex.Clear();
-            Resources.ColonyResources.Clear();
             StopAllCoroutines();
         }
 

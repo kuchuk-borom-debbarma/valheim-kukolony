@@ -32,7 +32,6 @@ namespace Kukolony.Colonies
             if (!Input.GetKeyDown(ModConfig.MarkStructureHotkey.Value)) return;
             if (Chat.instance != null && Chat.instance.HasFocus()) return;
             if (Console.IsVisible()) return;
-            if (Gui.ColonyPanel.Instance != null && Gui.ColonyPanel.Instance.IsOpen) return;
 
             Player player = Player.m_localPlayer;
             if (player == null) return;

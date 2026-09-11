@@ -35,8 +35,6 @@ namespace Kukolony
             }
             AddLocalization();
 
-            Gui.ColonyPanel.Register();
-            Gui.ColonyPicker.Register();
             VillagerPrefab.Register();
             Colonies.ColonyPrefab.Register();
             _harmony.PatchAll(Assembly.GetExecutingAssembly());
@@ -58,7 +56,7 @@ namespace Kukolony
             Localization.AddTranslation("English", "kukolony_villager_bag", "Villager's bag");
             Localization.AddTranslation("English", "kukolony_colony", "Colony Hearth");
             Localization.AddTranslation("English", "kukolony_colony_desc",
-                "Records a colony, its villagers, structures, jobs and presets. "
+                "Records a colony, its villagers and its registered structures. "
                 + "Only placed structures inside its live radius can be registered.");
         }
     }

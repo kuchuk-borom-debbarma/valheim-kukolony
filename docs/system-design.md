@@ -518,9 +518,18 @@ Settled, with the reason.
   says where a kind of work happens. Territory is a shape a player draws.
 - **Never infer destruction from absence.** A record is removed only on positive evidence:
   the object was seen destroyed, or the player said so. Anything else is dormant and visible.
-  A ZDO that cannot be resolved may be destroyed *or* merely not in memory, and the two are
-  indistinguishable from the outside — including through the persistent token, which is
-  stored on the ZDO and so needs the ZDO to read it.
+  A ZDO that cannot be resolved may be destroyed *or* merely not in memory.
+
+  Measurement has since refined this, and the refinement matters because the two statements
+  disagree: on the **host**, an unloaded object still resolves, so a failed lookup does mean
+  destroyed ([valheim-findings.md](valheim-findings.md)). The rule stands anyway, for a
+  different reason than it was written for. A multiplayer **client** is only told about part
+  of the world, so absence there is ordinary rather than evidence; and the dead list the host
+  could corroborate with is pruned over time. So: absence may drive *behaviour*, which is
+  reversible if it turns out to be wrong, and must never drive *deletion*, which is not.
+
+  Milestone 1's orphaned villager is the worked example — it stops and says it has no colony,
+  and does not clear its own membership.
 
 ---
 
@@ -536,3 +545,31 @@ A village of people who stand still while a boar kills them is not a village. Bu
 previous mod's own notes record that working villagers mostly failed to defend themselves,
 because the work loop starved the combat AI. Options: no defence; flee indoors; defend
 themselves but never seek a fight.
+
+---
+
+## Status
+
+**11 September 2026 — clean slate, then milestone 1.**
+
+The feature layer built to the previous plan was deleted rather than adapted: jobs, the panel,
+resource scanning, the wardrobe, and every check that tested them. About 5,600 lines went.
+Git is the archive, so nothing was kept "just in case".
+
+What was kept is the engine underneath, because it was correct and expensive to establish:
+ownership discipline, keep-alive, persistence, capability probing, the two-phase in-game
+harness, and villagers that look like people. What was *measured* was written down first, in
+[valheim-findings.md](valheim-findings.md), which is the actual asset — the code was only what
+carried it.
+
+Two things were removed that had looked like working features and were not:
+
+- `VillagerState` still carried the whole job queue — position, attempt, progress, cursor,
+  step target. Nothing outside the test suite read any of it. The suite was verifying
+  machinery no feature used, which is a passing check that means nothing.
+- The reload phase asserted a registered structure's *name* survived a save, which is a plain
+  string in the record and would pass even if the reference to the object had rotted. That is
+  now an assertion that the record still resolves to a live object.
+
+Milestone 1 is done; see [roadmap.md](roadmap.md). Villagers are currently undressed — the
+wardrobe went with the feature layer and returns with equipment.

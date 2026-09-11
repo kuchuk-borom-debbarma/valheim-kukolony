@@ -51,26 +51,6 @@ namespace Kukolony.Colonies
             }
         }
 
-        /// <summary>
-        ///     Whether any known colony is set to gather from the world rather than only from
-        ///     containers. Read from the saved jobs rather than from what villagers are doing,
-        ///     because a colony that is about to gather has to have its trees loaded before its
-        ///     villagers can find them, not after.
-        /// </summary>
-        internal static bool AnyGathers()
-        {
-            foreach (ZDO colonyZdo in ColonyZdos)
-            {
-                if (colonyZdo == null || !colonyZdo.IsValid()) continue;
-                foreach (Jobs.ColonyJobConfig job in new ColonyState(colonyZdo).GetEffectiveJobs())
-                {
-                    Jobs.Work.IColonyWork work = Jobs.Work.WorkRegistry.For(job.Type);
-                    if (work != null && work.GathersFromTheWorld) return true;
-                }
-            }
-            return false;
-        }
-
         internal static IReadOnlyList<ZDO> GetKnownColonies() => ColonyZdos;
         internal static void Clear() => ColonyZdos.Clear();
 

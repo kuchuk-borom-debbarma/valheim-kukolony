@@ -19,34 +19,17 @@ namespace Kukolony.KeepAlive
     {
         private static readonly HashSet<int> Allowed = new HashSet<int>();
 
-        /// <summary>Whether the last build included trees. See <see cref="Rebuild(bool)"/>.</summary>
-        private static bool _gathering;
-
         internal static int Count => Allowed.Count;
 
         internal static bool IsReady => Allowed.Count > 0;
-
-        internal static bool IncludesResources => _gathering;
 
         /// <summary>
         ///     Built once from ZNetScene by component, not by name - a name list would
         ///     silently miss modded chests and stations.
         /// </summary>
-        /// <param name="gathering">
-        ///     Whether any colony is set to gather, which is the only reason to instantiate
-        ///     trees. Off-screen a villager cannot chop what was never loaded: it would pick a
-        ///     tree, walk to it and wait forever, while working perfectly every time anyone
-        ///     came to look. So gathering colonies must load them.
-        ///
-        ///     They are not on the list unconditionally because trees are the most numerous
-        ///     thing in the world by a wide margin, and loading every one in every kept zone is
-        ///     exactly the cost this allowlist exists to avoid. A colony that only hauls and
-        ///     smelts pays nothing.
-        /// </param>
-        internal static void Rebuild(bool gathering)
+        internal static void Rebuild()
         {
             Allowed.Clear();
-            _gathering = gathering;
 
             if (ZNetScene.instance == null)
             {
@@ -61,8 +44,7 @@ namespace Kukolony.KeepAlive
                 }
             }
 
-            Log.Info($"[KeepAlive] allowlist covers {Allowed.Count} prefab(s)"
-                     + (gathering ? ", including trees for gathering" : string.Empty));
+            Log.Info($"[KeepAlive] allowlist covers {Allowed.Count} prefab(s)");
         }
 
         internal static bool Contains(int prefabHash) => Allowed.Contains(prefabHash);
@@ -71,11 +53,7 @@ namespace Kukolony.KeepAlive
         ///     Dropped when a world unloads - prefab hashes are per-session once mods can
         ///     register their own, so carrying a list across worlds risks stale entries.
         /// </summary>
-        internal static void Clear()
-        {
-            Allowed.Clear();
-            _gathering = false;
-        }
+        internal static void Clear() => Allowed.Clear();
 
         private static bool Matters(GameObject prefab)
         {
@@ -105,16 +83,8 @@ namespace Kukolony.KeepAlive
                 return true;
             }
 
-            // Loose items are the raw material of every gathering job.
+            // Loose items: the raw material of anything a colony picks up.
             if (prefab.GetComponent<ItemDrop>() != null)
-            {
-                return true;
-            }
-
-            // What a gathering colony works on. Only when one is, because this is by far the
-            // most expensive entry on the list.
-            if (_gathering && Resources.ResourceIndex.Of(prefab.name.GetStableHashCode())
-                != Resources.ResourceKind.None)
             {
                 return true;
             }

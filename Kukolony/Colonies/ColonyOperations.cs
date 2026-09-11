@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Kukolony.Jobs;
 
 namespace Kukolony.Colonies
 {
@@ -65,27 +64,5 @@ namespace Kukolony.Colonies
             return added;
         }
 
-        /// <summary>
-        ///     Saves a preset, replacing any existing one with the same name. A colony-local
-        ///     preset keeps exact structure IDs; a portable one is cloned without them.
-        /// </summary>
-        internal static void SavePreset(Colony colony, string name, ColonyJobConfig job, bool local)
-        {
-            List<JobPreset> presets = colony.State.GetPresets();
-            presets.RemoveAll(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
-            presets.Add(new JobPreset { Name = name.Trim(), ColonyLocal = local, Settings = job.Clone(local) });
-            colony.State.SetPresets(presets);
-        }
-
-        /// <summary>
-        ///     Materialises a preset into a new job. The fresh ID is the point: applying a
-        ///     preset must never alias the configuration it was saved from.
-        /// </summary>
-        internal static ColonyJobConfig ApplyPreset(JobPreset preset)
-        {
-            ColonyJobConfig job = preset.Settings.Clone(preset.ColonyLocal);
-            job.Id = Guid.NewGuid().ToString("N");
-            return job;
-        }
     }
 }

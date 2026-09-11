@@ -23,9 +23,18 @@ appeared without releasing the mouse.
 
 ---
 
-## Milestone 1 — The colony
+## Milestone 1 — The colony — **done**
 
 The settlement exists, is a place, and persists.
+
+Verified 11 September 2026: 35 in-game checks in the create phase and 9 across a real save and
+relaunch, a warning-free build, and the villager screenshot inspected. Each claim below that
+could pass by accident has a paired control that must fail — the orphan check is the clearest,
+since idling and being orphaned both look like standing still.
+
+**One thing here is deferred and not done:** the name is generated, not yet chosen. A player
+cannot rename a colony until there is a screen to do it in, which is milestone 2. Everything
+the record and the hover need is in place; only the editing surface is missing.
 
 ### Build
 
@@ -58,6 +67,17 @@ redesign.
 ### Done when
 
 You place a hearth, name it, walk away, save, reload, and it is still there with its name.
+
+**Result.** The hearth persists with its name, population and structure count across a
+relaunch. A destroyed colony leaves its registered chest untouched in the world, and its
+villagers standing where they were, reporting "no colony" rather than walking to where the
+hearth used to be.
+
+Orphaning is deliberately *behavioural and reversible*: the villager reacts to not being able
+to see its colony, and nothing deletes the membership pointer. On the host a missing ZDO does
+mean destroyed, but a multiplayer client is only told about part of the world, so absence
+there is not evidence. This is the *never infer destruction from absence* rule in
+[valheim-findings.md](valheim-findings.md) applied where it costs something to get wrong.
 
 ---
 

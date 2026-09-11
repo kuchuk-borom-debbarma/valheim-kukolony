@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using Kukolony.Colonies;
 using Kukolony.Core;
-using Kukolony.Jobs;
 using UnityEngine;
 
 namespace Kukolony.Villagers
@@ -35,13 +34,10 @@ namespace Kukolony.Villagers
         private Container _bag;
 
         private bool _pathFailureReported;
-        private float _nextWorkTick;
 
         /// <summary>Short description of what this villager is doing, for hover text.</summary>
         internal string Activity { get; private set; } = "idle";
 
-        /// <summary>The job it is employed on, or empty when unemployed.</summary>
-        internal string CurrentJob { get; private set; } = string.Empty;
 
         private void Awake() => Instances.Add(this);
 
@@ -117,16 +113,21 @@ namespace Kukolony.Villagers
             EnsureIdentity();
             EnsureHumanSkin();
             EnsureAppearance();
-            EnsureDressed();
             EnsureTamed();
 
-            // Work takes priority over idling. A villager only wanders home when it has
-            // nothing else to do.
-            if (!TryWork(deltaTime))
+            // A villager whose hearth was destroyed has nowhere to belong. Walking to
+            // where the hearth used to be would look like ordinary behaviour, so it stops
+            // and says what is wrong instead.
+            if (!HasColony())
             {
-                CurrentJob = string.Empty;
-                StayNearHome(deltaTime);
+                VillagerMovement.Stop(_ai);
+                SetActivity("no colony");
+                return true;
             }
+
+            // Nothing to work at yet: jobs are rebuilt at roadmap milestone 6. Until then a
+            // villager lives in the settlement and idles, which is the whole of milestone 1.
+            StayNearHome(deltaTime);
 
             return true;
         }
@@ -289,24 +290,6 @@ namespace Kukolony.Villagers
         private int _cleanPasses;
 
         /// <summary>
-        ///     Shows what the villager owns of its outfit.
-        /// </summary>
-        /// <remarks>
-        ///     Runs every owned tick rather than once, because the answer changes: an equip job
-        ///     brings a helmet back, a job takes the axe out of the bag. Writing a ZDO field
-        ///     that already holds the same value costs nothing, so a mirror is cheaper than
-        ///     remembering to update one.
-        /// </remarks>
-        private void EnsureDressed()
-        {
-            if (_visEquipment == null || _bag == null) return;
-            Colonies.Colony colony = Colonies.Colony.FindFor(_nview.GetZDO());
-            if (colony == null) return;
-            VillagerWardrobe.Wear(_visEquipment, _bag.GetInventory(),
-                colony.State.GetOutfit(State.OutfitName));
-        }
-
-        /// <summary>
         ///     Villagers are tamed so the player and their other tame creatures never
         ///     treat them as enemies. BaseAI.IsEnemy short-circuits on tamed state before
         ///     it reaches the faction switch, which is cleaner than the predecessor's
@@ -400,33 +383,25 @@ namespace Kukolony.Villagers
         }
 
         /// <summary>
-        ///     Executes the villager's explicit colony queue. There is deliberately no
-        ///     automatic assignment fallback: a villager only runs work a player queued.
+        ///     Whether this villager currently has a colony it can see.
         /// </summary>
-        private bool TryWork(float deltaTime)
+        /// <remarks>
+        ///     This deliberately does not clear the stale back-pointer, and does not claim
+        ///     the colony was destroyed. Absence is not proof: on the host a missing ZDO does
+        ///     mean destroyed, but a multiplayer client is only told about part of the world,
+        ///     so a colony that was never replicated to it looks exactly the same. Deleting
+        ///     membership on that evidence would throw away a real settlement's roster.
+        ///
+        ///     So the response is behavioural and reversible - the villager stops and says it
+        ///     has no colony - and it resumes by itself if the hearth turns out to be there
+        ///     after all. Reclaiming genuinely orphaned villagers is the colony screen's job,
+        ///     where a person can see what is being discarded.
+        /// </remarks>
+        private bool HasColony()
         {
-            ZDO villagerZdo = _nview.GetZDO();
-            Colony colony = Colony.FindFor(villagerZdo);
-            if (colony == null)
-            {
-                return false;
-            }
-            List<ColonyJobConfig> jobs = colony.State.GetEffectiveJobs();
-            ColonyJobConfig job = QueueRunner.Current(State, jobs);
-            if (job == null)
-            {
-                return false;
-            }
-            if (Time.time < _nextWorkTick)
-            {
-                return true;
-            }
-            JobResult result = ColonyJobEngine.Tick(this, _ai, _bag, colony, job, out string activity);
-            QueueRunner.Apply(State, jobs, result);
-            if (result == JobResult.Skipped) _nextWorkTick = Time.time + .5f;
-            CurrentJob = ColonyJobCatalog.DisplayName(job.Type);
-            SetActivity(activity);
-            return true;
+            ZDOID colonyId = Colonies.ColonyMembership.GetColony(_nview.GetZDO());
+            return !colonyId.IsNone() && ZDOMan.instance != null &&
+                   ZDOMan.instance.GetZDO(colonyId) != null;
         }
 
         /// <summary>
@@ -536,11 +511,9 @@ namespace Kukolony.Villagers
                 return string.Empty;
             }
 
-            string headline = string.IsNullOrEmpty(CurrentJob)
-                ? "<color=grey>no job</color>"
-                : $"<color=orange>{CurrentJob}</color>";
-
-            return $"{state.Name}\n{headline}\n<color=grey>{Activity}</color>";
+            // There is no work to report yet - jobs return at roadmap milestone 6 - so the
+            // hover says who this is and what they are doing, which is currently idling.
+            return $"{state.Name}\n<color=grey>{Activity}</color>";
         }
 
         internal string DisplayName()

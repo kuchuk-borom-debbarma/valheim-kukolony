@@ -158,7 +158,11 @@ namespace Kukolony.Colonies
                 return false;
             }
 
-            Gui.ColonyPanel.Instance?.Open(this);
+            // The colony screen is roadmap milestone 2. Saying so beats a piece that
+            // silently ignores being used, which reads as broken rather than unfinished.
+            if (MessageHud.instance != null)
+                MessageHud.instance.ShowMessage(MessageHud.MessageType.Center,
+                    "Colony management is not built yet");
             return true;
         }
 
