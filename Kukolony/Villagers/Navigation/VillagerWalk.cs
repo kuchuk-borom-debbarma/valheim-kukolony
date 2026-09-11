@@ -34,7 +34,20 @@ namespace Kukolony.Villagers.Navigation
         /// <summary>How much closer counts as having got somewhere.</summary>
         private const float ProgressStep = .25f;
 
+        /// <summary>
+        ///     How long without getting any closer before a walk is called off.
+        /// </summary>
+        /// <remarks>
+        ///     Generous, because the thing it must not mistake for being stuck is a villager
+        ///     waiting at the edge of the built world for the next navmesh tiles - measured at up
+        ///     to fifteen seconds for ground nobody had asked about before. Being slow to give up
+        ///     costs a villager some standing about; being quick to give up costs it every
+        ///     journey longer than the navmesh it started with.
+        /// </remarks>
+        private const float StallSeconds = 20f;
+
         private readonly MonsterAI _ai;
+        private readonly Journey _journey;
 
         private Vector3 _target;
         private Vector3 _standing;
@@ -42,8 +55,18 @@ namespace Kukolony.Villagers.Navigation
         private float _graceUntil;
         private float _closest;
         private float _lastProgress;
+        private bool _wasReckoning;
 
-        internal VillagerWalk(MonsterAI ai) => _ai = ai;
+        internal VillagerWalk(MonsterAI ai)
+        {
+            _ai = ai;
+            _journey = new Journey(ai);
+        }
+
+        /// <summary>Where this villager currently intends to be, for the keep-alive set.</summary>
+        internal Vector3 Waypoint => _journey.Waypoint;
+
+        internal bool Travelling => _journey.Travelling;
 
         /// <summary>How long the villager has been trying without getting closer.</summary>
         internal float StalledFor => _hasTarget ? Mathf.Max(0f, Time.time - _lastProgress) : 0f;
@@ -51,8 +74,44 @@ namespace Kukolony.Villagers.Navigation
         /// <summary>The closest it has managed to get to the current target.</summary>
         internal float Closest => _closest;
 
-        internal MoveResult MoveTowards(Vector3 target, float stopDistance, bool run = false)
+        /// <param name="deltaTime">
+        ///     The AI tick's own step. Defaulted to the frame time for callers that do not have
+        ///     it, but passing the real one matters: the AI is driven at a fixed 0.05s while a
+        ///     frame is nearer 0.02, so a villager covering ground unseen moved at forty per
+        ///     cent of its own walking speed - correct-looking, steady, and wrong.
+        /// </param>
+        internal MoveResult MoveTowards(Vector3 target, float stopDistance, bool run = false,
+            float deltaTime = 0f)
         {
+            // Anywhere further than a single hop is walked in hops, because Valheim will not
+            // answer a path across ground it has not built a navmesh for - and it only builds
+            // one where something has asked to walk. Near targets take the same route through
+            // this with the destination unchanged, so there is one movement call in the mod
+            // and it does not matter whether the caller knows the distance.
+            _journey.Prepare(target);
+
+            // A long journey nobody can see is covered by dead reckoning rather than by
+            // walking. Walking needs a navmesh, a navmesh needs loaded colliders, and ground no
+            // player has visited may never have either - so the one thing a settlement cannot
+            // rely on is a villager walking somewhere alone. This takes exactly as long.
+            if (_journey.Travelling && !_journey.Observed(_ai.transform.position))
+            {
+                _wasReckoning = true;
+                VillagerMovement.Stop(_ai);
+                return _journey.Advance(_ai.m_character, target,
+                    deltaTime > 0f ? deltaTime : Time.deltaTime)
+                    ? MoveResult.Arrived
+                    : MoveResult.Moving;
+            }
+
+            // Coming back into view: put it down somewhere it can walk from before it tries.
+            if (_wasReckoning)
+            {
+                _wasReckoning = false;
+                _journey.Resume(_ai.m_character);
+                Forget();
+            }
+
             Retarget(target);
 
             float distance = Utils.DistanceXZ(target, _ai.transform.position);
@@ -72,14 +131,30 @@ namespace Kukolony.Villagers.Navigation
 
             if (distance <= stopDistance) return MoveResult.Arrived;
 
-            // Inside the grace a failure is most likely the throttled pathfinder answering
-            // from a cache that predates this target. Keep walking and ask again.
-            return Time.time < _graceUntil ? MoveResult.Moving : MoveResult.PathFailed;
+            // Stopped, but not there. That is the ordinary state of affairs rather than a
+            // failure: BaseAI follows a *partial* path and reports "stopped" every time it
+            // reaches the end of the navmesh that has been built so far, which on any walk
+            // across unvisited ground happens over and over. The tiles ahead then build - the
+            // asking is what builds them - and the next call carries on.
+            //
+            // So a walk fails when it stops getting closer, not when it stops walking. The
+            // grace still covers the first seconds, when the throttled pathfinder is answering
+            // about a target it has not considered yet and there is no progress to measure.
+            if (Time.time < _graceUntil) return MoveResult.Moving;
+
+            return StalledFor < StallSeconds ? MoveResult.Moving : MoveResult.PathFailed;
         }
 
         internal void Stop()
         {
             VillagerMovement.Stop(_ai);
+            Forget();
+        }
+
+        /// <summary>Drops the route as well, for a villager whose errand has been cancelled.</summary>
+        internal void Abandon()
+        {
+            _journey.Forget();
             Forget();
         }
 

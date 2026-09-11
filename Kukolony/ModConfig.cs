@@ -32,6 +32,9 @@ namespace Kukolony
         /// <summary>Rings of zones held open around each villager. 1 means a 3x3 block.</summary>
         internal static ConfigEntry<int> KeepAliveHaloRings { get; private set; }
 
+        /// <summary>How near a player must be for a travelling villager to walk rather than reckon.</summary>
+        internal static ConfigEntry<float> TravelObservedRange { get; private set; }
+
         /// <summary>Hard ceiling on zones held open at once, across all colonies.</summary>
         internal static ConfigEntry<int> KeepAliveMaxZones { get; private set; }
 
@@ -82,6 +85,17 @@ namespace Kukolony
                 true,
                 "Villagers keep a small area around themselves loaded, so colonies carry on "
                 + "working when no player is nearby. Disable to compare against vanilla behaviour.");
+
+            TravelObservedRange = config.Bind(
+                "3 - Off-screen simulation",
+                nameof(TravelObservedRange),
+                96f,
+                new ConfigDescription(
+                    "How near a player has to be for a travelling villager to walk rather than "
+                    + "cover ground unseen. Walking needs a navmesh, which needs loaded terrain, "
+                    + "which distant ground may never have - so out of sight a villager advances "
+                    + "at its own walking speed instead. Zero makes every journey unseen.",
+                    new AcceptableValueRange<float>(0f, 300f)));
 
             KeepAliveHaloRings = config.Bind(
                 "3 - Off-screen simulation",

@@ -87,6 +87,33 @@ namespace Kukolony.Villagers
         ///     skipped. False to let vanilla run - which it does correctly, since
         ///     BaseAI.UpdateAI no-ops for non-owners anyway.
         /// </returns>
+        /// <summary>
+        ///     Sends the villager somewhere, as its own behaviour rather than from outside.
+        /// </summary>
+        /// <remarks>
+        ///     Driving a villager by calling into its walk from a test does not work and is
+        ///     worth recording: the villager's own tick runs every frame and walks it home, so
+        ///     two callers hand the same walker different destinations and it stands still
+        ///     between them. An errand is consumed inside the tick, ahead of going home, which
+        ///     is where a travel job will sit when there is one.
+        /// </remarks>
+        internal void SendOnErrand(Vector3 target)
+        {
+            _errand = target;
+            _onErrand = true;
+        }
+
+        internal bool OnErrand => _onErrand;
+
+        private Vector3 _errand;
+        private bool _onErrand;
+
+        /// <summary>Whether this villager is partway through a journey longer than one hop.</summary>
+        internal bool IsTravelling => _walk != null && _walk.Travelling;
+
+        /// <summary>Where it intends to be next, so the ground there can be loaded for it.</summary>
+        internal Vector3 Waypoint => _walk != null ? _walk.Waypoint : transform.position;
+
         /// <summary>What the pathfinder thinks about a target, for a failure worth explaining.</summary>
         internal string Explain(Vector3 target) => VillagerMovement.Explain(_ai, target);
 
@@ -120,6 +147,15 @@ namespace Kukolony.Villagers
             EnsureHumanSkin();
             EnsureAppearance();
             EnsureTamed();
+
+            if (_onErrand)
+            {
+                MoveResult errand = _walk.MoveTowards(_errand, Navigation.Approach.ToStructure,
+                    run: false, deltaTime: deltaTime);
+                if (errand == MoveResult.Arrived) _onErrand = false;
+                SetActivity(errand == MoveResult.PathFailed ? "cannot get there" : "travelling");
+                return true;
+            }
 
             if (TryWork()) return true;
 

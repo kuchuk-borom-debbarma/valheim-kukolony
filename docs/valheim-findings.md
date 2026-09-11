@@ -430,3 +430,53 @@ the distance — containers are worked through their ZDO, not with an outstretch
 | `ai.m_path` | current waypoints; empty means `MoveTo` will stop |
 
 `Pathfinding.SnapToGround` does **not** exist. Do not reach for it.
+
+---
+
+## Long journeys: walk when watched, reckon when not
+
+The navmesh section above explains why a destination gets refused. This is about the harder
+version of the same problem: **ground nobody has ever been near has no colliders, so it has no
+navmesh, so nothing can path into it — and it may never get one.**
+
+Valheim builds navmesh tiles only where something asks to walk, one tile per `UpdatePathfinding`
+call, from colliders that are actually loaded. A villager sent across the world alone is
+therefore waiting on a chain of things that may simply never happen.
+
+Measured, on identical terrain with the same villager: **eleven metres covered in thirty seconds
+on one run, two metres on the next.** That is not something to build a settlement on.
+
+### What does not work, and is worth not trying again
+
+**Choosing your own intermediate hops.** The idea is obvious and the failure is not: the navmesh
+around a villager that has not moved reaches about *two metres*, so the hops it picks are one to
+three metres long — and handing `BaseAI.MoveTo` a target one metre away makes a character
+decelerate to a stop rather than walk. Measured: three centimetres of progress every three
+seconds, while planning flawlessly and reporting itself as travelling.
+
+**Demanding a full path.** `BaseAI.FindPath` calls `GetPath` with its defaults, so
+`requireFullPath` is *false*. Valheim's own creatures follow **partial** paths and re-ask once a
+second. Nothing in the game waits for a complete route, and code that does will wait forever.
+
+### What works
+
+**Walk straight at the destination when a player is near enough to see it.** Partial-path
+following plus the once-a-second replan *is* the streaming mechanism; it only needs ground to
+stream, which the keep-alive halo provides by anchoring on the villager's waypoint as well as its
+position.
+
+**Advance by dead reckoning when nobody is watching** (`TravelObservedRange`, default 96m). The
+villager moves toward its destination at its own `m_walkSpeed`, a bounded step at a time,
+snapping to ground height where ground exists. It takes exactly as long as walking would, and it
+cannot fail — which is what turns arrival into a matter of time rather than of luck. Coming back
+into view, the villager is put down on the navmesh with `FindValidPoint` before it walks again,
+so it never resumes standing in a lake.
+
+**A walk fails when it stops getting closer, not when it stops walking.** `MoveTo` reports
+"stopped" every time a villager reaches the end of the partial path it is following, which on any
+walk across unvisited ground happens over and over.
+
+### Pass the AI's own delta, not the frame's
+
+The AI is driven at a fixed 0.05s while a frame is nearer 0.02. A villager reckoning with
+`Time.deltaTime` moved at forty per cent of its own walking speed — steady, plausible, and wrong.

@@ -29,7 +29,41 @@ namespace Kukolony.Debug
                 ZoneSystem.instance == null || !ZoneSystem.instance.IsActiveAreaLoaded()) return;
             _started = true;
             Application.runInBackground = true;
+            ProtectThePlayer();
             StartCoroutine(Run());
+        }
+
+        /// <summary>
+        ///     Makes the benchmark player unkillable and unnoticed.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The run takes several minutes of real time standing still in the Meadows at
+        ///         night, and the player was dying to whatever wandered past. A death is not a
+        ///         small thing here: respawning moves the player to the world spawn, and
+        ///         <c>ZNet.GetReferencePosition</c> follows the player, so every zone around the
+        ///         settlement unloads and every villager in it stops existing - mid-check.
+        ///     </para>
+        ///     <para>
+        ///         Which made the whole suite intermittent for reasons that had nothing to do
+        ///         with what it was testing. Two "Starting respawn" lines in a single create
+        ///         phase is what it looks like from the log, and nothing else in the run
+        ///         mentions it at all.
+        ///     </para>
+        ///     <para>
+        ///         Ghost mode as well as god mode, because an immortal player is still a target:
+        ///         creatures walk to it, crowd the settlement and stand in the villagers' way.
+        ///     </para>
+        /// </remarks>
+        private static void ProtectThePlayer()
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null) return;
+
+            if (!player.InGodMode()) player.SetGodMode(true);
+            if (!player.InGhostMode()) player.SetGhostMode(true);
+
+            Core.Log.Info("[Benchmark] player set to god and ghost mode for the run");
         }
 
         private IEnumerator Run()

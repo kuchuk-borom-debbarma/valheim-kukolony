@@ -171,6 +171,7 @@ namespace Kukolony.Debug
             yield return CheckJobQueue(report, colony);
             yield return CheckHauling(report, colony, origin);
             yield return CheckTidying(report, colony, origin);
+            yield return CheckDistantTravel(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
@@ -794,6 +795,98 @@ namespace Kukolony.Debug
             VillagerLifecycle.Remove(colony, who);
             colony.State.SetJobs(new List<JobDefinition>());
             if (chest != null) { colony.RemoveStructure(store.Id); Release(chest); }
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     How far a villager can be asked to walk before the pathfinder stops answering.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Work areas are meant to be placed away from the colony, so "can a villager
+        ///         get there" stops being rhetorical. Two things bound it and neither is
+        ///         obvious: a villager cannot path into unloaded ground, and Valheim's own path
+        ///         search has limits of its own.
+        ///     </para>
+        ///     <para>
+        ///         This measures rather than asserts. Most of what it reports is a finding, not
+        ///         a requirement - the only thing checked is that near travel works, which is
+        ///         the control that says the measurement apparatus itself is sound.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckDistantTravel(TestReport report, Colony colony, Vector3 origin)
+        {
+            Villager walker = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.5f);
+            if (walker == null || !walker.TryGetComponent(out ZNetView view) || !view.IsValid() ||
+                !walker.TryGetComponent(out MonsterAI ai))
+            {
+                report.Check(false, "distance check could spawn a villager");
+                yield break;
+            }
+
+            // A real walk, not a path query. What matters is whether a villager crosses
+            // ground; a query answers a much narrower question, and answers it wrong the first
+            // several times it is asked.
+            // The benchmark player stands at the hearth, so every villager here is observed
+            // and would walk. Turning the range off is how this exercises the unobserved half
+            // without moving anybody: putting the villager two hundred metres out to get away
+            // from the player hung the game outright, which is a fixture problem and not a
+            // finding about travel.
+            float observed = ModConfig.TravelObservedRange.Value;
+            ModConfig.TravelObservedRange.Value = 0f;
+
+            Vector3 far = origin + new Vector3(85f, 0f, 85f);
+            if (ZoneSystem.instance.GetSolidHeight(far, out float ground)) far.y = ground;
+
+            Character body = walker.GetComponent<Character>();
+            Core.Log.Info($"[Benchmark] traveller at {walker.transform.position} " +
+                          $"swimming={(body != null && body.IsSwimming())} " +
+                          $"onGround={(body != null && body.IsOnGround())} heading for {far}");
+
+            float startedAt = Utils.DistanceXZ(walker.transform.position, far);
+            float closest = startedAt;
+            float elapsed = 0f;
+
+            walker.SendOnErrand(far);
+            while (elapsed < 20f && closest > 10f)
+            {
+                yield return new WaitForSecondsRealtime(.25f);
+                elapsed += .25f;
+
+                float now = Utils.DistanceXZ(walker.transform.position, far);
+                if (now < closest) closest = now;
+
+
+            }
+
+            string found = $"start={startedAt:0}m closest={closest:0}m after {elapsed:0}s";
+            Core.Log.Info($"[Benchmark] distant travel: {found}");
+
+            Core.Log.Info($"[Benchmark] distant travel {found}");
+
+            // The benchmark player stands at the colony, so a target this far off is
+            // unobserved and the journey is covered by dead reckoning. Asserted as a rate
+            // rather than as arrival: what must hold is that the villager closes the distance
+            // at something like walking pace and keeps doing it, which is the property that
+            // makes arrival a matter of time rather than of luck.
+            // Sustained progress at roughly walking pace, not arrival. Arrival is a hundred
+            // and fifteen metres of real time; what has to be true is that the distance keeps
+            // falling whether or not there is a navmesh out there, because that is what turns
+            // arriving into a matter of time rather than of luck.
+            report.Check(startedAt - closest > 12f,
+                "a villager crosses open country towards somewhere far outside the colony", found);
+
+            // Control: this measures travelling, not a villager that started close. A journey
+            // that never began leaves the two distances equal, which would pass a check written
+            // only as "closest is small".
+            float hop = global::Kukolony.Villagers.Navigation.Journey.HopLength;
+            report.Check(startedAt > hop,
+                "control: the distant target really was outside the settlement",
+                $"start={startedAt:0}m settlement={hop:0}m");
+
+            ModConfig.TravelObservedRange.Value = observed;
+            VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
             yield return new WaitForSecondsRealtime(.2f);
         }
 

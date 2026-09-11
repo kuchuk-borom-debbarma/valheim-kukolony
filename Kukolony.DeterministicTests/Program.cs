@@ -51,6 +51,7 @@ static class Program
         Haul();
         Placing();
         Packing();
+        Reckoning();
 
         Console.WriteLine(_failed == 0
             ? $"RESULT: PASS ({_cases} cases)"
@@ -223,6 +224,39 @@ static class Program
         Case("control: packing tells tidy from untidy rather than answering the same way twice",
             Stacking.Pack(new List<int> { 50, 50, 12 }, 50).Count == 0 &&
             Stacking.Pack(new List<int> { 40, 40, 20 }, 50).Count > 0);
+    }
+
+    /// <summary>
+    ///     Moving while unobserved. All boundaries, and all of them off-screen where nothing
+    ///     would notice them going wrong.
+    /// </summary>
+    static void Reckoning()
+    {
+        Console.WriteLine("reckoning");
+
+        Step("an ordinary tick moves at the given speed", 100f, 4f, .25f, 1f);
+        Step("the last tick stops exactly on the destination rather than past it", .3f, 4f, .25f, .3f);
+        Step("having arrived, there is nowhere further to go", 0f, 4f, .25f, 0f);
+
+        // A frame that took a second - loading a zone, saving the world - must not fling a
+        // villager through whatever it would have walked around.
+        Step("a frame hitch does not become a teleport", 100f, 4f, 3f,
+            global::Kukolony.Villagers.Navigation.Reckoning.MaximumStep);
+
+        Step("a character with no speed does not drift", 100f, 0f, .25f, 0f);
+        Step("time that did not pass moves nothing", 100f, 4f, 0f, 0f);
+        Step("a negative delta after a clock adjustment moves nothing", 100f, 4f, -1f, 0f);
+
+        // Control: a step that ignored its arguments would satisfy several lines above.
+        Case("control: a faster walker covers more ground in the same tick",
+            global::Kukolony.Villagers.Navigation.Reckoning.StepLength(100f, 4f, .2f) >
+            global::Kukolony.Villagers.Navigation.Reckoning.StepLength(100f, 2f, .2f));
+    }
+
+    static void Step(string what, float remaining, float speed, float dt, float expected)
+    {
+        float actual = global::Kukolony.Villagers.Navigation.Reckoning.StepLength(remaining, speed, dt);
+        Case($"{what} (got {actual})", Math.Abs(actual - expected) < .0001f);
     }
 
     static void Pack(string what, int[] stacks, int maximum, int[] expected)

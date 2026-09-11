@@ -18,3 +18,23 @@ disabled or failing control. Any image defect requires a fix and complete rerun.
 
 See [in-game-testing.md](in-game-testing.md) for configuration, lifecycle, artifacts,
 extension rules, safety guarantees, exact commands, and troubleshooting.
+
+---
+
+## The benchmark player must be immortal, and invisible
+
+The run stands still in the Meadows for several minutes of real time, much of it at night. The
+player was being killed by whatever wandered past.
+
+A death is not a small thing here. Respawning moves the player to the world spawn, and
+`ZNet.GetReferencePosition()` follows the player — so **every zone around the settlement unloads
+and every villager in it stops existing**, in the middle of whatever was being checked. The suite
+was intermittent for reasons that had nothing to do with what it was testing, and hours went into
+chasing hauling bugs that were really a dead viking.
+
+What it looks like in the log is two `Starting respawn` lines in a single create phase. Nothing
+else mentions it at all.
+
+So the controller sets god mode **and** ghost mode before the run. Ghost as well as god, because
+an immortal player is still a target: creatures walk to it, crowd the settlement, and stand in
+the villagers' way.

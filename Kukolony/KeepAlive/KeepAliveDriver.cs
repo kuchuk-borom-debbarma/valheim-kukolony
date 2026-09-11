@@ -127,9 +127,17 @@ namespace Kukolony.KeepAlive
             // region follow them as they walk.
             foreach (Villager villager in Villager.Instances)
             {
-                if (villager != null)
+                if (villager == null) continue;
+
+                _positions.Add(villager.transform.position);
+
+                // Where it is going, as well as where it is. A villager crossing open country
+                // needs the ground ahead to exist before it can be asked for a path into it -
+                // the navmesh is built from colliders that are actually present - so a journey
+                // loads its own corridor by intending to walk there.
+                if (villager.IsTravelling)
                 {
-                    _positions.Add(villager.transform.position);
+                    _positions.Add(villager.Waypoint);
                 }
             }
 
