@@ -22,10 +22,25 @@ namespace Kukolony.KeepAlive.Patches
     ///       * ZDOMan.ReleaseNearbyZDOS - ownership arbitration.
     ///       * ZDOMan.CreateSyncList - what gets pushed to each peer.
     /// </summary>
-    internal static class ZDOManKeepAlivePatch
+    internal static partial class ZDOManKeepAlivePatch
     {
         /// <summary>Reused so a 30Hz patch does not allocate.</summary>
         private static readonly List<ZDO> Buffer = new List<ZDO>();
+
+        /// <summary>
+        ///     Zones we held but did not append, because the player's own area was believed to
+        ///     cover them.
+        /// </summary>
+        /// <remarks>
+        ///     Recorded so it can be asked about. A villager destroyed while its zone was both
+        ///     held and skipped means the belief is wrong and there is a ring of ground that
+        ///     neither vanilla nor this covers - which is not something that can be worked out
+        ///     by reading, because the reference decompile is a different build from the one
+        ///     installed.
+        /// </remarks>
+        private static readonly HashSet<Vector2s> Skipped = new HashSet<Vector2s>();
+
+        internal static bool WasSkipped(Vector2s zone) => Skipped.Contains(zone);
 
         /// <summary>
         ///     True only while ZNetScene.CreateDestroyObjects is on the stack. Harmony
@@ -39,7 +54,11 @@ namespace Kukolony.KeepAlive.Patches
         [HarmonyPatch(typeof(ZNetScene), "CreateDestroyObjects")]
         private static class CreateDestroyObjectsScope
         {
-            private static void Prefix() => _inCreateDestroy = true;
+            private static void Prefix()
+            {
+                _inCreateDestroy = true;
+                Skipped.Clear();
+            }
 
             // Finalizer rather than Postfix: it runs even if the original throws, so an
             // exception cannot leave the flag stuck on and quietly widen every other
@@ -60,14 +79,23 @@ namespace Kukolony.KeepAlive.Patches
 
                 foreach (Vector2s zone in KeepAliveZones.All)
                 {
-                    // Already covered by the player's own active area - vanilla loads it
-                    // in full, and adding it again would duplicate every ZDO.
-                    int area = simulationDistance.NearSimulationDistance;
-                    if (zone.x >= sector.x - area && zone.x <= sector.x + area
-                        && zone.y >= sector.y - area && zone.y <= sector.y + area)
-                    {
-                        continue;
-                    }
+                    // Every held zone is appended, including ones the player's own area looks
+                    // like it already covers.
+                    //
+                    // This used to skip those, on the reasoning that vanilla loads them in full
+                    // and appending again would duplicate every ZDO. The reasoning was wrong and
+                    // the symptom was specific: a villager walking away from the settlement was
+                    // destroyed at about a hundred metres, every time, while reporting that its
+                    // zone was held. Instrumenting the decision said zoneHeld=True skipped=True
+                    // at the moment it died - so there is a ring where this declined to append
+                    // and vanilla did not in fact cover it.
+                    //
+                    // The exact boundary is not something to work out by reading, because the
+                    // reference decompile is a different build from the one installed - its
+                    // FindSectorObjects takes (Vector2i, int area) where the live one takes
+                    // (Vector2s, SimulationDistance). Appending unconditionally is correct
+                    // whatever the boundary is: a duplicate costs a wasted lookup in a list that
+                    // is already being walked, and being wrong the other way costs a villager.
 
                     Append(__instance, zone, sectorObjects);
                 }

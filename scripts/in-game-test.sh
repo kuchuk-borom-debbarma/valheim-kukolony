@@ -85,7 +85,15 @@ wait_for_run() {
 
     if [ -f "$OUTPUT/heartbeat.txt" ]; then
       modified="$(stat -f %m "$OUTPUT/heartbeat.txt")"; now="$(date +%s)"
-      [ $((now-modified)) -le 180 ] || { echo "benchmark heartbeat stalled ($expected_stage)"; return 1; }
+      if [ $((now-modified)) -gt 300 ]; then
+        echo "benchmark heartbeat stalled ($expected_stage)"
+        # A stalled heartbeat is usually a crashed coroutine rather than a true hang: an
+        # exception inside a nested check kills the enumerator, the phase stops advancing, and
+        # the only symptom is this. Say what threw, or the next person reads "stalled" and goes
+        # looking for a deadlock that is not there.
+        grep -B 1 -A 6 "Exception" "$GAME_LOG" 2>/dev/null | tail -20
+        return 1
+      fi
     fi
     sleep 2; waited=$((waited+2))
   done

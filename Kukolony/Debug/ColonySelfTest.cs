@@ -816,97 +816,193 @@ namespace Kukolony.Debug
         /// </remarks>
         private static IEnumerator CheckDistantTravel(TestReport report, Colony colony, Vector3 origin)
         {
-            Villager walker = VillagerLifecycle.Spawn(colony);
-            yield return new WaitForSecondsRealtime(.5f);
-            if (walker == null || !walker.TryGetComponent(out ZNetView view) || !view.IsValid() ||
-                !walker.TryGetComponent(out MonsterAI ai))
+            Player player = Player.m_localPlayer;
+            if (player == null)
             {
-                report.Check(false, "distance check could spawn a villager");
+                report.Check(false, "travel check needs a player to walk to");
                 yield break;
             }
 
-            // A real walk, not a path query. What matters is whether a villager crosses
-            // ground; a query answers a much narrower question, and answers it wrong the first
-            // several times it is asked.
-            // The benchmark player stands at the hearth, so every villager here is observed
-            // and would walk. Turning the range off is how this exercises the unobserved half
-            // without moving anybody: putting the villager two hundred metres out to get away
-            // from the player hung the game outright, which is a fixture problem and not a
-            // finding about travel.
-            float observed = ModConfig.TravelObservedRange.Value;
-            ModConfig.TravelObservedRange.Value = 0f;
+            if (!TryFindLand(origin, TravelDistance, out Vector3 outpost))
+            {
+                report.Check(false, "travel check could find solid ground to walk to",
+                    $"nothing but water within reach of {TravelDistance:0}m");
+                yield break;
+            }
 
-            Vector3 far = origin + new Vector3(85f, 0f, 85f);
-            if (ZoneSystem.instance.GetSolidHeight(far, out float ground)) far.y = ground;
+            Villager walker = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.5f);
+            if (walker == null || !walker.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "travel check could spawn a villager");
+                yield break;
+            }
 
             ZDOID who = view.GetZDO().m_uid;
-            Character body = walker.GetComponent<Character>();
-            Core.Log.Info($"[Benchmark] traveller at {walker.transform.position} " +
-                          $"swimming={(body != null && body.IsSwimming())} " +
-                          $"onGround={(body != null && body.IsOnGround())} heading for {far}");
 
-            float startedAt = Utils.DistanceXZ(walker.transform.position, far);
+            // Out to the far point, then back to the player. Nobody moves but the villager.
+            //
+            // The obvious way to stage this was to teleport the player to the far end and have
+            // the villager walk to them - and a distant teleport hangs the game outright, three
+            // minutes of no log output and no exception. Sending the villager out and back gets
+            // both halves without it: the outward leg is entirely unobserved, and the return leg
+            // crosses into view on its own as it approaches the player standing at the hearth.
+            bool outward = false;
+            yield return Journey(report, walker, who, outpost, "out to open country beyond the settlement",
+                expectHandover: false, arrived: result => outward = result);
+
+            if (!outward)
+            {
+                VillagerLifecycle.Remove(colony, who);
+                yield break;
+            }
+
+            yield return Journey(report, walker, who, player.transform.position, "home again",
+                expectHandover: true, arrived: _ => { });
+
+            if (walker != null) VillagerLifecycle.Remove(colony, who);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     One leg of a journey, watched to its end.
+        /// </summary>
+        /// <remarks>
+        ///     <paramref name="expectHandover" /> is the interesting half. A villager returning to
+        ///     the settlement crosses out of dead reckoning and into walking as it comes within
+        ///     sight of the player, and that transition is the one most likely to look wrong -
+        ///     the villager is put down on the navmesh at that moment, and if that goes badly it
+        ///     resumes inside a rock or on top of water.
+        /// </remarks>
+        private static IEnumerator Journey(TestReport report, Villager walker, ZDOID who,
+            Vector3 destination, string what, bool expectHandover, System.Action<bool> arrived)
+        {
+            float startedAt = Utils.DistanceXZ(walker.transform.position, destination);
+            walker.SendOnErrand(destination);
+
+            bool wentUnseen = false;
+            bool cameIntoView = false;
+            bool destroyed = false;
+            int unloads = 0;
+            bool wasLoaded = true;
             float closest = startedAt;
             float elapsed = 0f;
 
-            walker.SendOnErrand(far);
-            while (elapsed < 20f && closest > 10f)
+            while (elapsed < TravelSeconds && closest > ArrivedWithin)
             {
-                yield return new WaitForSecondsRealtime(.25f);
-                elapsed += .25f;
+                yield return new WaitForSecondsRealtime(.5f);
+                elapsed += .5f;
 
-                float now = Utils.DistanceXZ(walker.transform.position, far);
+                // Gone and not-loaded are different, and the difference decides whether this is
+                // a bug or a delay. An unloaded villager still has its ZDO and comes back when
+                // something holds its zone again; a destroyed one does not. Never infer
+                // destruction from absence - measuring the instance alone reported "DESTROYED
+                // EN ROUTE" for what may only have been a villager between zone loads.
+                ZDO living = ZDOMan.instance.GetZDO(who);
+                if (living == null)
+                {
+                    destroyed = true;
+                    break;
+                }
+
+                // Unity's null is not C#'s: a destroyed MonoBehaviour compares equal to null but
+                // still arrives here as a live reference, and touching its transform throws.
+                bool loaded = walker != null && ZNetScene.instance.FindInstance(who) != null;
+                if (wasLoaded && !loaded) unloads++;
+                wasLoaded = loaded;
+
+                if (loaded)
+                {
+                    if (walker.IsReckoning) wentUnseen = true;
+                    else if (wentUnseen) cameIntoView = true;
+                }
+
+                // Read from the record when there is no body to read from. The record is what
+                // the world keeps, so it is also the honest measure of how far the journey got.
+                float now = Utils.DistanceXZ(
+                    loaded ? walker.transform.position : living.GetPosition(), destination);
                 if (now < closest) closest = now;
-
-
             }
 
-            string found = $"start={startedAt:0}m closest={closest:0}m after {elapsed:0}s";
-            Core.Log.Info($"[Benchmark] distant travel: {found}");
+            string story = $"{startedAt:0}m to {closest:0}m in {elapsed:0}s, unseen={wentUnseen}" +
+                           (expectHandover ? $" cameIntoView={cameIntoView}" : string.Empty) +
+                           $" unloadedTimes={unloads}" +
+                           (destroyed ? " - ZDO GONE, TRULY DESTROYED" : string.Empty);
+            Core.Log.Info($"[Benchmark] travel {what}: {story}");
 
-            Core.Log.Info($"[Benchmark] distant travel {found}");
+            bool reached = closest <= ArrivedWithin;
+            report.Check(reached, $"a villager sent {what} arrives", story);
 
-            // The benchmark player stands at the colony, so a target this far off is
-            // unobserved and the journey is covered by dead reckoning. Asserted as a rate
-            // rather than as arrival: what must hold is that the villager closes the distance
-            // at something like walking pace and keeps doing it, which is the property that
-            // makes arrival a matter of time rather than of luck.
-            // Sustained progress at roughly walking pace, not arrival. Arrival is a hundred
-            // and fifteen metres of real time; what has to be true is that the distance keeps
-            // falling whether or not there is a navmesh out there, because that is what turns
-            // arriving into a matter of time rather than of luck.
-            report.Check(startedAt - closest > 12f,
-                "a villager crosses open country towards somewhere far outside the colony", found);
+            report.Check(!destroyed,
+                $"control: it still exists after travelling {what}",
+                destroyed ? "its record was deleted en route" : $"record intact, unloaded {unloads} time(s)");
 
-            // Control: this measures travelling, not a villager that started close. A journey
-            // that never began leaves the two distances equal, which would pass a check written
-            // only as "closest is small".
-            float hop = global::Kukolony.Villagers.Navigation.Journey.HopLength;
-            report.Check(startedAt > hop,
-                "control: the distant target really was outside the settlement",
-                $"start={startedAt:0}m settlement={hop:0}m");
+            if (expectHandover)
+            {
+                report.Check(cameIntoView,
+                    "coming home, a villager stops covering ground unseen and walks the last of it",
+                    story);
+            }
 
-            // The world has to agree with the body. Valheim decides what exists by ZDO sector,
-            // and a sector only moves when ZDO.SetPosition is called - so a villager whose
-            // transform is moved by hand is destroyed mid-journey for being in no sector any
-            // list mentions. It walked three hundred metres and stopped existing, and nothing
-            // logged a thing.
-            ZDO record = ZDOMan.instance.GetZDO(who);
-            float drift = record == null
-                ? float.MaxValue
-                : Utils.DistanceXZ(record.GetPosition(), walker.transform.position);
+            arrived(reached);
+        }
 
-            report.Check(drift < 2f,
-                "a villager covering ground unseen takes its recorded position with it",
-                $"body and record differ by {drift:0.0}m");
+        /// <summary>How far off to send the villager, in metres.</summary>
+        private const float TravelDistance = 160f;
 
-            report.Check(ZNetScene.instance.FindInstance(who) != null,
-                "control: the traveller still exists after covering that ground",
-                $"loaded={ZNetScene.instance.FindInstance(who) != null}");
+        /// <summary>
+        ///     How long to allow for it, at a villager's walking pace with room to spare.
+        /// </summary>
+        /// <remarks>
+        ///     Deliberately generous. A hundred and sixty metres at about a metre and a half a
+        ///     second is under two minutes of walking, and the rest is slack for zone loading,
+        ///     rough ground and the handover. A check that fails because it was in a hurry
+        ///     teaches nothing, and this one is watching real time pass.
+        /// </remarks>
+        private const float TravelSeconds = 300f;
 
-            ModConfig.TravelObservedRange.Value = observed;
-            VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
-            yield return new WaitForSecondsRealtime(.2f);
+        /// <summary>Near enough to the player to count as having arrived.</summary>
+        private const float ArrivedWithin = 8f;
+
+        /// <summary>
+        ///     Somewhere solid, roughly this far from a point, without loading anything.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <c>WorldGenerator</c> answers height and biome for anywhere in the world from
+        ///         the seed alone, which is what makes this possible: the destination has to be
+        ///         chosen <em>before</em> the player goes there, and asking the loaded world about
+        ///         ground that is not loaded returns nothing.
+        ///     </para>
+        ///     <para>
+        ///         Sixteen bearings rather than one, because the first fixed direction this check
+        ///         used pointed into a lake and a villager that will not walk into water is
+        ///         behaving correctly - which is not what it meant to measure. Water level is 30,
+        ///         so a few metres of margin keeps the destination off the shoreline as well as
+        ///         out of the sea.
+        ///     </para>
+        /// </remarks>
+        private static bool TryFindLand(Vector3 from, float distance, out Vector3 found)
+        {
+            found = from;
+            if (WorldGenerator.instance == null) return false;
+
+            for (int step = 0; step < 16; step++)
+            {
+                float radians = step * Mathf.PI * 2f / 16f;
+                Vector3 candidate = from + new Vector3(Mathf.Cos(radians), 0f, Mathf.Sin(radians)) * distance;
+
+                if (WorldGenerator.instance.GetBiome(candidate.x, candidate.z) == Heightmap.Biome.Ocean) continue;
+
+                float height = WorldGenerator.instance.GetHeight(candidate.x, candidate.z);
+                if (height < ZoneSystem.instance.m_waterLevel + 5f) continue;
+
+                candidate.y = height;
+                found = candidate;
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>

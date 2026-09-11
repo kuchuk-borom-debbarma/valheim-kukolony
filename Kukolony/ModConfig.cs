@@ -190,11 +190,12 @@ namespace Kukolony
                 "BepInEx/kukolony-benchmarks", "Canonical folder for benchmark reports and screenshots.");
             BenchmarkSettleSeconds = config.Bind("9 - Development", nameof(BenchmarkSettleSeconds), 10f,
                 new ConfigDescription("Seconds to wait after the active area loads.", new AcceptableValueRange<float>(1f, 60f)));
-            // Raised as the functional phase grew: hauling and tidying are watched in real
-            // time, so they cost seconds rather than frames. Still a hang detector - work that
-            // takes three minutes is stuck, whatever it claims to be doing.
-            BenchmarkPhaseTimeoutSeconds = config.Bind("9 - Development", nameof(BenchmarkPhaseTimeoutSeconds), 180f,
-                new ConfigDescription("Maximum time for an in-game phase.", new AcceptableValueRange<float>(15f, 600f)));
+            // Raised as the functional phase grew. Hauling and tidying are watched in real
+            // time, and one villager now walks a hundred and sixty metres at its own pace,
+            // which is most of three minutes on its own. Still a hang detector: nothing here
+            // takes seven minutes unless it has stopped.
+            BenchmarkPhaseTimeoutSeconds = config.Bind("9 - Development", nameof(BenchmarkPhaseTimeoutSeconds), 600f,
+                new ConfigDescription("Maximum time for an in-game phase.", new AcceptableValueRange<float>(15f, 900f)));
             BenchmarkSaveGraceSeconds = config.Bind("9 - Development", nameof(BenchmarkSaveGraceSeconds), 15f,
                 new ConfigDescription("Grace period after requesting save/logout.", new AcceptableValueRange<float>(5f, 120f)));
             BenchmarkScreenshots = config.Bind("9 - Development", nameof(BenchmarkScreenshots), true,

@@ -165,9 +165,20 @@ namespace Kukolony.Villagers
             if (Time.time < _nextTrace) return;
 
             float covered = Utils.DistanceXZ(transform.position, _tracedAt);
+
+            // Whether the settlement is actually holding the ground under this villager. A
+            // traveller that is destroyed mid-journey leaves nothing behind to ask afterwards,
+            // so the question has to be asked while it is still alive.
+            Vector2s standingIn = ZoneSystem.GetZone(transform.position);
+            bool zoneHeld = KeepAlive.KeepAliveZones.Contains(standingIn);
+            bool zoneSkipped = KeepAlive.Patches.ZDOManKeepAlivePatch.WasSkipped(standingIn);
+            bool allowed = _nview != null && _nview.IsValid() &&
+                           KeepAlive.LoadAllowlist.Contains(_nview.GetZDO().GetPrefab());
+
             Log.Info($"[travel] {State.Name}: {remaining:0}m to go, " +
                      $"{covered / TraceSeconds:0.0}m/s {(reckoning ? "unseen" : "walking")}, " +
-                     $"'{Activity}'{(result == MoveResult.PathFailed ? " - STUCK" : string.Empty)}");
+                     $"'{Activity}' zoneHeld={zoneHeld} skipped={zoneSkipped} allowed={allowed}" +
+                     (result == MoveResult.PathFailed ? " - STUCK" : string.Empty));
 
             _tracedAt = transform.position;
             _nextTrace = Time.time + TraceSeconds;
@@ -182,6 +193,9 @@ namespace Kukolony.Villagers
 
         /// <summary>Whether this villager is partway through a journey longer than one hop.</summary>
         internal bool IsTravelling => _walk != null && _walk.Travelling;
+
+        /// <summary>Whether it is covering ground unseen rather than walking it.</summary>
+        internal bool IsReckoning => _walk != null && _walk.Reckoning;
 
         /// <summary>Where it intends to be next, so the ground there can be loaded for it.</summary>
         internal Vector3 Waypoint => _walk != null ? _walk.Waypoint : transform.position;

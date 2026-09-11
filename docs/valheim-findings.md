@@ -480,3 +480,48 @@ walk across unvisited ground happens over and over.
 
 The AI is driven at a fixed 0.05s while a frame is nearer 0.02. A villager reckoning with
 `Time.deltaTime` moved at forty per cent of its own walking speed — steady, plausible, and wrong.
+
+---
+
+## Moving a networked object by hand: tell the ZDO
+
+`ZDO.SetPosition` is what calls `SetSector`. **Moving a transform never touches it.**
+
+Valheim decides what exists by ZDO *sector*, so an object whose transform you moved yourself has
+a body in one place and a record in another. Found the hard way: a villager covering ground
+unseen walked 317 metres and then stopped existing, with no death, no damage and nothing in the
+log. Its keep-alive was holding zones around a position nothing else agreed with.
+
+Anything that repositions a networked object outside the physics path must do all three:
+
+```csharp
+if (body.m_body != null) body.m_body.position = position;   // or the rigidbody drags it back
+body.transform.position = position;                          // or readers are a frame behind
+body.m_nview.GetZDO().SetPosition(position);                 // or the world loses track of it
+```
+
+## Unloaded is not destroyed, and the difference is the whole diagnosis
+
+`ZNetScene.FindInstance(id) == null` means **not loaded**. The object may be perfectly alive as a
+ZDO and come back when something holds its zone. `ZDOMan.GetZDO(id) == null` is the one that means
+gone.
+
+A check that measured only the instance reported `DESTROYED EN ROUTE` for a villager whose record
+was intact the whole time, and sent the investigation after the wrong bug twice. The project rule
+*never infer destruction from absence* applies to your own diagnostics, not just to the feature
+code.
+
+## Liveness must be reported by something that ticks
+
+A heartbeat written by the phase runner's loop is not a heartbeat. `RunPhase` writes one each
+time its enumerator advances, but a check yielded as a **nested enumerator** does not return
+control until that check *finishes* - so a check that watches a villager walk for three minutes
+freezes the heartbeat for three minutes while everything is healthy.
+
+That cost hours, and cost them expensively: it was read as a crashed coroutine, then as a hung
+game, then as a hanging distant teleport. None of those were happening. The heartbeat is written
+from `Update` now, which runs whatever the coroutines are doing.
+
+**Corollary for reading logs:** "Valheim stopped logging for N seconds" is not evidence of a hang
+either. The game logs nothing while nothing happens, and a quiet stretch looks identical to a
+freeze from outside.

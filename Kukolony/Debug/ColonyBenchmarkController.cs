@@ -24,6 +24,8 @@ namespace Kukolony.Debug
 
         private void Update()
         {
+            Beat();
+
             if (_started || !ModConfig.BenchmarkMode.Value || ModConfig.DebugProbeEnabled.Value ||
                 Player.m_localPlayer == null ||
                 ZoneSystem.instance == null || !ZoneSystem.instance.IsActiveAreaLoaded()) return;
@@ -32,6 +34,35 @@ namespace Kukolony.Debug
             ProtectThePlayer();
             StartCoroutine(Run());
         }
+
+        /// <summary>
+        ///     Says the run is still alive, from somewhere that keeps running.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Liveness has to be reported by something that ticks independently of the work,
+        ///         and the obvious place - the phase runner's own loop - is not one.
+        ///         <c>RunPhase</c> writes the heartbeat each time its enumerator advances, but a
+        ///         check yielded as a nested enumerator does not return control to it until that
+        ///         check <em>finishes</em>. So a check that watches a villager walk for three
+        ///         minutes freezes the heartbeat for three minutes while everything is perfectly
+        ///         healthy.
+        ///     </para>
+        ///     <para>
+        ///         That cost hours. It was read as a crashed coroutine, then as a hung game, then
+        ///         as a hanging teleport - none of which were happening. Update runs whatever the
+        ///         coroutines are doing, which is the whole point of a heartbeat.
+        ///     </para>
+        /// </remarks>
+        private void Beat()
+        {
+            if (!_started || _output == null || Time.realtimeSinceStartup < _nextBeat) return;
+
+            _nextBeat = Time.realtimeSinceStartup + 1f;
+            Write("heartbeat.txt", "alive " + DateTime.UtcNow.ToString("O"));
+        }
+
+        private float _nextBeat;
 
         /// <summary>
         ///     Makes the benchmark player unkillable and unnoticed.

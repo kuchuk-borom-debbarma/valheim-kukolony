@@ -188,3 +188,41 @@ so read them at runtime rather than assuming.
 | `BaseAI` tick | fixed 0.05s via `MonoUpdaters.FixedUpdate` |
 | `ZDOMan.FindSectorObjects` | public |
 | `ZoneSystem.PokeLocalZone` | private (publicized in our build) |
+
+---
+
+## Open: a travelling villager unloads and does not come back
+
+**Status: reproducible, automated, unfixed.** The benchmark check
+`a villager sent out to open country beyond the settlement arrives` fails on purpose while this
+is true. It is a real defect, not a flaky test.
+
+What is measured, every run, at the same place:
+
+```
+160m to 59m in 300s, unseen=True unloadedTimes=1
+```
+
+A villager sent 160m from the settlement covers about a hundred metres, unloads **once**, and is
+never instantiated again - so it stops there for good. Its ZDO is intact throughout; this is not
+destruction.
+
+What has been ruled out by measurement rather than argument:
+
+| Suspected | Measured |
+|---|---|
+| The prefab is not kept alive | `allowed=True` at the moment it goes |
+| Its zone is not held | `zoneHeld=True` at the moment it goes |
+| The append skipped its zone | `skipped=True` originally — removing the skip changed nothing |
+| It was killed by something | no damage, no death, ZDO intact |
+| Its record went stale behind it | fixed separately; drift stays under a metre |
+
+So the halo contains the zone, the prefab qualifies, the record is current, and the object is
+still destroyed-as-in-unloaded. The remaining candidate is the path that brings an **unloaded**
+villager back: `KeepAliveDriver` scans for villager ZDOs every `KeepAliveScanSeconds` and feeds
+their positions to the halo, and something in that loop is not re-forcing this one.
+
+Worth knowing before picking it up: the reference decompile in `.reference/` is a **different
+build** from the installed game — its `FindSectorObjects` takes `(Vector2i, int area)` where the
+live one takes `(Vector2s, SimulationDistance)`. Reasoning from it about this code is unsafe;
+instrument the running game instead, which is how every line of the table above was settled.
