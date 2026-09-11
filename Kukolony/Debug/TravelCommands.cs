@@ -29,15 +29,15 @@ namespace Kukolony.Debug
         {
             new Terminal.ConsoleCommand("kukolony_come",
                 "sends the nearest villager to where you are standing, and reports what it does",
-                _ => Send(), isCheat: false, isNetwork: false, onlyServer: false);
+                args => Send(args.Context), isCheat: false, isNetwork: false, onlyServer: false);
 
             new Terminal.ConsoleCommand("kukolony_where",
                 "says what every loaded villager is doing and how far away it is",
-                _ => Where(), isCheat: false, isNetwork: false, onlyServer: false);
+                args => Where(args.Context), isCheat: false, isNetwork: false, onlyServer: false);
         }
 
         /// <summary>Sends the nearest villager to the player, however far that is.</summary>
-        private static void Send()
+        private static void Send(Terminal console)
         {
             Player player = Player.m_localPlayer;
             if (player == null) return;
@@ -45,7 +45,7 @@ namespace Kukolony.Debug
             Villager nearest = Nearest(player.transform.position);
             if (nearest == null)
             {
-                Report.Say("no villager is loaded to send for");
+                Tell(console, "no villager is loaded to send for");
                 return;
             }
 
@@ -53,13 +53,12 @@ namespace Kukolony.Debug
             nearest.SendOnErrand(target);
 
             float distance = Utils.DistanceXZ(nearest.transform.position, target);
-            Report.Say($"{nearest.State.Name} is coming - {distance:0}m away. " +
-                       $"It will walk while you can see it and cover ground unseen beyond " +
-                       $"{ModConfig.TravelObservedRange.Value:0}m. Watch it with kukolony_where.");
+            Tell(console, $"{nearest.State.Name} is coming - {distance:0}m away. Walks while you can " +
+                          $"see it, covers ground unseen beyond {ModConfig.TravelObservedRange.Value:0}m.");
         }
 
         /// <summary>Says what every loaded villager is doing, so a journey can be followed.</summary>
-        private static void Where()
+        private static void Where(Terminal console)
         {
             Player player = Player.m_localPlayer;
             if (player == null) return;
@@ -71,13 +70,27 @@ namespace Kukolony.Debug
 
                 found++;
                 float distance = Utils.DistanceXZ(villager.transform.position, player.transform.position);
-                Log.Info($"[travel] {villager.State.Name}: {distance:0}m away, '{villager.Activity}'" +
-                         (villager.IsTravelling ? " (travelling)" : string.Empty));
+                Tell(console, $"{villager.State.Name}: {distance:0}m away, '{villager.Activity}'" +
+                              (villager.IsTravelling ? " - travelling" : string.Empty));
             }
 
-            Report.Say(found == 0
-                ? "no villagers are loaded"
-                : $"{found} villager(s) reported to the log");
+            if (found == 0) Tell(console, "no villagers are loaded");
+        }
+
+        /// <summary>
+        ///     Answers where the question was asked.
+        /// </summary>
+        /// <remarks>
+        ///     Into the console, not the log. The first version of these printed the numbers to
+        ///     the log file and a bare count to the screen, which is no use at all to somebody
+        ///     standing in the world watching a villager walk - the answer arrived somewhere
+        ///     they would have to stop and go and read. The log line is kept as well, because
+        ///     afterwards the file is exactly where the answer should be.
+        /// </remarks>
+        private static void Tell(Terminal console, string what)
+        {
+            if (console != null) console.AddString(what);
+            Log.Info("[travel] " + what);
         }
 
         private static Villager Nearest(Vector3 to)
