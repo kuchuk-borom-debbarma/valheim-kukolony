@@ -600,5 +600,12 @@ Two things were removed that had looked like working features and were not:
   string in the record and would pass even if the reference to the object had rotted. That is
   now an assertion that the record still resolves to a live object.
 
-Milestone 1 is done; see [roadmap.md](roadmap.md). Villagers are currently undressed — the
-wardrobe went with the feature layer and returns with equipment.
+Milestone 1 is done; see [roadmap.md](roadmap.md).
+
+**Correction, 11 September 2026.** This section previously said villagers were undressed. They
+were not, and had never been: `VillagerAppearance` picks chest, legs, hair and beard from the
+game's own item table. The claim came from reading a benchmark photograph that deliberately
+frames the player and a villager together, and mistaking the player's bare chest for the
+villager standing beside them. The photograph now says which figure is which, and the suite
+asserts what villagers are wearing — neither of which existed when the wrong claim was made,
+which is why it survived to be written down twice.

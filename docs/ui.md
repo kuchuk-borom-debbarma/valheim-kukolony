@@ -104,6 +104,39 @@ to this peer reads "not found" there, identically to one that was destroyed. The
 live outpost's records is the same loss the *never infer destruction from absence* rule exists
 to prevent, just routed through a person.
 
+## The structure settings
+
+A registered structure's screen grows a section per capability it has:
+
+- **Storage** — what belongs here (empty means *anything*, which is what an overflow chest is)
+  and whether the settlement may take from it.
+- **Processing** — what to keep it fuelled with, what to feed it, and how full to keep it, shown
+  as a percentage and the count it works out to.
+- **Rest** — who sleeps here.
+
+Both processing lists are read from the **prefab**, so a station that is nowhere near the player
+can still be configured, and a station with no fuel item shows no fuel row at all rather than an
+empty one. A screen must not offer a setting the structure ignores.
+
+## The villager screens
+
+A villagers list off the colony screen, and a screen per villager: name, what they are doing,
+their bed, what they wear, what they carry, and the actions — rename, choose a bed, wear
+something, hand an item over, remove.
+
+**Equipment is a mirror of the bag.** A slot offers only what the villager owns, because what is
+shown is rebuilt from the bag rather than stored separately. The item never enters the
+creature's own inventory: the routine that equips a creature's best weapon runs on load through
+a path this mod does not suppress and would quietly strip it.
+
+What a worn slot is *called* comes from the game's item table rather than from the bag. A
+villager's rolled clothes were never bag items, so asking the bag named every villager born
+dressed as wearing "something they no longer have".
+
+**The list decodes its members once**, not once per row. `GetMembers` unpacks a packed string on
+every call, so a per-row lookup would cost more the more villagers a settlement had — which is
+the one shape a settlement with no population cap cannot afford.
+
 ## Saying things
 
 `Core.Report.Say` is the one place the mod tells the player what happened, including refusal

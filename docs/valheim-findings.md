@@ -312,8 +312,12 @@ dereference the local player.
 - **Keep destructive fixtures away from other checks' subjects.** Felling 200-health trees
   beside the benchmark's chests destroyed one, and the failure surfaced two phases later as a
   persistence error.
-- **A screenshot must frame its subject.** Every capture framed the interface, so villagers
-  glowing like ghosts survived run after run: nothing ever photographed one.
+- **A screenshot must frame its subject, and say what the subject is.** Every capture framed
+  the interface, so villagers glowing like ghosts survived run after run: nothing ever
+  photographed one. The opposite failure followed: a capture that deliberately puts the player
+  and a villager in one frame, with nothing recording which is which, had me diagnose the
+  player's bare chest as a villager bug across several runs and write "villagers are undressed"
+  into two documents. A photograph is evidence only if the thing it proves is identified.
 - **One writer per piece of state.** A persistence snapshot had two writers that disagreed, so
   every failure named an object the check being edited had not chosen.
 - **Report the value you asserted on, not the value at report time.** Several checks printed a

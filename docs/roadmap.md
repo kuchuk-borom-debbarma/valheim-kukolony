@@ -260,7 +260,7 @@ the safety argument was demonstrated rather than asserted.
 
 ---
 
-## Milestone 4 — Component settings
+## Milestone 4 — Component settings — **done**
 
 What makes registration worth doing. Each component contributes its own settings, on the
 structure, where the player is already looking.
@@ -313,9 +313,26 @@ Registering a chest as holding wood and a smelter as wanting coal is the *entire
 configuration, and the settlement can answer where wood goes without anything walking
 anywhere.
 
+**Result.** All of it. Settings live on the record, so a dormant structure keeps them. What a
+station accepts is read from its **prefab** — asset data identical on every instance — so an
+outpost's kiln is configurable from home with nothing loaded and no cache to go stale; a
+charcoal kiln shows no fuel row at all, because it burns nothing.
+
+The index answers rather than searches, rebuilt on a revision the colony bumps on write rather
+than per query.
+
+Two measurements shaped it. **A container's contents are not on its ZDO** — a chest holding two
+wood reported an empty record after the change, after an explicit `Save`, through a fresh
+reference and through `ZDOMan`, using the game's own key. So capacity is a loaded-only question.
+But **a colony keeps its own registered structures loaded**: a chest registered to a settlement
+900m away stays instantiated with its capacity readable, while an identical unregistered chest
+at the same distance unloads. So "unknown capacity" is a fallback, not the common case — and
+unknown means *still a candidate*, since treating it as empty would funnel every villager to the
+one chest nobody can see.
+
 ---
 
-## Milestone 5 — Villagers
+## Milestone 5 — Villagers — **done**
 
 People in the settlement.
 
@@ -348,6 +365,26 @@ People in the settlement.
 
 You spawn five villagers, each looks different, all survive a reload with their names, and
 removing one returns what it was carrying.
+
+**Result.** All of it, from the screen rather than a debug hotkey — plus equipment a player can
+change, a villagers list and a per-villager screen, and an assigned bed that is now where a
+villager calls home.
+
+**A correction belongs here.** This milestone was planned around villagers being undressed. They
+never were: `VillagerAppearance` had always picked chest, legs, hair and beard from the game's
+own item table. The claim came from misreading a benchmark photograph that frames the player and
+a villager together without saying which is which. What the milestone actually added is the
+*assertion* — five villagers, all wearing chest and legs, five distinct looks, nothing a player
+could not craft — whose absence is why a wrong claim about appearance survived four milestones.
+
+Equipment is a mirror of the persisted bag and never the creature's own inventory, because the
+load-time routine that equips a creature's best weapon strips whatever is put there.
+
+Names now come from the game's pool. `WarriorNames` is absent from the decompiled reference
+while present in the shipped assembly, so its shape was probed at runtime — which caught the
+obvious-looking mistake of taking every string field, 370 of them, most being prefixes and
+suffixes the game combines with a name rather than uses alone. Villagers would have been called
+"the Bold".
 
 ---
 
