@@ -127,6 +127,7 @@ namespace Kukolony.Debug
             yield return CheckDestroyedColonyLeavesStructures(report, colony, origin);
             yield return CheckRegistration(report, colony, origin);
             yield return CheckReaper(report, colony, origin);
+            yield return CheckStoredContents(report, colony, origin);
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
 
@@ -578,6 +579,73 @@ namespace Kukolony.Debug
         ///         since to this peer they are the same situation.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     What a registered container's capacity can and cannot tell the settlement.
+        /// </summary>
+        /// <remarks>
+        ///     This began as a check that contents are readable from the ZDO, which would have
+        ///     let the index answer capacity for structures nobody is standing near. It is not:
+        ///     a chest holding two wood, owned by this peer, reported an empty record after the
+        ///     change, after an explicit Save, through a fresh ZDO reference, through ZDOMan,
+        ///     and using the game's own key constant. What survives is the fact itself, so the
+        ///     next person to assume it does not spend another five runs finding out.
+        /// </remarks>
+        private static IEnumerator CheckStoredContents(TestReport report, Colony colony, Vector3 origin)
+        {
+            GameObject chest = Spawn("piece_chest_wood", origin + Vector3.forward * 12f);
+            yield return null;
+            if (chest == null || !chest.TryGetComponent(out ZNetView view) || !view.IsValid() ||
+                !chest.TryGetComponent(out Container container))
+            {
+                report.Check(false, "capacity check could place a chest");
+                yield break;
+            }
+
+            view.ClaimOwnership();
+            ZDOID id = view.GetZDO().m_uid;
+
+            bool added = Add(container.GetInventory(), "Wood") &&
+                         Add(container.GetInventory(), "Wood") &&
+                         Add(container.GetInventory(), "Coal");
+            report.Check(added && Count(container.GetInventory(), "Wood") == 2,
+                "control: the chest actually holds what was put in it",
+                $"added={added} owner={view.IsOwner()}");
+
+            yield return new WaitForSecondsRealtime(1.6f);
+
+            // The finding, asserted so it cannot quietly start being true without anyone
+            // noticing - if a game update makes containers flush, this fails and the index can
+            // be made smarter on purpose rather than by accident.
+            int record = view.GetZDO().GetString(ZDOVars.s_items, string.Empty).Length;
+            report.Check(record == 0,
+                "a container's contents are NOT on its ZDO, so capacity is a loaded-only question",
+                $"recordChars={record} live={Count(container.GetInventory(), "Wood")}");
+
+            Inventory live = StructureInventory.Live(id);
+            report.Check(live != null && Count(live, "Wood") == 2,
+                "a loaded container's contents are readable",
+                $"wood={(live == null ? -1 : Count(live, "Wood"))}");
+
+            report.Check(StructureInventory.HasRoomFor(id, "Coal"),
+                "control: a loaded chest with space reports room");
+
+            Fill(container.GetInventory(), "Wood");
+            yield return null;
+            report.Check(!StructureInventory.HasRoomFor(id, "Coal"),
+                "a full chest reports no room, so it is not an answer",
+                $"emptySlots={StructureInventory.Live(id)?.GetEmptySlots()}");
+
+            // Unknown, not empty. An unloaded container must stay a candidate rather than
+            // looking like a chest with infinite room or one with none.
+            ZDOID unheard = new ZDOID(4242424242u, 987654321u);
+            report.Check(StructureInventory.Live(unheard) == null &&
+                         StructureInventory.HasRoomFor(unheard, "Wood"),
+                "an unreadable container is unknown rather than full, so it stays a candidate");
+
+            Release(chest);
+            yield return null;
+        }
+
         /// <summary>
         ///     A record goes when its structure is known destroyed, and only then.
         /// </summary>

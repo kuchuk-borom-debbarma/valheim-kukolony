@@ -134,6 +134,27 @@ armoured, so allowing the whole range costs nothing.
   creature's best weapon runs on load through a path this mod does not suppress, and strips it.
   Truth lives in a persisted bag; the visible slot mirrors it.
 
+## Container contents are not on the ZDO
+
+**Measured, and it is not specific to the villager bag.** A vanilla `piece_chest_wood` holding
+two Wood, owned by this peer and loaded, reported an empty `s_items` record:
+
+- after the inventory change that should trigger `OnContainerChanged`
+- after invoking `Container.Save()` explicitly
+- read through the captured ZDO, through a freshly fetched one, and through `ZDOMan.GetZDO`
+- using the game's own `ZDOVars.s_items` rather than a reconstructed hash
+
+Five runs, each eliminating one explanation. The live inventory reported two Wood throughout, so
+the items were genuinely there.
+
+**Consequence: capacity is a loaded-only question.** An unloaded container cannot be asked how
+full it is, so the settlement index treats it as *unknown* — which must mean "still a candidate",
+not "empty". Empty reads as plenty of room and would send every villager to the one chest nobody
+can see.
+
+The check asserting this is deliberately phrased as the negative, so that if a game update makes
+containers flush, it fails and the index gets made smarter on purpose rather than by accident.
+
 ## The villager bag
 
 `Container` is documented as flushing its inventory to the ZDO on every change. **Measured, it
