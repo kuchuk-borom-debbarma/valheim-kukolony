@@ -68,6 +68,9 @@ namespace Kukolony.Villagers.Navigation
         /// </remarks>
         private const float RescueAfterSeconds = 15f;
 
+        /// <summary>How many polite rescues to try before resorting to one a player might see.</summary>
+        private const int RescuesBeforeGliding = 2;
+
         private readonly MonsterAI _ai;
         private readonly Journey _journey;
 
@@ -78,6 +81,7 @@ namespace Kukolony.Villagers.Navigation
         private float _closest;
         private float _lastProgress;
         private bool _wasReckoning;
+        private int _rescues;
 
         internal VillagerWalk(MonsterAI ai)
         {
@@ -137,15 +141,24 @@ namespace Kukolony.Villagers.Navigation
             // used here: a player watching would see it glide, and the whole reason reckoning is
             // allowed at all is that nobody can see it.
             if (_journey.Travelling && StalledFor > RescueAfterSeconds &&
-                _journey.Observed(_ai.transform.position))
+                _journey.Observed(_ai.transform.position) && _rescues < RescuesBeforeGliding)
             {
+                _rescues++;
                 _journey.Resume(_ai.m_character);
                 Forget();
                 return MoveResult.Moving;
             }
 
+            // Last rung: glide even in view, because the alternative is worse.
+            //
+            // Being seen is normally the one thing that forbids reckoning, and it still comes
+            // last - after walking, and after being put back on the navmesh twice. But a villager
+            // that has exhausted those is not going to arrive, and a settlement that quietly
+            // loses a worker to a patch of ground is a worse outcome than a player occasionally
+            // noticing one cross it oddly. Measured: stuck dead at 77m from home, 0.0m/s, ticking
+            // twenty times a second, for five minutes.
             if (_journey.Travelling && StalledFor > RescueAfterSeconds &&
-                !_journey.Observed(_ai.transform.position))
+                (_rescues >= RescuesBeforeGliding || !_journey.Observed(_ai.transform.position)))
             {
                 _wasReckoning = true;
                 VillagerMovement.Stop(_ai);
@@ -168,8 +181,19 @@ namespace Kukolony.Villagers.Navigation
             float distance = Utils.DistanceXZ(target, _ai.transform.position);
             if (distance < _closest - ProgressStep)
             {
+                // Real progress, not the first reading of a new journey. Forgetting a route sets
+                // the closest-yet to infinity, so the tick after it every distance looks like an
+                // improvement - and the rescue that did the forgetting immediately cleared its
+                // own counter. The ladder could never climb past its second rung, which is
+                // exactly what a villager stuck at seventy metres for five minutes looked like.
+                bool measured = _closest < float.MaxValue;
+
                 _closest = distance;
                 _lastProgress = Time.time;
+
+                // Getting somewhere again earns back the gentler rescues. Without this, one bad
+                // patch early in a journey would leave a villager gliding for the rest of it.
+                if (measured) _rescues = 0;
             }
 
             // Walk as close to the navmesh point as it can get, and judge arrival generously

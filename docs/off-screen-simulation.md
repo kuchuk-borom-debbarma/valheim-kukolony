@@ -220,7 +220,40 @@ So the rigidbody goes kinematic while covering ground unseen, and back the momen
 Nobody can see this happen — that is the precondition for reckoning at all — so there is nothing
 to gain by colliding with scenery and a whole journey to lose.
 
-## Open: travel is reliable but slow
+## The rescue ladder, in order of how visible it is
+
+Walking is how a villager travels. Everything below it is a rescue, and each rung is only
+reached because the one above it failed.
+
+| Rung | When | What a player sees |
+|---|---|---|
+| Walk | always, first | ordinary movement |
+| Put back on the navmesh | stalled 15s, in view | a correction of a metre or two |
+| Reckon | stalled 15s, unobserved | nothing - that is the precondition |
+| Reckon anyway | stalled 15s, in view, two corrections already failed | a villager crossing ground oddly |
+
+The last rung is a deliberate trade. Being seen is normally the one thing that forbids
+reckoning, and a settlement that silently loses a worker to a patch of ground is worse than a
+player occasionally noticing one cross it strangely. Real progress resets the counter, so one bad
+patch early in a journey does not leave a villager gliding for the rest of it.
+
+**Measured, both legs, repeatably:** out 160m to 8m in 186s, home 152m to 8m in 98s, unloaded
+zero times. Before any of this, a villager stopped existing at about a hundred metres, every run.
+
+## Open: walking stalls near the settlement, so the last stretch is gliding
+
+**Status: arrival is reliable; the way it arrives is not yet right.**
+
+The return leg reports `cameIntoView=False` - the villager reckoned the whole way home rather
+than handing back to walking when it came into view. It is not a fault in the handover, which
+works: it is that walking stalls dead at seventy to ninety metres from the settlement, so the
+ladder escalates and keeps gliding.
+
+That stall is almost certainly the same fault as the intermittent
+`cannot get there (stopped 7.2m away, needed 5.0m ... fullPath=False partialPath=True)` seen in
+hauling, which suggests one navigation problem near the colony rather than two. The benchmark
+check `coming home, a villager stops covering ground unseen and walks the last of it` fails on
+purpose until it is fixed.
 
 **Status: no longer loses villagers; does not yet complete a journey in reasonable time.**
 
