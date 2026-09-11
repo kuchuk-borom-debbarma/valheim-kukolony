@@ -220,6 +220,22 @@ So the rigidbody goes kinematic while covering ground unseen, and back the momen
 Nobody can see this happen — that is the precondition for reckoning at all — so there is nothing
 to gain by colliding with scenery and a whole journey to lose.
 
+## Verified
+
+Three consecutive full runs, no failures, 151 in-game checks and 102 deterministic cases each:
+
+| | out | home |
+|---|---|---|
+| run 1 | 160m to 6m in 126s | 155m to 5m in 94s |
+| run 2 | 160m to 6m in 65s | 155m to 6m in 81s |
+| run 3 | 160m to 5m in 66s | 155m to 5m in 71s |
+
+Unloaded zero times in all six legs. Before this work a villager stopped existing at about a
+hundred metres, every run.
+
+The spread in timings is the navmesh, not the villager: the first journey over new ground waits
+for tiles to be built and the next one does not.
+
 ## The rescue ladder, in order of how visible it is
 
 Walking is how a villager travels. Everything below it is a rescue, and each rung is only
