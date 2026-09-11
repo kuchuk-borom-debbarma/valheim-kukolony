@@ -839,6 +839,7 @@ namespace Kukolony.Debug
             Vector3 far = origin + new Vector3(85f, 0f, 85f);
             if (ZoneSystem.instance.GetSolidHeight(far, out float ground)) far.y = ground;
 
+            ZDOID who = view.GetZDO().m_uid;
             Character body = walker.GetComponent<Character>();
             Core.Log.Info($"[Benchmark] traveller at {walker.transform.position} " +
                           $"swimming={(body != null && body.IsSwimming())} " +
@@ -884,6 +885,24 @@ namespace Kukolony.Debug
             report.Check(startedAt > hop,
                 "control: the distant target really was outside the settlement",
                 $"start={startedAt:0}m settlement={hop:0}m");
+
+            // The world has to agree with the body. Valheim decides what exists by ZDO sector,
+            // and a sector only moves when ZDO.SetPosition is called - so a villager whose
+            // transform is moved by hand is destroyed mid-journey for being in no sector any
+            // list mentions. It walked three hundred metres and stopped existing, and nothing
+            // logged a thing.
+            ZDO record = ZDOMan.instance.GetZDO(who);
+            float drift = record == null
+                ? float.MaxValue
+                : Utils.DistanceXZ(record.GetPosition(), walker.transform.position);
+
+            report.Check(drift < 2f,
+                "a villager covering ground unseen takes its recorded position with it",
+                $"body and record differ by {drift:0.0}m");
+
+            report.Check(ZNetScene.instance.FindInstance(who) != null,
+                "control: the traveller still exists after covering that ground",
+                $"loaded={ZNetScene.instance.FindInstance(who) != null}");
 
             ModConfig.TravelObservedRange.Value = observed;
             VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);

@@ -185,6 +185,18 @@ namespace Kukolony.Villagers.Navigation
             // reads the transform a frame behind.
             if (body.m_body != null) body.m_body.position = position;
             body.transform.position = position;
+
+            // And tell the ZDO, which is the part that is easy to forget and fatal to omit.
+            // Valheim decides what exists by ZDO *sector*, and a sector only changes when
+            // ZDO.SetPosition is called - moving a transform by hand never touches it. So a
+            // villager covering ground unseen had a body three hundred metres from where the
+            // world believed it to be, the keep-alive held zones around a position nothing
+            // agreed with, and ZNetScene destroyed it mid-journey for being in no sector any
+            // list mentioned. It walked 317 metres and then stopped existing.
+            if (body.m_nview != null && body.m_nview.IsValid() && body.m_nview.IsOwner())
+            {
+                body.m_nview.GetZDO().SetPosition(position);
+            }
         }
 
         /// <summary>
