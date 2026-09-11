@@ -361,3 +361,72 @@ Worth knowing because the same shapes are tempting again:
   game` above it. Unhandled exceptions there take the process down.
 - Working villagers mostly could not defend themselves, because re-commanding the AI every tick
   starved the vanilla combat logic. Stated as a known bug in that mod's README.
+
+---
+
+## Pathfinding: `FindPath` requires a complete path and gives up without one
+
+**The single most important thing to know before making anything walk anywhere.**
+
+A villager sent to a chest stood motionless five metres away. Measured at the moment of
+failure:
+
+```
+agent=Humanoid  fullPath=False  partialPath=True  waypoints=0
+```
+
+Every part of that matters. The agent type is right. The navmesh *can* route most of the
+way there. But `BaseAI.FindPath` asks `Pathfinding.GetPath` for a **complete** path, and
+the destination was the centre of a solid object — not a point anything can stand on. So:
+
+1. `FindPath` returns false.
+2. `MoveTo` takes its "stopped" branch — `StopMoving(); return true` — with an empty
+   waypoint list.
+3. The villager never takes a step, and `MoveTo` reports success.
+
+This reads exactly like "the AI walks into obstacles and does not path around them". It is
+the opposite: the AI refused a destination it was right to refuse, and the caller could not
+tell that apart from arriving.
+
+### What to do instead
+
+**Snap the destination to the navmesh before asking anyone to walk to it.**
+`Pathfinding.instance.FindValidPoint(out point, near, radius, agentType)` is the engine's
+own answer to "somewhere around here an agent of this kind can be". It beats offsetting by
+a guessed distance, which cannot tell a clear spot from a wall, a drop, or the inside of the
+next chest along.
+
+`Kukolony/Villagers/Navigation/Approach.cs` does this for everything the mod moves, and
+`VillagerWalk` resolves it **once per journey** — `HavePath` is a real query against the
+navmesh, not a field read.
+
+### Two distances, and never the same one
+
+- **Where you walk to** — the snapped point, approached with a tight stop distance.
+- **Whether you arrived** — measured against the *thing you wanted*, generously.
+
+Passing one tolerance to both compounds them: you stop short of a point that is already
+short of the chest, and arrive exactly where you were sent, still out of reach.
+
+### The tolerances are measurements, not preferences
+
+A villager walks its full path, consumes every waypoint, and comes to rest **4.1 m** from a
+chest with a valid complete path behind it. That is as near as the navmesh goes — Valheim's
+path tiles are coarse and a placed piece blocks several metres around itself. A loose item
+lying against something measured **3.4 m** for the same reason.
+
+So: 5 m for a structure, 3.5 m for a loose item. Demanding less produces a villager standing
+as close as it will ever get, reporting that it cannot get there, forever. Nothing is lost by
+the distance — containers are worked through their ZDO, not with an outstretched arm.
+
+### Useful API surface (verified to compile against publicized assemblies)
+
+| Call | Use |
+|---|---|
+| `Pathfinding.instance.HavePath(from, to, agentType)` | is this destination reachable at all |
+| `Pathfinding.instance.FindValidPoint(out p, near, radius, agentType)` | nearest point an agent can stand on |
+| `Pathfinding.instance.GetPath(from, to, path, agentType, requireFullPath, cleanup)` | `path` may be null, so it doubles as a query |
+| `ai.m_pathAgentType` | the agent type — `Humanoid` for the Dverger rig |
+| `ai.m_path` | current waypoints; empty means `MoveTo` will stop |
+
+`Pathfinding.SnapToGround` does **not** exist. Do not reach for it.
