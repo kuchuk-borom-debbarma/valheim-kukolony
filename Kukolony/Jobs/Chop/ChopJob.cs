@@ -359,7 +359,11 @@ namespace Kukolony.Jobs.Chop
         /// </remarks>
         private static JobResult Choose(ChopContext context, out string activity)
         {
-            WorkArea area = WorkArea.For(context.Colony, context.Job);
+            // Narrowed to what the search will actually return. Without this the invariant
+            // below is merely asserted: a colony radius of 128 against the default 96 m scan,
+            // or a flag set to 200, gives a work area wider than the scan that feeds it, and
+            // the band between them is ground the job lists as in range and can never act on.
+            WorkArea area = Area(context.Colony, context.Job);
             List<ZDOID> candidates = ChoppingGround.Near(context.Colony);
 
             Vector3 here = context.Villager.transform.position;
@@ -399,8 +403,9 @@ namespace Kukolony.Jobs.Chop
 
                 Vector3 at = zdo.GetPosition();
 
-                // The job's work area narrows the colony-wide scan; it can never widen it,
-                // because the scan was already bounded by the config ceiling.
+                // The work area narrows the colony-wide scan and cannot widen it, because
+                // Area has already held it to the search radius. That used to be asserted
+                // here and enforced nowhere, which is how the gap stayed invisible.
                 if (!area.Contains(at)) continue;
 
                 if (!Wanted(context.Job, kind, zdo)) continue;
@@ -673,7 +678,8 @@ namespace Kukolony.Jobs.Chop
         {
             if (job == null || job.LeaveStanding <= 0) return false;
 
-            return StandingIn(colony, new WorkArea(centre, radius, "there")) <= job.LeaveStanding;
+            return StandingIn(colony, new WorkArea(centre, radius, "there")
+                .NoWiderThan(ChoppingGround.SearchRadius)) <= job.LeaveStanding;
         }
 
         /// <summary>
@@ -708,6 +714,16 @@ namespace Kukolony.Jobs.Chop
             string prefab = PrefabName(zdo);
             return prefab.Length > 0 && job.Species.Contains(prefab);
         }
+
+        /// <summary>
+        ///     Where this job works, held to what the search can reach.
+        /// </summary>
+        /// <remarks>
+        ///     The one place chopping decides its own ground, so the screen and the scan can
+        ///     both be told the same answer instead of each working one out.
+        /// </remarks>
+        internal static WorkArea Area(Colony colony, JobDefinition job) =>
+            WorkArea.For(colony, job).NoWiderThan(ChoppingGround.SearchRadius);
 
         /// <summary>How many standing trees an area still has.</summary>
         private static int StandingIn(Colony colony, WorkArea area)

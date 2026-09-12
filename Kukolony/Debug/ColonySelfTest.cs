@@ -5539,8 +5539,25 @@ namespace Kukolony.Debug
                 // record to remove it by - which is the case that most often lands here. A
                 // villager left behind is counted by the next check's claim and collision
                 // measurements.
-                if (view != null) VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
-                else if (villager != null) Release(villager.gameObject);
+                if (view != null)
+                {
+                    VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
+                }
+                else if (villager != null)
+                {
+                    // Destroying the object is not removing the villager: Spawn only returns
+                    // once the member has been written to the colony's persisted state, and
+                    // Unregister is what takes it out. Skipping it leaves a phantom id in the
+                    // roster for the rest of the world - shown as unnamed in every picker,
+                    // counted by assignment, and pinned on the map.
+                    if (villager.TryGetComponent(out ZNetView record) && record.IsValid())
+                    {
+                        colony.Unregister(ColonyMemberKind.Villager, record.GetZDO().m_uid);
+                    }
+
+                    Release(villager.gameObject);
+                }
+
                 yield break;
             }
 

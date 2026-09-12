@@ -179,7 +179,12 @@ namespace Kukolony.Gui
                 // flag's own radius - so a job on a two-hundred-metre flag used to read
                 // "48 m" on this row while working the whole outpost, and no slider position
                 // could have stated the truth.
-                float shown = WorkArea.For(colony, job).Radius;
+                // Asked of the job itself, so the row states the radius actually in force
+                // rather than re-deriving one. For chopping that is already held to the
+                // search radius, which is why the cap below can never contradict it.
+                float shown = job.Kind == JobKind.Chop
+                    ? Jobs.Chop.ChopJob.Area(colony, job).Radius
+                    : WorkArea.For(colony, job).Radius;
 
                 // Capped for chopping at the ceiling the scan will honour, asked of the scan
                 // rather than worked out again here - a reach set past it is a promise this
@@ -193,7 +198,11 @@ namespace Kukolony.Gui
                 // would misreport a job on a wide flag - and worse, the nudge buttons write
                 // from the displayed number, so pressing + on a clipped row would silently
                 // shrink the job to the cap.
-                Widgets.Number(radius, "How far it reaches", shown, 8f, Mathf.Max(shown, most), 4f,
+                // Displayed as it is, bounded as it must be. Clipping what is shown
+                // misreported a job on a wide flag; letting the bound follow what is shown
+                // gave up the cap entirely and let a reach be written past what the search
+                // honours. Showing the effective number makes the two agree.
+                Widgets.Number(radius, "How far it reaches", shown, 8f, most, 4f,
                     value => $"{value:F0} m",
                     value => Edit(host, j => j.WorkRadius = value));
             }

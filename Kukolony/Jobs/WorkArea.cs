@@ -42,6 +42,21 @@ namespace Kukolony.Jobs
         internal bool Contains(Vector3 point) => Utils.DistanceXZ(point, Centre) <= Radius;
 
         /// <summary>
+        ///     The same area, no wider than a limit.
+        /// </summary>
+        /// <remarks>
+        ///     For work whose search has a ceiling of its own. A work area wider than the
+        ///     search that feeds it is a band of ground the job reports as in range and can
+        ///     never act on - which is not a hypothetical: a colony radius of 128 against the
+        ///     default 96 m scan, or a flag set to 200, both produce it, and the villager
+        ///     stands reporting nothing to do about trees its own screen has listed.
+        ///     Narrowing is the job's to apply rather than this type's to assume, because
+        ///     hauling has no such ceiling and must keep the radius it was given.
+        /// </remarks>
+        internal WorkArea NoWiderThan(float limit) =>
+            limit > 0f && limit < Radius ? new WorkArea(Centre, limit, Name) : this;
+
+        /// <summary>
         ///     The area a job works in, falling back to the whole settlement.
         /// </summary>
         /// <remarks>
