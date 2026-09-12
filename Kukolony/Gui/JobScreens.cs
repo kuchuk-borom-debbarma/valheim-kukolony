@@ -147,7 +147,7 @@ namespace Kukolony.Gui
             {
                 Widgets.Number(repeat, "Times before the next job", job.Repeat, 1f, 50f, 1f,
                     value => ((int)value).ToString(),
-                    value => Edit(host, j => j.Repeat = (int)value));
+                    value => { Edit(host, j => j.Repeat = (int)value); host.Refresh(); });
             }
 
             // Each kind shows only the settings it reads. A job must not offer a setting it
@@ -189,8 +189,15 @@ namespace Kukolony.Gui
                 // the ceiling still while the value moves under it. The other way round -
                 // a bound below what is shown - collapses the job to the bound on the first
                 // tap, which is the failure this replaced.
+                // Both terms, because they guard opposite failures and each was tried alone.
+                // The place-derived term stops the ratchet: a bound that follows the current
+                // value can only ever shrink, so one tap down on a wide flag loses the rest
+                // for good. The shown term stops the collapse: a bound under what is
+                // displayed makes the first tap jump the value *down* to it, which is what
+                // happens the moment a flag is shrunk or the work area re-pointed after a
+                // reach was set against the old one.
                 float most = job.Kind == JobKind.Chop ? Resources.ChoppingGround.SearchRadius : 128f;
-                float bound = Mathf.Max(most, Effective(colony, Unbounded(job)));
+                float bound = Mathf.Max(shown, Mathf.Max(most, Effective(colony, Unbounded(job))));
 
                 Widgets.Number(radius, "How far it reaches", shown, 8f, bound, 4f,
                     value => $"{value:F0} m",
@@ -279,7 +286,7 @@ namespace Kukolony.Gui
             {
                 Widgets.Number(leave, "Leave standing", job.LeaveStanding, 0f, 50f, 1f,
                     value => value <= 0f ? "none" : $"{value:F0} trees",
-                    value => Edit(host, j => j.LeaveStanding = (int)value));
+                    value => { Edit(host, j => j.LeaveStanding = (int)value); host.Refresh(); });
             }
 
             if (column.TryRow(out Row stock))
@@ -313,7 +320,7 @@ namespace Kukolony.Gui
             {
                 Widgets.Number(target, "How much is enough", job.StockTarget, 0f, 999f, 10f,
                     value => value <= 0f ? "never stop" : $"{value:F0}",
-                    value => Edit(host, j => j.StockTarget = (int)value));
+                    value => { Edit(host, j => j.StockTarget = (int)value); host.Refresh(); });
             }
         }
 
