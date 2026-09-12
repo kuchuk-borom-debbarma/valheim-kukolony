@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
 [assembly: AssemblyTitle("Kukolony")]
-[assembly: AssemblyDescription("A colony management system for Valheim.")]
+[assembly: AssemblyDescription("A Kolony management system for Valheim.")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("Kukolony")]

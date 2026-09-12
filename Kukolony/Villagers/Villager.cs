@@ -268,7 +268,7 @@ namespace Kukolony.Villagers
             if (!HasColony())
             {
                 VillagerMovement.Stop(_ai);
-                SetActivity("no colony");
+                SetActivity("no Kolony");
                 return true;
             }
 
@@ -850,7 +850,7 @@ namespace Kukolony.Villagers
             Colony colony = Colony.FindFor(zdo);
             if (colony == null)
             {
-                Report.Say($"{DisplayName()} has no settlement to manage them from.");
+                Report.Say($"{DisplayName()} has no Kolony to manage them from.");
                 return true;
             }
 

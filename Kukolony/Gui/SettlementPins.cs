@@ -87,7 +87,7 @@ namespace Kukolony.Gui
                 if (known == null || !known.IsValid()) continue;
 
                 ColonyState state = new ColonyState(known);
-                string settlement = string.IsNullOrEmpty(state.Name) ? "A settlement" : state.Name;
+                string settlement = string.IsNullOrEmpty(state.Name) ? "A Kolony" : state.Name;
                 Color tint = Tint(settlement);
 
                 ZDOID id = known.m_uid;
@@ -343,7 +343,7 @@ namespace Kukolony.Gui
             {
                 // Pinned from its record, so it can be shown on the map without being loaded -
                 // but its screen reads live state, so there is nothing honest to open yet.
-                Report.Say("That settlement is too far away to manage from here.");
+                Report.Say("That Kolony is too far away to manage from here.");
                 return;
             }
 
@@ -359,7 +359,7 @@ namespace Kukolony.Gui
             Colony colony = Colony.FindFor(zdo);
             if (colony == null)
             {
-                Report.Say("That villager's settlement is gone.");
+                Report.Say("That villager's Kolony is gone.");
                 return;
             }
 

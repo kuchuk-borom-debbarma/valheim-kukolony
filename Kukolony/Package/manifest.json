@@ -1,6 +1,6 @@
 {
   "name": "Kukolony",
-  "description": "A colony management system for Valheim. Recruit NPC villagers and assign them work.",
+  "description": "A Kolony management system for Valheim. Recruit NPC villagers and assign them work.",
   "version_number": "0.0.1",
   "website_url": "https://github.com/kuchuk-borom-debbarma/valheim-kukolony",
   "dependencies": [

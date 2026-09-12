@@ -582,13 +582,13 @@ namespace Kukolony.Debug
             ZDO zdo = view.GetZDO();
             ZDOID id = zdo.m_uid;
             yield return new WaitForSecondsRealtime(.4f);
-            report.Check(villager.Activity != "no colony",
+            report.Check(villager.Activity != "no Kolony",
                 "control: a villager in a live colony does not report being colonyless",
                 $"activity='{villager.Activity}'");
 
             ColonyMembership.SetColony(zdo, ZDOID.None);
             yield return new WaitForSecondsRealtime(.4f);
-            report.Check(villager.Activity == "no colony",
+            report.Check(villager.Activity == "no Kolony",
                 "a villager that cannot see its colony reports it",
                 $"activity='{villager.Activity}'");
 
@@ -1728,7 +1728,7 @@ namespace Kukolony.Debug
             ColonyMembership.SetColony(zdo, ZDOID.None);
             yield return new WaitForSecondsRealtime(1.5f);
 
-            report.Check(stray != null && stray.Activity == "no colony",
+            report.Check(stray != null && stray.Activity == "no Kolony",
                 "a villager orphaned mid-trip stops rather than finishing a delivery to nobody",
                 $"doing='{stray?.Activity}'");
 

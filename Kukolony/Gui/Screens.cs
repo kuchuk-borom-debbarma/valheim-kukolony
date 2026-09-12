@@ -12,7 +12,7 @@ namespace Kukolony.Gui
     /// </summary>
     internal sealed class ColonyHomeScreen : ScreenView
     {
-        internal override string Title => "Colony";
+        internal override string Title => "Kolony";
 
         internal override string Subtitle =>
             ColonyScreen.Instance != null && ColonyScreen.Instance.LookedAt != null
@@ -33,7 +33,7 @@ namespace Kukolony.Gui
                     string trimmed = (value ?? string.Empty).Trim();
                     if (string.IsNullOrEmpty(trimmed))
                     {
-                        Report.Say("A colony needs a name.");
+                        Report.Say("A Kolony needs a name.");
                         host.Refresh();
                         return;
                     }
@@ -102,7 +102,7 @@ namespace Kukolony.Gui
 
             if (column.TryRow(out Row switchRow))
             {
-                Widgets.Button(switchRow, "Switch colony", 200f, () => host.Push(new ColonyListScreen()));
+                Widgets.Button(switchRow, "Switch Kolony", 200f, () => host.Push(new ColonyListScreen()));
                 Widgets.Button(switchRow, "Widget gallery", 200f, () => host.Push(new GalleryScreen()));
             }
         }
@@ -113,7 +113,7 @@ namespace Kukolony.Gui
     /// </summary>
     internal sealed class ColonyListScreen : ScreenView
     {
-        internal override string Title => "Switch colony";
+        internal override string Title => "Switch Kolony";
 
         internal override void Build(ColonyScreen host, Column column)
         {
@@ -290,7 +290,7 @@ namespace Kukolony.Gui
 
         internal override string Title => "Widget gallery";
 
-        internal override string Subtitle => "Every control the settlement can offer";
+        internal override string Subtitle => "Every control the Kolony can offer";
 
         internal override void Build(ColonyScreen host, Column column)
         {

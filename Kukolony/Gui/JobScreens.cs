@@ -28,7 +28,7 @@ namespace Kukolony.Gui
 
             if (jobs.Count == 0 && column.TryRow(out Row empty))
             {
-                Widgets.Label(empty, "This settlement has no jobs yet.", Color.gray);
+                Widgets.Label(empty, "This Kolony has no jobs yet.", Color.gray);
             }
 
             foreach (JobDefinition job in jobs)
@@ -74,7 +74,7 @@ namespace Kukolony.Gui
         /// <summary>A short answer to "where does this happen", for the list.</summary>
         internal static string Where(Colony colony, JobDefinition job)
         {
-            if (string.IsNullOrEmpty(job.WorkArea)) return "the whole settlement";
+            if (string.IsNullOrEmpty(job.WorkArea)) return "the whole Kolony";
 
             foreach (StructureRecord record in colony.State.GetStructures())
             {
@@ -213,7 +213,7 @@ namespace Kukolony.Gui
         {
             List<PickerScreen.Option> options = new List<PickerScreen.Option>
             {
-                new PickerScreen.Option(string.Empty, "the whole settlement")
+                new PickerScreen.Option(string.Empty, "the whole Kolony")
             };
 
             foreach (StructureRecord record in colony.State.GetStructures())

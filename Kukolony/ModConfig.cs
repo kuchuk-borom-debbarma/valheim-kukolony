@@ -92,8 +92,8 @@ namespace Kukolony
                     "How far a villager may wander from its home before it walks back, in metres.",
                     new AcceptableValueRange<float>(2f, 64f)));
 
-            ColonyRadius = config.Bind("1 - Colony", nameof(ColonyRadius), 48f,
-                new ConfigDescription("Live registration radius around a colony hearth. Registered records outside it remain visible but are ineligible.", new AcceptableValueRange<float>(8f, 128f)));
+            ColonyRadius = config.Bind("1 - Kolony", nameof(ColonyRadius), 48f,
+                new ConfigDescription("Live registration radius around a Kolony Hearth. Registered records outside it remain visible but are ineligible.", new AcceptableValueRange<float>(8f, 128f)));
 
             KeepAliveEnabled = config.Bind(
                 "3 - Off-screen simulation",
@@ -197,7 +197,7 @@ namespace Kukolony
                 "3 - Off-screen simulation",
                 nameof(KeepAliveFilterObjects),
                 true,
-                "In zones kept loaded only for a villager, load just what the colony needs - "
+                "In zones kept loaded only for a villager, load just what the Kolony needs - "
                 + "villagers, registered structures, buildings and loose items - and skip trees, "
                 + "rocks and wildlife. Disable to load everything, as chunk loader mods do.");
 
@@ -231,12 +231,12 @@ namespace Kukolony
                 "9 - Development",
                 nameof(DebugSpawnEnabled),
                 false,
-                "Enable the Ctrl+Shift+K hotkey that spawns a colony-less villager in front of you. "
+                "Enable the Ctrl+Shift+K hotkey that spawns a Kolony-less villager in front of you. "
                 + "Development aid for the unassigned-villager path, which this does not affect.");
 
             ColonyScreenHotkey = config.Bind(
-                "1 - Colony", nameof(ColonyScreenHotkey), KeyCode.C,
-                "Press this key (outside chat) to open the colony screen on the nearest colony.");
+                "1 - Kolony", nameof(ColonyScreenHotkey), KeyCode.C,
+                "Press this key (outside chat) to open the Kolony screen on the nearest Kolony.");
 
 
             DebugProbeEnabled = config.Bind(

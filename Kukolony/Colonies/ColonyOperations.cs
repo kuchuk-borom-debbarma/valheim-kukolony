@@ -204,10 +204,10 @@ namespace Kukolony.Colonies
                 case RegisterOutcome.Moved: return $"Moved {what} to {colonyName}.";
                 case RegisterOutcome.AlreadyHere: return $"{what} already belongs to {colonyName}.";
                 case RegisterOutcome.OutOfReach: return $"{what} is outside {colonyName}'s reach.";
-                case RegisterOutcome.NotUsable: return $"{what} is not something a colony can use.";
+                case RegisterOutcome.NotUsable: return $"{what} is not something a Kolony can use.";
                 case RegisterOutcome.NotOwnable: return $"{what} could not be claimed just now - try again.";
-                case RegisterOutcome.HolderUnreachable: return $"{what} belongs to a colony that is not loaded here.";
-                case RegisterOutcome.NoColony: return "No colony to register that to.";
+                case RegisterOutcome.HolderUnreachable: return $"{what} belongs to a Kolony that is not loaded here.";
+                case RegisterOutcome.NoColony: return "No Kolony to register that to.";
                 default: return string.Empty;
             }
         }

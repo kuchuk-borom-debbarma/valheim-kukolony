@@ -58,9 +58,9 @@ namespace Kukolony
         {
             Localization.AddTranslation("English", "kukolony_villager", "Villager");
             Localization.AddTranslation("English", "kukolony_villager_bag", "Villager's bag");
-            Localization.AddTranslation("English", "kukolony_colony", "Colony Hearth");
+            Localization.AddTranslation("English", "kukolony_colony", "Kolony Hearth");
             Localization.AddTranslation("English", "kukolony_colony_desc",
-                "Records a colony, its villagers and its registered structures. "
+                "Records a Kolony, its villagers and its registered structures. "
                 + "Only placed structures inside its live radius can be registered.");
         }
     }

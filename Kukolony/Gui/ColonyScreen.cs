@@ -94,7 +94,7 @@ namespace Kukolony.Gui
             if (Instance == null)
             {
                 // The GUI event has not fired yet, which is a real state on the main menu.
-                Report.Say("The colony screen is not ready yet.");
+                Report.Say("The Kolony screen is not ready yet.");
                 return;
             }
 
@@ -113,7 +113,7 @@ namespace Kukolony.Gui
             Colony nearest = Nearest(player.transform.position);
             if (nearest == null)
             {
-                Report.Say("No colony nearby. Place a Colony Hearth first.");
+                Report.Say("No Kolony nearby. Place a Kolony Hearth first.");
                 return;
             }
 
@@ -378,7 +378,7 @@ namespace Kukolony.Gui
             if (Colony == null || Current == null || !Current.StillValid(this))
             {
                 Report.Listener = null;
-                Report.Say("The colony is gone.");
+                Report.Say("The Kolony is gone.");
                 Close();
                 return;
             }

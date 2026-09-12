@@ -353,7 +353,7 @@ namespace Kukolony.Gui
 
         internal override string Title => "Register nearby";
 
-        internal override string Subtitle => "Anything the colony understands, within reach";
+        internal override string Subtitle => "Anything the Kolony understands, within reach";
 
         internal override bool StillValid(ColonyScreen host) => host.Colony != null;
 
