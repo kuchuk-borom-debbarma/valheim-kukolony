@@ -14,6 +14,11 @@
 # pass means the same thing the full one would mean about those checks.
 set -eu
 
+# A failing run must fail the command, even when its output is piped somewhere - a
+# pipeline reports the last stage's status, so `run.sh | tail` returns tail's success
+# and a red report reads as green.
+( set -o pipefail 2>/dev/null ) && set -o pipefail
+
 FOCUS="${1:-chop}"
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 GAME="/Users/kuku/Library/Application Support/Steam/steamapps/common/Valheim"
