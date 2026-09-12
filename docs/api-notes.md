@@ -44,16 +44,25 @@ A villager bag is a collider-less child Container with
 `m_rootObjectOverride` pointing at the villager ZNetView. This persists inventory on the
 villager ZDO without stealing Hoverable interaction.
 
-For registered containers:
+For registered containers, **find the slot yourself**:
 
 ```csharp
-view.ClaimOwnership();
-destination.MoveItemToThis(source, item, amount, -1, -1);
-container.Save();
+view.ClaimOwnership();                       // writing a container needs owning it
+if (!TryFindSlot(destination, item, out int x, out int y)) return Full;
+destination.MoveItemToThis(source, item, item.m_stack, x, y);
 ```
 
-Capacity is checked with `Inventory.CanAddItem`. A failed/full deposit leaves the carried
-item intact. Do not clone stacks or write `ZDOVars.s_items` manually.
+**`MoveItemToThis(source, item, amount, -1, -1)` does not work** and this document used to
+prescribe it. The amount overload rejects `(-1, -1)` even after `CanAddItem` has said yes — a
+measured API defect, and a silent one: the call returns without moving anything and without
+complaining. Prefer an existing compatible stack and fall back to the first empty slot, which is
+what `Jobs/Carrying.TryFindSlot` does.
+
+The container saves itself through its own change hook once the write lands, so `container.Save()`
+is not needed either.
+
+Capacity is checked with `Inventory.CanAddItem`. A failed or full deposit leaves the carried item
+intact. Do not write `ZDOVars.s_items` manually.
 
 ## Verified station contracts
 
