@@ -213,6 +213,7 @@ namespace Kukolony.Debug
             // finding nothing to contradict.
             yield return CheckChoppingIndex(report);
             yield return CheckTreesAreKeptLoaded(report);
+            yield return CheckTheAxeIsPutAway(report, colony);
             yield return CheckUnclaimedDamageDoesNothing(report, origin);
             yield return CheckGivingUpOnAnUncuttableTree(report, origin);
             yield return CheckChopSettings(report, origin);
@@ -5396,6 +5397,10 @@ namespace Kukolony.Debug
                 yield break;
             }
 
+            // Reset before the control as well as after the change. An earlier check that
+            // asked the same question within the freshness window would otherwise have this
+            // one measuring the cache rather than the settlement.
+            Stock.ResetForTest();
             report.Check(Stock.Held(colony, "Wood") == 0,
                 "control: an empty settlement holds none of it",
                 $"held={Stock.Held(colony, "Wood")}");
@@ -5500,6 +5505,104 @@ namespace Kukolony.Debug
             SweepFelling(site, 24f);
             ChoppingGround.ResetForTest();
             yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     The axe is held while chopping and put away afterwards - and the player's own
+        ///     choice of gear is not.
+        /// </summary>
+        /// <remarks>
+        ///     Written because two rounds of fixes to this behaviour both shipped with a hole
+        ///     in it, and nothing anywhere asserted on the right hand. The slot persists in
+        ///     the save, so getting it wrong is not a cosmetic slip: it is a villager holding
+        ///     an axe for the rest of a world, or a player's torch disappearing every time
+        ///     they equip it.
+        /// </remarks>
+        private static IEnumerator CheckTheAxeIsPutAway(TestReport report, Colony colony)
+        {
+            Villager villager = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (villager == null || !villager.TryGetComponent(out ZNetView view) || !view.IsValid() ||
+                !villager.TryGetComponent(out VisEquipment vis))
+            {
+                report.Check(false, "axe check could spawn a villager with equipment");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            ZDO zdo = view.GetZDO();
+
+            GameObject axe = FindAxe(0, 99);
+            if (axe == null)
+            {
+                report.Check(false, "axe check could find an axe in this world");
+                VillagerLifecycle.Remove(colony, who);
+                yield break;
+            }
+
+            // Put one in its hand the way the job does, then ask for it back.
+            VillagerWardrobe.Set(vis, WearSlot.RightHand, axe.GetComponent<ItemDrop>().m_itemData);
+            yield return new WaitForSecondsRealtime(.3f);
+
+            report.Check(VillagerWardrobe.Worn(zdo, WearSlot.RightHand) != 0,
+                "control: the villager is visibly holding something");
+
+            ChopJob.PutAxeAway(vis, zdo);
+            yield return new WaitForSecondsRealtime(.3f);
+
+            report.Check(VillagerWardrobe.Worn(zdo, WearSlot.RightHand) == 0,
+                "an axe is put away when the villager is no longer chopping");
+
+            // The other half, and the one a player notices: gear they chose stays. Asked of
+            // a torch or a shield - anything that does not chop - because the rule is about
+            // what the tool is, not about who wrote the slot.
+            GameObject keepsake = FindNonAxeHandItem();
+            if (keepsake == null)
+            {
+                report.Check(true,
+                    "axe check: this world has no non-axe hand item, so the control did not run");
+            }
+            else
+            {
+                VillagerWardrobe.Set(vis, WearSlot.RightHand,
+                    keepsake.GetComponent<ItemDrop>().m_itemData);
+                yield return new WaitForSecondsRealtime(.3f);
+
+                int before = VillagerWardrobe.Worn(zdo, WearSlot.RightHand);
+                ChopJob.PutAxeAway(vis, zdo);
+                yield return new WaitForSecondsRealtime(.3f);
+
+                report.Check(VillagerWardrobe.Worn(zdo, WearSlot.RightHand) == before,
+                    "control: gear the player chose is left alone - only an axe is taken back",
+                    $"item={keepsake.name}");
+
+                VillagerWardrobe.Set(vis, WearSlot.RightHand, null);
+            }
+
+            VillagerLifecycle.Remove(colony, who);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Something a villager can hold that is not an axe, for the control above.
+        /// </summary>
+        private static GameObject FindNonAxeHandItem()
+        {
+            if (ObjectDB.instance == null) return null;
+
+            foreach (GameObject candidate in ObjectDB.instance.m_items)
+            {
+                if (candidate == null || !candidate.TryGetComponent(out ItemDrop drop)) continue;
+
+                ItemDrop.ItemData.SharedData shared = drop.m_itemData?.m_shared;
+                if (shared == null || shared.m_damages.m_chop > 0f) continue;
+                if (!VillagerWardrobe.Fits(drop.m_itemData, WearSlot.RightHand)) continue;
+
+                return candidate;
+            }
+
+            return null;
         }
 
         /// <summary>

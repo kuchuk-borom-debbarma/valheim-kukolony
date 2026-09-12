@@ -104,12 +104,16 @@ namespace Kukolony.Resources
             // the search the same way the hearth does.
             float bound = ModConfig.ResourceScanRadius.Value;
 
-            // Each anchor carries its own reach, as (x, y, z, radius). The hearth gets the
-            // config distance; a flag gets its own radius, capped by the config, because a
-            // flag's radius is already the answer to "how far does this outpost reach" - the
-            // player set it, the job's work area uses it, and the map draws it. Giving every
-            // flag the full config distance instead would make a settlement of a dozen
-            // outposts scan a far larger candidate set than the setting appears to allow.
+            // Every anchor gets the same reach: the config distance. The hearth and each
+            // claimed flag are both places the Kolony works, and the setting is the single
+            // ceiling on how far from any of them work is looked for.
+            //
+            // A flag was briefly capped at its own radius instead, to keep a settlement of
+            // many outposts from scanning more than the setting appears to allow. That
+            // inverted the rule the job relies on - the scan bounds, the work area narrows -
+            // and a job whose reach was set wider than its flag then found nothing while its
+            // own screen said otherwise. The breadth is the cost of the setting being the
+            // ceiling, and the setting is the player's to lower.
             Anchors.Clear();
             Vector3 hearth = colony.transform.position;
             Anchors.Add(new Vector4(hearth.x, hearth.y, hearth.z, bound));
@@ -120,7 +124,7 @@ namespace Kukolony.Resources
                 // Copied out immediately, and by index: that list is a shared scratch buffer
                 // rebuilt on the next ask by anyone.
                 Vector4 flag = flags[i];
-                Anchors.Add(new Vector4(flag.x, flag.y, flag.z, Mathf.Min(bound, flag.w)));
+                Anchors.Add(new Vector4(flag.x, flag.y, flag.z, bound));
             }
 
             foreach (ZNetView view in ZNetScene.instance.m_instances.Values)

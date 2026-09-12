@@ -148,7 +148,6 @@ namespace Kukolony.Jobs.Chop
             Fruitless.Clear();
             NextBlow.Clear();
             Settled.Clear();
-            Equipped.Clear();
         }
 
         /// <summary>
@@ -167,47 +166,66 @@ namespace Kukolony.Jobs.Chop
             Fruitless.Remove(villager);
             NextBlow.Remove(villager);
             Settled.Remove(villager);
-            Equipped.Remove(villager);
         }
 
         /// <summary>
-        ///     What this job put in each villager's hand, so it can take back only that.
-        /// </summary>
-        private static readonly Dictionary<ZDOID, int> Equipped = new Dictionary<ZDOID, int>();
-
-        /// <summary>
-        ///     Puts the axe away, for a villager that is no longer chopping.
+        ///     Puts away an axe, for a villager that is no longer chopping.
         /// </summary>
         /// <remarks>
         ///     <para>
         ///         The right hand is written only while a chop job is the current queue entry,
         ///         so without this a villager carries a visible axe through every haul that
-        ///         follows - and for ever if its chop job is deleted, because nothing would
-        ///         write the slot again and the slot is ZDO-backed. A tool is held while the
-        ///         work is being done.
+        ///         follows - and for ever if its chop job is deleted, because nothing else
+        ///         would write the slot again and the slot is ZDO-backed. A tool is held while
+        ///         the work is being done.
         ///     </para>
         ///     <para>
-        ///         <b>Only what this job put there.</b> The hand is also a slot a player can
-        ///         dress from the villager screen - a sword, a torch, a shield - so baring it
-        ///         because no chop job is current would silently strip the player's choice on
-        ///         the next work tick, permanently and with no way to keep it. So the hash
-        ///         written is remembered, and only that hash is taken back.
+        ///         <b>Only an axe.</b> The hand is also a slot a player can dress from the
+        ///         villager screen - a sword, a torch, a shield - so baring it because no chop
+        ///         job is current would silently strip their choice on the next work tick. What
+        ///         is worn is therefore identified, and left alone unless it is something an
+        ///         axe-wielding job would have put there.
+        ///     </para>
+        ///     <para>
+        ///         Asked of the item rather than remembered, deliberately. A note of "what we
+        ///         equipped" is process memory guarding a slot that persists in the save, so it
+        ///         is empty in exactly the cases that matter: after a reload, on a second
+        ///         client, or when the villager spent the night resting and the job was deleted
+        ///         before it ever swung again. Each of those would have left the axe in its
+        ///         hand for good - the bug this was written to fix, moved across a session.
+        ///         The cost of asking instead is that a player cannot dress a villager in an
+        ///         axe for show, which is a smaller loss than any of those.
         ///     </para>
         /// </remarks>
-        internal static void PutAxeAway(VisEquipment equipment, ZDOID villager, ZDO zdo)
+        internal static void PutAxeAway(VisEquipment equipment, ZDO zdo)
         {
-            if (equipment == null || villager.IsNone()) return;
-            if (!Equipped.TryGetValue(villager, out int ours) || ours == 0) return;
+            // No record to read means no way to tell an axe from a torch, and the safe answer
+            // when the question cannot be asked is to change nothing.
+            if (equipment == null || zdo == null) return;
 
-            // Still what we put there? A player who has since changed it keeps their change.
-            if (zdo != null && VillagerWardrobe.Worn(zdo, WearSlot.RightHand) != ours)
-            {
-                Equipped.Remove(villager);
-                return;
-            }
+            int worn = VillagerWardrobe.Worn(zdo, WearSlot.RightHand);
+            if (worn == 0 || !IsAxe(worn)) return;
 
             VillagerWardrobe.Set(equipment, WearSlot.RightHand, null);
-            Equipped.Remove(villager);
+        }
+
+        /// <summary>This villager's own record, for reading what it is wearing.</summary>
+        private static ZDO VillagerRecord(ChopContext context)
+        {
+            ZDOID id = context.Villager.Id;
+            return id.IsNone() ? null : ZDOMan.instance?.GetZDO(id);
+        }
+
+        /// <summary>Whether a worn prefab hash is something that chops.</summary>
+        private static bool IsAxe(int prefabHash)
+        {
+            GameObject prefab = ZNetScene.instance != null
+                ? ZNetScene.instance.GetPrefab(prefabHash)
+                : null;
+
+            return prefab != null && prefab.TryGetComponent(out ItemDrop drop) &&
+                   drop.m_itemData?.m_shared != null &&
+                   drop.m_itemData.m_shared.m_damages.m_chop > 0f;
         }
 
         internal static JobResult Tick(ChopContext context, out string activity)
@@ -733,17 +751,12 @@ namespace Kukolony.Jobs.Chop
             // filled. A chopping villager's right hand belongs to the job while it works.
             if (context.Equipment != null)
             {
-                VillagerWardrobe.Set(context.Equipment, WearSlot.RightHand, best);
-
-                // Remembered so putting it away later takes back only this, and not a sword
-                // or a torch the player dressed the villager in.
-                ZDOID villager = context.Villager.Id;
-                if (!villager.IsNone())
-                {
-                    Equipped[villager] = best?.m_dropPrefab == null
-                        ? 0
-                        : Utils.GetPrefabName(best.m_dropPrefab).GetStableHashCode();
-                }
+                // Written only when there is one to show. Writing null here instead would
+                // bare the hand every tick a villager had no axe, which is also every tick
+                // after a player dressed it in something else - so the slot is only ever
+                // filled by this, and emptied by the same rule that empties it elsewhere.
+                if (best != null) VillagerWardrobe.Set(context.Equipment, WearSlot.RightHand, best);
+                else PutAxeAway(context.Equipment, VillagerRecord(context));
             }
 
             return best;

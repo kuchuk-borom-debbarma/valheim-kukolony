@@ -68,20 +68,21 @@ namespace Kukolony.Jobs
 
                 // A flag brings its own reach - its screen says how far, and a job pointed
                 // at it working a default-sized patch of a larger outpost contradicted the
-                // number the player set. The job's own radius still narrows it, because
+                // number the player set. The job's own radius still wins when given, because
                 // "work the near half of the quarry" is a legitimate instruction.
                 //
-                // But it cannot widen it past the flag. The flag's radius is what makes the
-                // ground the Kolony's at all: it is what holds those zones loaded, what
-                // decides whether a chest out there can be registered, and what bounds the
-                // search for work. A job told to reach further than its flag would promise
-                // ground nothing else agrees is the Kolony's, and report "nothing to chop"
-                // for trees its own screen said were in range.
-                bool isFlag = (record.Capabilities & StructureCapability.WorkArea) != 0;
-                float reach = isFlag ? WorkFlag.RadiusOf(zdo) : DefaultRadius;
-                float radius = job.WorkRadius > 0f
-                    ? (isFlag ? Mathf.Min(job.WorkRadius, reach) : job.WorkRadius)
-                    : reach;
+                // Deliberately not capped at the flag's radius. That was tried, on the
+                // reasoning that a flag's radius is what makes ground the Kolony's - and it
+                // is the wrong place to enforce it. A work area is the only bound hauling
+                // has, so capping it meant shrinking a flag silently stopped a haul job
+                // tidying chests it had tidied the day before; and the Kolony's ground is the
+                // hearth's reach together with every flag's, so a job pointed at one flag was
+                // refused work that sat plainly inside the settlement. What bounds the search
+                // is the config ceiling, and what narrows it is this radius. Nothing else.
+                float radius = job.WorkRadius > 0f ? job.WorkRadius
+                    : (record.Capabilities & StructureCapability.WorkArea) != 0
+                        ? WorkFlag.RadiusOf(zdo)
+                        : DefaultRadius;
                 return new WorkArea(zdo.GetPosition(), radius, record.Name);
             }
 
