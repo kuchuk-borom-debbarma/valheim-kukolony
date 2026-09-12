@@ -15,6 +15,7 @@ namespace Kukolony
         /// <summary>How far a villager may drift from home before walking back.</summary>
         internal static ConfigEntry<float> GoHomeRadius { get; private set; }
         internal static ConfigEntry<float> ColonyRadius { get; private set; }
+        internal static ConfigEntry<float> FlagRadius { get; private set; }
 
         /// <summary>
         ///     Whether villagers reserve what they are working on. Off is the old
@@ -91,6 +92,12 @@ namespace Kukolony
                 new ConfigDescription(
                     "How far a villager may wander from its home before it walks back, in metres.",
                     new AcceptableValueRange<float>(2f, 64f)));
+
+            FlagRadius = config.Bind("1 - Kolony", nameof(FlagRadius), 48f,
+                new ConfigDescription(
+                    "Default reach of a Kolony Flag, in metres. Each placed flag can be given its own "
+                    + "radius from its screen; this is what a fresh one starts with.",
+                    new AcceptableValueRange<float>(8f, 256f)));
 
             ColonyRadius = config.Bind("1 - Kolony", nameof(ColonyRadius), 48f,
                 new ConfigDescription("Live registration radius around a Kolony Hearth. Registered records outside it remain visible but are ineligible.", new AcceptableValueRange<float>(8f, 128f)));
@@ -179,10 +186,11 @@ namespace Kukolony
             KeepAliveMaxZones = config.Bind(
                 "3 - Off-screen simulation",
                 nameof(KeepAliveMaxZones),
-                48,
+                96,
                 new ConfigDescription(
                     "Hard ceiling on zones held open at once. Reaching it is logged rather than "
-                    + "silently dropping villagers.",
+                    + "silently dropping anything. Each villager holds a 3x3 block; a hearth or "
+                    + "flag holds every zone its radius touches plus a ring.",
                     new AcceptableValueRange<int>(9, 256)));
 
             KeepAliveScanSeconds = config.Bind(

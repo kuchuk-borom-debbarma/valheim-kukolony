@@ -136,7 +136,12 @@ namespace Kukolony.Colonies
                 return RegisterOutcome.NotUsable;
             if (!StructureRegistry.TryCapabilities(target, out StructureCapability capabilities))
                 return RegisterOutcome.NotUsable;
-            if (Utils.DistanceXZ(target.transform.position, colony.transform.position) > colony.EffectiveRadius)
+
+            // Reach is a union of the hearth's radius and the claimed flags' circles - and a
+            // flag itself is exempt entirely, because a flag inside reach would be a marker
+            // for ground the Kolony already has. Standing beyond the hearth is its purpose.
+            bool isFlag = (capabilities & StructureCapability.WorkArea) != 0;
+            if (!isFlag && !KolonyReach.Covers(colony, target.transform.position))
                 return RegisterOutcome.OutOfReach;
 
             ZDOID colonyId = colony.Id;
@@ -170,6 +175,70 @@ namespace Kukolony.Colonies
 
             if (!colony.RegisterStructure(record)) return RegisterOutcome.OutOfReach;
             ColonyMembership.SetColony(targetZdo, colonyId);
+            return moved ? RegisterOutcome.Moved : RegisterOutcome.Registered;
+        }
+
+        /// <summary>
+        ///     Assigns a flag to a Kolony that need not be loaded.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <see cref="Register" /> requires a loaded <see cref="Colony" /> instance,
+        ///         which a hearth three hundred metres away does not have. A flag is claimed
+        ///         standing at the flag, so the flag is loaded and writable - and the Kolony's
+        ///         side is written straight onto its ZDO after claiming ownership, the same
+        ///         move bulk assignment already makes on unloaded villagers.
+        ///     </para>
+        ///     <para>
+        ///         The ordering is release-then-take, as in <see cref="Register" />, and for
+        ///         the same reason: a flag in two Kolonies' lists would hold zones open for
+        ///         both and bound work areas for both, and nothing would ever notice.
+        ///     </para>
+        /// </remarks>
+        internal static RegisterOutcome AssignFlag(ZDOID colonyId, WorkFlag flag)
+        {
+            ZDO colonyZdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(colonyId) : null;
+            if (colonyZdo == null || !colonyZdo.IsValid()) return RegisterOutcome.NoColony;
+
+            if (flag == null || !flag.TryGetComponent(out ZNetView view) || !view.IsValid())
+                return RegisterOutcome.NotUsable;
+            if (!StructureRegistry.TryCapabilities(flag.gameObject, out StructureCapability capabilities))
+                return RegisterOutcome.NotUsable;
+
+            ZDO flagZdo = view.GetZDO();
+            ColonyState state = new ColonyState(colonyZdo);
+
+            ZDOID holder = ColonyMembership.GetColony(flagZdo);
+            if (holder == colonyId && state.GetStructures().Exists(r => r.Id == flagZdo.m_uid))
+                return RegisterOutcome.AlreadyHere;
+
+            view.ClaimOwnership();
+            string token = Core.PersistentZdoReference.Ensure(flagZdo);
+            if (string.IsNullOrEmpty(token)) return RegisterOutcome.NotOwnable;
+
+            bool moved = false;
+            if (!holder.IsNone() && holder != colonyId)
+            {
+                if (!TryRelease(holder, flagZdo.m_uid)) return RegisterOutcome.HolderUnreachable;
+                moved = true;
+            }
+
+            StructureRecord record = new StructureRecord
+            {
+                Id = flagZdo.m_uid,
+                PersistentId = token,
+                Name = StructureRegistry.DisplayName(flag.gameObject),
+                Prefab = Utils.GetPrefabName(flag.gameObject),
+                Capabilities = capabilities
+            };
+
+            colonyZdo.SetOwner(ZDOMan.GetSessionID());
+            List<StructureRecord> records = state.GetStructures();
+            records.RemoveAll(r => r.Id == record.Id);
+            records.Add(record);
+            state.SetStructures(records);
+
+            ColonyMembership.SetColony(flagZdo, colonyId);
             return moved ? RegisterOutcome.Moved : RegisterOutcome.Registered;
         }
 

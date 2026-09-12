@@ -107,7 +107,14 @@ namespace Kukolony.Colonies
 
         internal bool RegisterStructure(StructureRecord record)
         {
-            if (record == null || !record.IsLiveIn(this) || !Bind() || !_nview.IsValid()) return false;
+            if (record == null || !Bind() || !_nview.IsValid()) return false;
+
+            // A flag is exempt from the liveness gate for the same reason registration's
+            // reach check exempts it: until this very record lands in the list, the union
+            // cannot include the flag's own circle, and the gate would refuse the one thing
+            // whose job is to extend it.
+            bool isFlag = (record.Capabilities & StructureCapability.WorkArea) != 0;
+            if (!isFlag && !record.IsLiveIn(this)) return false;
             _nview.ClaimOwnership();
             List<StructureRecord> records = State.GetStructures();
             int index = records.FindIndex(r => r.Id == record.Id);

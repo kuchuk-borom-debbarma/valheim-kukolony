@@ -29,7 +29,14 @@ namespace Kukolony.Colonies
         Processing = 4,
 
         /// <summary>One villager can sleep here. A Bed.</summary>
-        Rest = 64
+        Rest = 64,
+
+        /// <summary>
+        ///     A place the Kolony works, far from home. The flag piece - and the one
+        ///     capability whose holder is exempt from the reach gate, because being beyond
+        ///     reach is its entire purpose.
+        /// </summary>
+        WorkArea = 128
     }
 
     /// <summary>
@@ -47,7 +54,8 @@ namespace Kukolony.Colonies
     ///     as a capability that now owns its bit.
     /// </remarks>
     internal const StructureCapability Known =
-        StructureCapability.Storage | StructureCapability.Processing | StructureCapability.Rest;
+        StructureCapability.Storage | StructureCapability.Processing | StructureCapability.Rest |
+        StructureCapability.WorkArea;
 
     /// <summary>
     ///     What a player should read for a set of capabilities.
@@ -71,6 +79,7 @@ namespace Kukolony.Colonies
         if ((capabilities & StructureCapability.Storage) != 0) parts.Add("Storage");
         if ((capabilities & StructureCapability.Processing) != 0) parts.Add("Processing");
         if ((capabilities & StructureCapability.Rest) != 0) parts.Add("Rest");
+        if ((capabilities & StructureCapability.WorkArea) != 0) parts.Add("Work area");
         return string.Join(" + ", parts.ToArray());
     }
     }

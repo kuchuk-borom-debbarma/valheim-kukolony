@@ -30,6 +30,8 @@ namespace Kukolony.KeepAlive
 
         private readonly List<ZDO> _villagerZdos = new List<ZDO>();
         private readonly List<Vector3> _positions = new List<Vector3>();
+        private readonly List<Vector4> _areas = new List<Vector4>();
+        private readonly List<Vector3> _structures = new List<Vector3>();
 
         private float _refreshTimer;
         private float _scanTimer;
@@ -154,12 +156,20 @@ namespace Kukolony.KeepAlive
                 }
             }
 
-            // Every registered structure. This is what makes
-            // a far-away container reachable - its zone is held open because the colony
-            // knows about it, not because a villager happens to be standing near it.
-            ColonyRegistry.CollectMemberPositions(_positions);
+            // The Kolonies' own ground: each hearth with its radius, each claimed flag
+            // with its own. Circles rather than points, so a real outpost keeps all of its
+            // zones rather than the one its flagpole stands in.
+            _areas.Clear();
+            ColonyRegistry.CollectAreas(_areas);
 
-            KeepAliveZones.Rebuild(_positions);
+            // Every registered structure, last. Almost all of them stand inside a circle
+            // already and cost nothing more; the ones that do not are the lowest priority
+            // when the cap binds, because losing a chest's zone loses a delivery, while
+            // losing a villager's loses the villager.
+            _structures.Clear();
+            ColonyRegistry.CollectMemberPositions(_structures);
+
+            KeepAliveZones.Rebuild(_positions, _areas, _structures);
         }
 
         /// <summary>

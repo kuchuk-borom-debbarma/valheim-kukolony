@@ -202,6 +202,7 @@ namespace Kukolony.Debug
             yield return ClearTheGround(colony, "CheckWalkingUpToAVillager");
             yield return CheckBulkAssignment(report, colony);
             yield return ClearTheGround(colony, "CheckBulkAssignment");
+            yield return CheckWorkFlags(report, colony, origin);
             yield return CheckDistantTravel(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
@@ -4809,6 +4810,109 @@ namespace Kukolony.Debug
 
         private static T Spawn<T>(string prefabName, Vector3 position) where T : Component =>
             Spawn(prefabName, position)?.GetComponent<T>();
+
+        /// <summary>
+        ///     The flag: claimed from afar, extending reach, and holding its ground open.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Placed well beyond the hearth's radius on purpose - a flag inside reach
+        ///         would prove nothing, since ordinary registration already covers that
+        ///         ground. Every positive claim here has the control the roadmap demands:
+        ///         the same chest is measured before the flag exists, beside it, and after
+        ///         the flag is gone.
+        ///     </para>
+        ///     <para>
+        ///         Claiming goes through <see cref="ColonyOperations.AssignFlag" />, the
+        ///         ZDO-based route, because that is the one a real outpost uses - the hearth
+        ///         three hundred metres away is not loaded when a player stands at the flag.
+        ///         The loaded-screen routes call the same registration underneath, which is
+        ///         the standing rule that no route can accept what another refuses.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckWorkFlags(TestReport report, Colony colony, Vector3 origin)
+        {
+            Vector3 farOut = origin + new Vector3(colony.EffectiveRadius + 90f, 0f, 0f);
+
+            // Control first: without any flag, ground out there is nobody's.
+            GameObject strayChest = Spawn("piece_chest_wood", farOut + new Vector3(4f, 0f, 0f));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            StructureRecord strayRecord = StructureRegistry.Describe(strayChest);
+            report.Check(strayChest != null && strayRecord != null &&
+                         ColonyOperations.Register(colony, strayChest) == RegisterOutcome.OutOfReach,
+                "control: without a flag, a distant chest is refused as out of reach");
+
+            GameObject flag = Spawn(WorkFlagPrefab.PrefabName, farOut);
+            yield return new WaitForSecondsRealtime(.3f);
+
+            WorkFlag planted = flag != null ? flag.GetComponent<WorkFlag>() : null;
+            if (planted == null)
+            {
+                report.Check(false, "flag check could place a flag");
+                Release(strayChest);
+                yield break;
+            }
+
+            report.Check(planted.Owner.IsNone(),
+                "control: a freshly planted flag belongs to nobody");
+
+            RegisterOutcome claimed = ColonyOperations.AssignFlag(colony.Id, planted);
+            report.Check(claimed == RegisterOutcome.Registered,
+                "a flag claims to a Kolony from beyond its reach",
+                $"outcome={claimed}");
+
+            report.Check(colony.State.GetStructures().Exists(r =>
+                    r.Id == planted.Id && (r.Capabilities & StructureCapability.WorkArea) != 0),
+                "and lands in the structure list as a work area");
+
+            // The whole point: ground inside the flag's radius is the Kolony's now.
+            SettlementIndex.ResetForTest();
+            RegisterOutcome chestOutcome = ColonyOperations.Register(colony, strayChest);
+            report.Check(chestOutcome == RegisterOutcome.Registered,
+                "a chest beside the flag registers, three hundred-odd metres from home",
+                $"outcome={chestOutcome}");
+
+            StructureRecord chestRecord = colony.State.GetStructures()
+                .Find(r => r.Id == strayChest.GetComponent<ZNetView>().GetZDO().m_uid);
+            report.Check(chestRecord != null && chestRecord.StatusIn(colony) == StructureStatus.Ready,
+                "and it is Ready - the hauling index can see it",
+                $"status={chestRecord?.StatusIn(colony)}");
+
+            // The keep-alive holds the flag's ground. Asked of the zone set directly: the
+            // question is "would this survive nobody being here", which watching it while
+            // being here cannot answer.
+            var areas = new List<Vector4>();
+            ColonyRegistry.CollectAreas(areas);
+            bool flagArea = areas.Exists(a =>
+                Utils.DistanceXZ(new Vector3(a.x, 0f, a.z), farOut) < 2f && a.w >= 8f);
+            report.Check(flagArea,
+                "the keep-alive knows the flag's circle",
+                $"areas={areas.Count}");
+
+            report.Check(KeepAlive.KeepAliveZones.DroppedAnchors == 0,
+                "control: nothing was silently dropped at the zone cap",
+                $"dropped={KeepAlive.KeepAliveZones.DroppedAnchors}");
+
+            // Reassigning is a move, not a duplicate - and the flag being gone takes the
+            // ground with it: the chest survives as a record but drops to out of reach,
+            // because falling out of reach never deregisters.
+            colony.RemoveStructure(planted.Id);
+            Release(flag);
+            SettlementIndex.ResetForTest();
+            yield return new WaitForSecondsRealtime(.3f);
+
+            report.Check(chestRecord != null && chestRecord.StatusIn(colony) == StructureStatus.OutOfReach,
+                "with the flag gone the chest is out of reach, not forgotten",
+                $"status={chestRecord?.StatusIn(colony)}");
+
+            report.Check(colony.State.GetStructures().Exists(r => r.Id == chestRecord.Id),
+                "control: it is still on the books for when the flag comes back");
+
+            colony.RemoveStructure(chestRecord.Id);
+            Release(strayChest);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
 
         private static GameObject Spawn(string prefabName, Vector3 position)
         {

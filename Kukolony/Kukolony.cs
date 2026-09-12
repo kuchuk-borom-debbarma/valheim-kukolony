@@ -36,8 +36,10 @@ namespace Kukolony
             AddLocalization();
 
             Gui.ColonyScreen.Register();
+            Gui.FlagAssignScreen.Register();
             VillagerPrefab.Register();
             Colonies.ColonyPrefab.Register();
+            Colonies.WorkFlagPrefab.Register();
             _harmony.PatchAll(Assembly.GetExecutingAssembly());
 
             gameObject.AddComponent<KeepAlive.KeepAliveDriver>();
@@ -62,6 +64,10 @@ namespace Kukolony
             Localization.AddTranslation("English", "kukolony_colony_desc",
                 "Records a Kolony, its villagers and its registered structures. "
                 + "Only placed structures inside its live radius can be registered.");
+            Localization.AddTranslation("English", "kukolony_flag", "Kolony Flag");
+            Localization.AddTranslation("English", "kukolony_flag_desc",
+                "Marks ground a Kolony works, however far from home. What its radius covers "
+                + "stays loaded, structures there can be registered, and jobs can be pointed at it.");
         }
     }
 }

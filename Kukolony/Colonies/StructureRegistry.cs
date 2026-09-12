@@ -57,8 +57,10 @@ namespace Kukolony.Colonies
                 return StructureStatus.NotFound;
             }
 
-            if (colony == null ||
-                Utils.DistanceXZ(zdo.GetPosition(), colony.transform.position) > colony.EffectiveRadius)
+            // Reach is a union: the hearth's radius, or any claimed flag's. A flag judges
+            // itself by its own circle, so a claimed flag is always Ready wherever it stands -
+            // being beyond the hearth is its entire purpose.
+            if (colony == null || !KolonyReach.Covers(colony, zdo.GetPosition()))
             {
                 return StructureStatus.OutOfReach;
             }
@@ -95,13 +97,14 @@ namespace Kukolony.Colonies
         {
             List<StructureRecord> found = new List<StructureRecord>();
             if (colony == null || ZNetScene.instance == null) return found;
-            float radius = colony.EffectiveRadius;
-            Vector3 centre = colony.transform.position;
-
             foreach (ZNetView view in ZNetScene.instance.m_instances.Values)
             {
                 if (view == null || !view.IsValid()) continue;
-                if (Utils.DistanceXZ(view.transform.position, centre) > radius) continue;
+
+                // The same union StatusIn answers with, so the register-nearby list at an
+                // outpost offers the chests standing there. A list bounded by the hearth
+                // alone showed an empty page to a player standing in their own lumber camp.
+                if (!KolonyReach.Covers(colony, view.transform.position)) continue;
                 if (!TryCapabilities(view.gameObject, out StructureCapability capabilities)) continue;
                 // Deliberately no token here. Minting one requires owning the object, so doing
                 // it while listing would take ownership of - and write a GUID onto - every
@@ -143,6 +146,7 @@ namespace Kukolony.Colonies
             if (Has<Container>(candidate)) capabilities |= StructureCapability.Storage;
             if (Has<Smelter>(candidate)) capabilities |= StructureCapability.Processing;
             if (Has<Bed>(candidate)) capabilities |= StructureCapability.Rest;
+            if (Has<WorkFlag>(candidate)) capabilities |= StructureCapability.WorkArea;
             return capabilities != StructureCapability.None;
         }
 

@@ -348,11 +348,12 @@ static class Program
         // never left doing neither. Every combination must produce something that moves it or
         // puts it somewhere it can move from.
         int idle = 0;
-        for (int bits = 0; bits < 64; bits++)
+        for (int bits = 0; bits < 256; bits++)
         {
             TravelFacts facts = new TravelFacts(
                 (bits & 1) != 0, (bits & 2) != 0, (bits & 4) != 0, (bits & 8) != 0,
-                (bits & 16) != 0, (bits & 32) != 0, canStand: true);
+                (bits & 16) != 0, (bits & 32) != 0, canStand: (bits & 64) != 0,
+                waterAhead: (bits & 128) != 0);
 
             Locomotion move = Locomotor.Decide(facts);
             if (move != Locomotion.Walk && move != Locomotion.CoverGround &&
@@ -361,6 +362,27 @@ static class Program
         }
 
         Case($"every combination of facts produces an action (idle in {idle})", idle == 0);
+
+        // Water. Ground that can never be walked is known in advance, so an ocean is a
+        // decision rather than a forty-five-second stall at the shoreline.
+        Case("water ahead on a journey starts the crossing without waiting to stall",
+            Locomotor.Decide(new TravelFacts(false, true, false, true, false, true, true,
+                waterAhead: true)) == Locomotion.BeginRescue);
+        Case("control: the same villager on dry ground walks",
+            Locomotor.Decide(new TravelFacts(false, true, false, true, false, true, true))
+                == Locomotion.Walk);
+        Case("a crossing does not hand back onto its feet in the middle of the sea",
+            Locomotor.Decide(new TravelFacts(true, true, true, true, true, true, true,
+                waterAhead: true)) == Locomotion.CoverGround);
+        Case("control: the same crossing with land ahead comes back on foot",
+            Locomotor.Decide(new TravelFacts(true, true, true, true, true, true, true))
+                == Locomotion.BackOnFoot);
+        Case("water near home is not a journey and is not crossed",
+            Locomotor.Decide(new TravelFacts(false, false, false, true, false, true, true,
+                waterAhead: true)) == Locomotion.Walk);
+        Case("arrival still ends a crossing - a finished journey stops, wet or not",
+            Locomotor.Decide(new TravelFacts(true, false, false, false, false, false, true,
+                waterAhead: true)) == Locomotion.BackOnFoot);
 
         // The five-minute standstill, as a single line: rescuing, in view, polite rescues still
         // available - but nowhere to stand. It must keep covering ground rather than stop.

@@ -90,8 +90,11 @@ namespace Kukolony.KeepAlive
             }
 
             // And the colony itself.
+            // The flag is a Piece already, but name it anyway: a marker that got filtered
+            // out of its own kept zone would be an outpost nobody can interact with.
             return prefab.GetComponent<Villagers.Villager>() != null
-                   || prefab.GetComponent<Colonies.Colony>() != null;
+                   || prefab.GetComponent<Colonies.Colony>() != null
+                   || prefab.GetComponent<Colonies.WorkFlag>() != null;
         }
     }
 }

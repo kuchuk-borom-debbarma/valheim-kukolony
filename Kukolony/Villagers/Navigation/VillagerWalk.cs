@@ -242,7 +242,8 @@ namespace Kukolony.Villagers.Navigation
                 observed: _journey.Observed(_ai.transform.position),
                 stalled: stuck,
                 politeRescuesLeft: _rescues < RescuesBeforeGliding,
-                canStand: canStand);
+                canStand: canStand,
+                waterAhead: _journey.WaterAhead(_ai.transform.position));
 
             switch (Locomotor.Decide(facts))
             {

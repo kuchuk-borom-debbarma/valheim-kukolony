@@ -23,7 +23,7 @@ namespace Kukolony.Villagers.Navigation
     internal readonly struct TravelFacts
     {
         internal TravelFacts(bool rescuing, bool travelling, bool burstSpent, bool observed,
-            bool stalled, bool politeRescuesLeft, bool canStand)
+            bool stalled, bool politeRescuesLeft, bool canStand, bool waterAhead = false)
         {
             Rescuing = rescuing;
             Travelling = travelling;
@@ -32,6 +32,7 @@ namespace Kukolony.Villagers.Navigation
             Stalled = stalled;
             PoliteRescuesLeft = politeRescuesLeft;
             CanStand = canStand;
+            WaterAhead = waterAhead;
         }
 
         /// <summary>Already covering ground rather than walking.</summary>
@@ -54,6 +55,18 @@ namespace Kukolony.Villagers.Navigation
 
         /// <summary>There is somewhere within reach an agent of this kind can stand.</summary>
         internal bool CanStand { get; }
+
+        /// <summary>
+        ///     The next stretch of the route is under water.
+        /// </summary>
+        /// <remarks>
+        ///     Water is not "stuck". A villager facing an ocean used to be handled by the
+        ///     rescue ladder - forty-five seconds of stalling at the shoreline, then escalating
+        ///     glides - which arrives eventually and looks broken the whole way. Ground that
+        ///     can never be walked is known in advance by sampling the route, so crossing it
+        ///     unseen is a decision rather than a recovery.
+        /// </remarks>
+        internal bool WaterAhead { get; }
     }
 
     /// <summary>
@@ -91,10 +104,20 @@ namespace Kukolony.Villagers.Navigation
                 // Otherwise stop when the rescue is spent, or when somebody can see it and it has
                 // not yet earned the right to be seen doing this - but only where there is ground
                 // to stand on. Otherwise keep going, because the alternative is standing still.
+                // Never back on foot into the sea: while the route ahead is water, the
+                // crossing continues whatever a burst timer or a watching player would
+                // otherwise prefer. The landing is what CanStand is for.
+                if (facts.WaterAhead) return Locomotion.CoverGround;
+
                 bool wantsToWalk = facts.BurstSpent || (facts.Observed && facts.PoliteRescuesLeft);
 
                 return wantsToWalk && facts.CanStand ? Locomotion.BackOnFoot : Locomotion.CoverGround;
             }
+
+            // Water ahead on a journey is crossed deliberately, not stalled at. This is
+            // before the stall test on purpose: the shoreline is exactly where a villager
+            // stops making progress, and waiting for the stall means waiting at the beach.
+            if (facts.Travelling && facts.WaterAhead) return Locomotion.BeginRescue;
 
             if (!facts.Travelling || !facts.Stalled) return Locomotion.Walk;
 

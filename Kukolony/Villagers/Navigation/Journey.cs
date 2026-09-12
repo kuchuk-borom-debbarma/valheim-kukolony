@@ -54,6 +54,15 @@ namespace Kukolony.Villagers.Navigation
 
         private const float PokeSeconds = 1f;
 
+        /// <summary>
+        ///     How often the route ahead is re-sampled for water, and how far apart the
+        ///     samples sit. Terrain height comes from the world generator - arithmetic, not
+        ///     colliders - so the answer does not depend on anything being loaded.
+        /// </summary>
+        private const float ProbeSeconds = 1f;
+
+        private const float ProbeStep = 12f;
+
         /// <summary>How far around the projected next stretch to look for walkable ground.</summary>
         private const float LegSearch = 15f;
 
@@ -83,6 +92,8 @@ namespace Kukolony.Villagers.Navigation
         private Vector3 _waypoint;
         private bool _travelling;
         private float _nextPoke;
+        private float _nextProbe;
+        private bool _waterAhead;
 
         internal Journey(MonsterAI ai) => _ai = ai;
 
@@ -91,6 +102,52 @@ namespace Kukolony.Villagers.Navigation
 
         /// <summary>Whether this is a journey rather than a step across the settlement.</summary>
         internal bool Travelling => _travelling;
+
+        /// <summary>
+        ///     Whether the next stretch of this journey is under water.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Sampled from the world generator rather than from colliders, because the
+        ///         question is about ground nobody has loaded and arithmetic is the only thing
+        ///         that can answer for it. A handful of points between here and the waypoint,
+        ///         once a second - a probe, not a survey.
+        ///     </para>
+        ///     <para>
+        ///         This is what turns an ocean from a forty-five-second stall at the shoreline
+        ///         into a decision. Water cannot become walkable by waiting, which is the whole
+        ///         difference between it and every other reason a walk stops making progress.
+        ///     </para>
+        /// </remarks>
+        internal bool WaterAhead(Vector3 from)
+        {
+            if (!_travelling) return false;
+            if (Time.time < _nextProbe) return _waterAhead;
+
+            _nextProbe = Time.time + ProbeSeconds;
+            _waterAhead = false;
+
+            if (WorldGenerator.instance == null || ZoneSystem.instance == null) return false;
+
+            float water = ZoneSystem.instance.m_waterLevel;
+            Vector3 bearing = _waypoint - from;
+            bearing.y = 0f;
+            float span = bearing.magnitude;
+            if (span < ProbeStep) return false;
+
+            Vector3 step = bearing / span;
+            for (float along = ProbeStep; along <= span; along += ProbeStep)
+            {
+                Vector3 at = from + step * along;
+                if (WorldGenerator.instance.GetHeight(at.x, at.z) < water)
+                {
+                    _waterAhead = true;
+                    break;
+                }
+            }
+
+            return _waterAhead;
+        }
 
         /// <summary>Prepares the ground between here and there. Call before walking.</summary>
         /// <param name="arriveWithin">
