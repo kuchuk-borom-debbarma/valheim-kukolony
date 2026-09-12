@@ -34,6 +34,8 @@ namespace Kukolony.Gui
         private WorkFlag _flag;
         private bool _blocked;
         private int _seenRevision;
+        private int _seenSweeps;
+        private bool _drewWhileSweeping;
         private int _page;
 
         internal static void Register() => GUIManager.OnCustomGUIAvailable += Rebuild;
@@ -64,6 +66,7 @@ namespace Kukolony.Gui
             // of saying it is looking.
             ColonyRegistry.EnsureFresh(_instance);
             _instance._seenRevision = ColonyRegistry.Revision;
+            _instance._seenSweeps = ColonyRegistry.Sweeps;
 
             _instance._flag = flag;
             _instance._page = 0;
@@ -111,9 +114,18 @@ namespace Kukolony.Gui
             // Any sweep landing with news redraws the open screen - whoever ran it. A
             // latch armed only at open missed the driver's scans on a host and the pins'
             // sweeps on a client, so rows only ever appeared after close-and-reopen.
-            if (_seenRevision != ColonyRegistry.Revision)
+            //
+            // "News" includes a sweep finishing while this screen was saying it was
+            // looking, even when the sweep found the same nothing it found before: keyed
+            // on the revision alone, an empty world never bumped anything and the screen
+            // claimed to still be searching for the rest of the session. That is the same
+            // lie as the definitive message it replaced, told the other way round.
+            bool news = _seenRevision != ColonyRegistry.Revision;
+            bool settled = _drewWhileSweeping && _seenSweeps != ColonyRegistry.Sweeps;
+            if (news || settled)
             {
                 _seenRevision = ColonyRegistry.Revision;
+                _seenSweeps = ColonyRegistry.Sweeps;
                 Refresh();
             }
         }
@@ -158,7 +170,14 @@ namespace Kukolony.Gui
             // below rendered nothing, which read as an unexplained empty screen.
             if (!ColonyRegistry.AnyValid() && column.TryRow(out Row none))
             {
+                // Remembered, so Update knows this drawing was provisional and owes the
+                // player a redraw once the sweep it was waiting on lands.
+                _drewWhileSweeping = ColonyRegistry.Sweeping;
                 Widgets.Label(none, EmptyListExplanation(), Color.gray);
+            }
+            else
+            {
+                _drewWhileSweeping = false;
             }
 
             foreach (ZDO hearth in ColonyRegistry.ValidColonies())

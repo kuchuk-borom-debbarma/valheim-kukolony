@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Kukolony.Core;
 using UnityEngine;
@@ -24,6 +25,20 @@ namespace Kukolony.KeepAlive
 
         private static readonly List<Vector3> CircleAnchors = new List<Vector3>();
 
+        /// <summary>
+        ///     The anchor the nearest-first sort is measuring against, and the one comparison
+        ///     that reads it.
+        /// </summary>
+        /// <remarks>
+        ///     A lambda capturing the loop's anchor allocates a closure and a delegate per
+        ///     circle per rebuild, and Rebuild runs every second for the whole session - the
+        ///     very allocation this buffer reuse exists to remove.
+        /// </remarks>
+        private static Vector3 _sortAnchor;
+
+        private static readonly Comparison<Vector2s> NearestFirst = (a, b) =>
+            SquaredZoneDistance(a, _sortAnchor).CompareTo(SquaredZoneDistance(b, _sortAnchor));
+
         /// <summary>Latched so the cap is reported on change rather than every second.</summary>
         private static bool _reportedCapped;
 
@@ -41,7 +56,16 @@ namespace Kukolony.KeepAlive
         ///     feature did not restore vanilla behaviour, and one world's zones leaked
         ///     into the next.
         /// </summary>
-        internal static void Clear() => Zones.Clear();
+        internal static void Clear()
+        {
+            Zones.Clear();
+
+            // The scratch too, so nothing is carried across a world boundary. Harmless as
+            // it stands - zone coordinates are values, not ZDO references - but "cleared"
+            // should mean cleared, and the next reader of these buffers need not wonder.
+            foreach (List<Vector2s> buffer in CircleBuffers) buffer.Clear();
+            CircleAnchors.Clear();
+        }
 
         /// <summary>
         ///     How many anchors the cap refused or truncated on the last rebuild, for checks.
@@ -107,8 +131,10 @@ namespace Kukolony.KeepAlive
             // to enumeration order - the first big outpost packed the set solid and the
             // second Kolony's hearth held nothing open at all, silently, while reach went
             // on reporting its ground Ready.
+            // One anchor per circle, so the anchor list's length *is* the circle count -
+            // a separate counter alongside it would be one `continue` away from letting a
+            // demolished outpost's stale buffer be read as a live circle.
             CircleAnchors.Clear();
-            int circleCount = 0;
             int wanted = 0;
             foreach (Vector4 area in areas)
             {
@@ -118,8 +144,10 @@ namespace Kukolony.KeepAlive
                 Vector2s low = ZoneSystem.GetZone(at - new Vector3(reach, 0f, reach));
                 Vector2s high = ZoneSystem.GetZone(at + new Vector3(reach, 0f, reach));
 
-                if (circleCount == CircleBuffers.Count) CircleBuffers.Add(new List<Vector2s>());
-                List<Vector2s> circle = CircleBuffers[circleCount];
+                CircleAnchors.Add(at);
+                int index = CircleAnchors.Count - 1;
+                if (index == CircleBuffers.Count) CircleBuffers.Add(new List<Vector2s>());
+                List<Vector2s> circle = CircleBuffers[index];
                 circle.Clear();
                 for (short y = low.y; y <= high.y; y++)
                 {
@@ -137,10 +165,9 @@ namespace Kukolony.KeepAlive
                         circle.Add(zone);
                     }
                 }
-
-                CircleAnchors.Add(at);
-                circleCount++;
             }
+
+            int circleCount = CircleAnchors.Count;
 
             if (Zones.Count + wanted <= cap)
             {
@@ -157,9 +184,8 @@ namespace Kukolony.KeepAlive
             {
                 for (int i = 0; i < circleCount; i++)
                 {
-                    Vector3 at = CircleAnchors[i];
-                    CircleBuffers[i].Sort((a, b) =>
-                        SquaredZoneDistance(a, at).CompareTo(SquaredZoneDistance(b, at)));
+                    _sortAnchor = CircleAnchors[i];
+                    CircleBuffers[i].Sort(NearestFirst);
                 }
 
                 for (int turn = 0; Zones.Count < cap; turn++)
@@ -244,41 +270,40 @@ namespace Kukolony.KeepAlive
             int haloSize = (rings * 2 + 1) * (rings * 2 + 1);
             if (Zones.Count + haloSize <= cap)
             {
-                for (int y = -rings; y <= rings; y++)
-                {
-                    for (int x = -rings; x <= rings; x++)
-                    {
-                        Zones.Add(new Vector2s((short)(centre.x + x), (short)(centre.y + y)));
-                    }
-                }
-
+                Halo(centre, rings, add: true);
                 return true;
             }
 
+            // One geometry, walked twice: counting what is missing and adding it must
+            // agree exactly about which zones the halo is, and the method's one documented
+            // past bug was precisely a count that disagreed with its add.
+            int missing = Halo(centre, rings, add: false);
+            if (missing == 0) return true;
+            if (Zones.Count + missing > cap) return false;
+
+            Halo(centre, rings, add: true);
+            return true;
+        }
+
+        /// <summary>
+        ///     Walks a point anchor's halo, either adding its zones or counting the ones not
+        ///     already held.
+        /// </summary>
+        /// <returns>How many of the halo's zones were missing before the walk.</returns>
+        private static int Halo(Vector2s centre, int rings, bool add)
+        {
             int missing = 0;
             for (int y = -rings; y <= rings; y++)
             {
                 for (int x = -rings; x <= rings; x++)
                 {
-                    if (!Zones.Contains(new Vector2s((short)(centre.x + x), (short)(centre.y + y))))
-                    {
-                        missing++;
-                    }
+                    Vector2s zone = new Vector2s((short)(centre.x + x), (short)(centre.y + y));
+                    if (add) { if (Zones.Add(zone)) missing++; }
+                    else if (!Zones.Contains(zone)) missing++;
                 }
             }
 
-            if (missing == 0) return true;
-            if (Zones.Count + missing > cap) return false;
-
-            for (int y = -rings; y <= rings; y++)
-            {
-                for (int x = -rings; x <= rings; x++)
-                {
-                    Zones.Add(new Vector2s((short)(centre.x + x), (short)(centre.y + y)));
-                }
-            }
-
-            return true;
+            return missing;
         }
 
         /// <summary>How far a zone's centre sits from an anchor, for nearest-first filling.</summary>

@@ -81,13 +81,28 @@ namespace Kukolony.Villagers.Navigation
         private const float MinimumLegGain = 10f;
 
         /// <summary>
+        ///     How near standable ground must be to count as a stride away - close enough
+        ///     that putting a villager there reads as stepping onto it.
+        /// </summary>
+        /// <remarks>
+        ///     Named rather than taken as "the first ring of the rescue ladder", because the
+        ///     two are different questions that happen to share a number. The ladder's rings
+        ///     are about where a rescue may place somebody; this is about what a watching
+        ///     player will accept. Retuning the ladder - widening its first ring for rough
+        ///     ground, or prepending a finer one - would otherwise silently move the
+        ///     watched-water rule with it, and at 20m that rule is the visible teleport it
+        ///     was written to stop.
+        /// </remarks>
+        private const float StrideSearch = 5f;
+
+        /// <summary>
         ///     How far to look for standable ground, widening until something is found.
         /// </summary>
         /// <remarks>
         ///     Nearest first, so a villager is put down as close as possible to where it actually
         ///     is rather than flung to the far side of whatever it was standing on.
         /// </remarks>
-        private static readonly float[] ResumeSearches = { 5f, 20f, 60f };
+        private static readonly float[] ResumeSearches = { StrideSearch, 20f, 60f };
 
         private readonly MonsterAI _ai;
 
@@ -368,15 +383,35 @@ namespace Kukolony.Villagers.Navigation
         internal bool CanStand(Character body) => TryFindStanding(body, out _);
 
         /// <summary>
-        ///     Whether there is somewhere to stand within a stride or two, for the one
-        ///     decision where <see cref="CanStand" />'s sixty-metre generosity is wrong: a
-        ///     watched water crossing must land only where landing reads as stepping
-        ///     ashore, not as snapping to a shore across the bay.
+        ///     Where this villager could stand, and whether that somewhere is within a
+        ///     stride.
         /// </summary>
-        internal bool CanStandNear(Character body) =>
-            body != null && Pathfinding.instance != null &&
-            Pathfinding.instance.FindValidPoint(out _, body.transform.position,
-                ResumeSearches[0], _ai.m_pathAgentType);
+        /// <remarks>
+        ///     Both answers from one search, because the decision needs both every tick
+        ///     while rescuing and the narrow question is the wide one's first ring - asking
+        ///     them separately put two identical pathfinder queries on the same tick.
+        ///     <paramref name="near" /> is the one decision where <see cref="CanStand" />'s
+        ///     sixty-metre generosity is wrong: a watched water crossing must land only
+        ///     where landing reads as stepping ashore, not as snapping to a shore across
+        ///     the bay.
+        /// </remarks>
+        internal bool CanStand(Character body, out bool near)
+        {
+            near = false;
+            if (body == null) return false;
+
+            foreach (float radius in ResumeSearches)
+            {
+                if (!HasStanding(body, radius)) continue;
+
+                // Measured against the stride, not against which ring happened to answer,
+                // so the ladder's rings and the watched-landing rule can be retuned apart.
+                near = radius <= StrideSearch;
+                return true;
+            }
+
+            return false;
+        }
 
         private bool TryFindStanding(Character body, out Vector3 point)
         {
@@ -394,6 +429,12 @@ namespace Kukolony.Villagers.Navigation
 
             return false;
         }
+
+        /// <summary>Whether an agent of this kind could stand within a given radius.</summary>
+        private bool HasStanding(Character body, float radius) =>
+            Pathfinding.instance != null &&
+            Pathfinding.instance.FindValidPoint(out _, body.transform.position, radius,
+                _ai.m_pathAgentType);
 
         /// <summary>How fast this villager covers ground on a journey.</summary>
         /// <remarks>

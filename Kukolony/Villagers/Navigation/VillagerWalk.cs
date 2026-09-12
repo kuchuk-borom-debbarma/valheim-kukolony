@@ -233,7 +233,10 @@ namespace Kukolony.Villagers.Navigation
                          Utils.DistanceXZ(target, _ai.transform.position) > stopDistance;
             bool onJourney = _journey.Travelling || stuck;
 
-            bool canStand = !onJourney || _journey.CanStand(_ai.m_character);
+            // One search answers both: whether there is anywhere to stand at all, and
+            // whether it is close enough that being put there reads as stepping ashore.
+            bool nearLand = false;
+            bool canStand = !onJourney || _journey.CanStand(_ai.m_character, out nearLand);
 
             TravelFacts facts = new TravelFacts(
                 rescuing: _reckoning,
@@ -244,7 +247,7 @@ namespace Kukolony.Villagers.Navigation
                 politeRescuesLeft: _rescues < RescuesBeforeGliding,
                 canStand: canStand,
                 waterAhead: _journey.WaterAhead(_ai.transform.position),
-                nearLand: _reckoning && _journey.CanStandNear(_ai.m_character));
+                nearLand: nearLand);
 
             switch (Locomotor.Decide(facts))
             {

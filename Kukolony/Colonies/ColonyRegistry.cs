@@ -107,6 +107,7 @@ namespace Kukolony.Colonies
             // references that will soon report valid as unrelated objects.
             _generation++;
             _sweeping = false;
+            _stamp = 0L;
 
             // And a fresh world deserves a fresh sweep, not the tail of the last one's timer.
             _nextSweep = 0f;
@@ -115,12 +116,26 @@ namespace Kukolony.Colonies
         /// <summary>Whether a sweep is in flight, for screens that want to say "looking".</summary>
         internal static bool Sweeping => _sweeping;
 
-        /// <summary>Bumped when a sweep lands with a different list, for screens to watch.</summary>
+        /// <summary>
+        ///     Bumped when a sweep lands with anything a screen would draw differently, for
+        ///     screens to watch. Names are part of that, not just which hearths exist - a
+        ///     list keyed on identity alone left an open screen showing a Kolony's old name
+        ///     after somebody renamed it.
+        /// </summary>
         internal static int Revision { get; private set; }
+
+        /// <summary>
+        ///     How many sweeps have completed. Bumped even by a sweep that found nothing
+        ///     new, so a screen that said it was looking can tell when looking is over -
+        ///     <see cref="Revision" /> alone left "Looking for Kolonies..." on screen for
+        ///     good in an empty world, where every sweep lands with the same nothing.
+        /// </summary>
+        internal static int Sweeps { get; private set; }
 
         private static bool _sweeping;
         private static float _nextSweep;
         private static int _generation;
+        private static long _stamp;
 
         /// <summary>How stale the registry may go between sweeps.</summary>
         private const float SweepSeconds = 10f;
@@ -142,12 +157,19 @@ namespace Kukolony.Colonies
         /// </remarks>
         internal static void EnsureFresh(MonoBehaviour host)
         {
-            if (host == null || _sweeping || Time.time < _nextSweep) return;
+            if (host == null || !host.isActiveAndEnabled) return;
+            if (_sweeping || Time.time < _nextSweep) return;
             if (ZNet.instance == null || ZDOMan.instance == null) return;
 
-            // StartCoroutine on an inactive host fails without running a single line, so
-            // the in-flight flag is set inside Scan - which runs synchronously up to its
-            // first yield - never latched out here where a refused start would wedge it.
+            // Armed before starting, not only on completion. StartCoroutine on an inactive
+            // host logs an error and runs not one line of the iterator, so a caller that
+            // pokes this every frame turned into an error per frame once that happened -
+            // the throttle has to bound the attempt, not just the success. Scan's own
+            // finally re-arms it on real completion, so nothing changes when it works.
+            //
+            // The in-flight flag stays inside Scan, which runs synchronously to its first
+            // yield: latched out here, a refused start would wedge it true forever.
+            _nextSweep = Time.time + SweepSeconds;
             host.StartCoroutine(Scan());
         }
 
@@ -157,6 +179,13 @@ namespace Kukolony.Colonies
         /// </summary>
         internal static IEnumerator Scan()
         {
+            // One sweep at a time. The driver scans on its own timer and any consumer may
+            // poke EnsureFresh, so two sweeps could overlap - and the first to finish
+            // cleared the in-flight flag and armed the throttle while the second was still
+            // walking, which reported "not sweeping" mid-sweep and did the work twice.
+            // Checked before the try, so this early exit cannot run the cleanup below.
+            if (_sweeping) yield break;
+
             _sweeping = true;
             int generation = _generation;
 
@@ -200,31 +229,72 @@ namespace Kukolony.Colonies
                     yield break;
                 }
 
-                bool changed = Changed(found);
+                long stamp = Stamp(found);
                 ColonyZdos.Clear();
                 ColonyZdos.AddRange(found);
-                if (changed)
+
+                if (stamp != _stamp)
                 {
+                    _stamp = stamp;
                     Revision++;
                 }
+
+                // Every completed sweep, changed or not - a screen showing "looking" needs
+                // to know the looking is over even when the answer is still "nothing".
+                Sweeps++;
             }
             finally
             {
-                _sweeping = false;
-                _nextSweep = Time.time + SweepSeconds;
+                // Only if this sweep still owns the flag. A sweep unwinding after its world
+                // was left has already been disowned by Clear - clearing the flag here would
+                // clear a *new* world's sweep, and arming the throttle here would make the
+                // new world wait out a dead world's timer before its first sweep.
+                if (generation == _generation)
+                {
+                    _sweeping = false;
+                    _nextSweep = Time.time + SweepSeconds;
+                }
             }
         }
 
-        private static bool Changed(List<ZDO> found)
+        /// <summary>
+        ///     A fingerprint of what a screen would draw from the known Kolonies: which
+        ///     they are, and the state each carries.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>Order-insensitive</b>, because the sweep's order is not news. Comparing
+        ///         positionally made any permutation of the same hearths read as a change,
+        ///         and a change destroy-and-rebuilds the open screen - a button destroyed
+        ///         between pointer-down and pointer-up never fires, so a spurious redraw
+        ///         swallows the player's click.
+        ///     </para>
+        ///     <para>
+        ///         <b>State, not just identity</b>, because the screen draws names and which
+        ///         Kolony a flag already serves, and both are written into an existing
+        ///         hearth's ZDO. Keyed on identity alone, a rename left a client's open
+        ///         screen showing the old name for as long as it stayed open - and fed that
+        ///         stale name into the report it printed on assigning. <c>DataRevision</c> is
+        ///         the ZDO's own counter for "something on me was written", which is exactly
+        ///         the question, and costs no allocation to ask.
+        ///     </para>
+        /// </remarks>
+        private static long Stamp(List<ZDO> colonies)
         {
-            if (found.Count != ColonyZdos.Count) return true;
-
-            for (int i = 0; i < found.Count; i++)
+            long stamp = 0L;
+            foreach (ZDO zdo in colonies)
             {
-                if (!ReferenceEquals(found[i], ColonyZdos[i])) return true;
+                if (zdo == null || !zdo.IsValid()) continue;
+
+                // Mixed per hearth, then summed - so the combination does not depend on the
+                // order, while two hearths swapping states still reads as a change.
+                long id = zdo.m_uid.GetHashCode();
+                long mixed = (id * 31L) ^ ((long)zdo.DataRevision * 1000003L);
+                stamp += mixed;
+                stamp += 1L << 32; // counts the hearths, in the same number
             }
 
-            return false;
+            return stamp;
         }
     }
 }
