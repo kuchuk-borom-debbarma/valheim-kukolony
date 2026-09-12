@@ -2921,22 +2921,27 @@ namespace Kukolony.Debug
                 : $"{why}the villager is no longer loaded; " +
                   $"wood chest holds {inWood}, stone chest holds {inStone}";
 
+            // All three framed against the stone chest, because with nobody to photograph the
+            // subject falls back to the wood chest - so naming the wood chest as the second
+            // point makes both points the same, and the framing collapses to a single chest
+            // seen from one side at the minimum distance. These pictures exist for exactly the
+            // case that produces that frame.
+            Vector3 opposite = stoneChest.transform.position;
+
             if (!caughtFetching)
             {
                 yield return BenchmarkUiScenario.PhotographAtWork("haul-fetching.png", Subject(),
-                    Caption("no setting-out moment was sampled; "), woodChest.transform.position);
+                    Caption("no setting-out moment was sampled; "), opposite);
             }
 
             if (!caughtCarrying)
             {
                 yield return BenchmarkUiScenario.PhotographAtWork("haul-delivering.png", Subject(),
-                    Caption("no carrying moment was sampled; "), woodChest.transform.position);
+                    Caption("no carrying moment was sampled; "), opposite);
             }
 
-            // Framed against the stone chest, so a settled shot taken with nobody to photograph
-            // has two distinct points and shows both chests rather than collapsing onto one.
             yield return BenchmarkUiScenario.PhotographAtWork("haul-settled.png", Subject(),
-                Caption("after the hauling: "), stoneChest.transform.position);
+                Caption("after the hauling: "), opposite);
 
             string did = string.Join(" > ", story.ToArray());
 
