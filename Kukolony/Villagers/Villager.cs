@@ -209,7 +209,15 @@ namespace Kukolony.Villagers
         internal bool CanSleep => _animation != null && _animation.CanSleep;
 
         /// <summary>This villager's durable identity, for anything that has to name it.</summary>
-        internal ZDOID Id => _nview != null && _nview.IsValid() ? _nview.GetZDO().m_uid : ZDOID.None;
+        /// <remarks>
+        ///     Binds on demand, as <see cref="State" /> beside it does. Reading the field
+        ///     directly instead meant this answered None for any villager that had not yet
+        ///     ticked - the component resolves its view lazily, and nothing binds it at
+        ///     Awake - so a caller that asked before the first AI tick was told the villager
+        ///     had no identity. That is a silent None rather than an error, and it made a
+        ///     cleanup path that guarded on it unreachable for the whole of two review rounds.
+        /// </remarks>
+        internal ZDOID Id => Bind() && _nview.IsValid() ? _nview.GetZDO().m_uid : ZDOID.None;
 
         /// <summary>Whether this villager is partway through a journey longer than one hop.</summary>
         internal bool IsTravelling => _walk != null && _walk.Travelling;

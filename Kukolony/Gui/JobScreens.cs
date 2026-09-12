@@ -174,44 +174,35 @@ namespace Kukolony.Gui
 
             if (!string.IsNullOrEmpty(job.WorkArea) && column.TryRow(out Row radius))
             {
-                // The number actually in force, not a constant that happens to be the
-                // fallback for some work areas. Pointed at a flag, an unset reach means the
-                // flag's own radius - so a job on a two-hundred-metre flag used to read
-                // "48 m" on this row while working the whole outpost, and no slider position
-                // could have stated the truth.
                 // Asked of the job itself, so the row states the radius actually in force
                 // rather than re-deriving one. For chopping that is already held to the
-                // search radius, which is why the cap below can never contradict it.
-                float shown = job.Kind == JobKind.Chop
-                    ? Jobs.Chop.ChopJob.Area(colony, job).Radius
-                    : WorkArea.For(colony, job).Radius;
+                // search radius, which is why the bound below can never contradict it.
+                float shown = Effective(colony, job);
 
-                // Capped for chopping at the ceiling the scan will honour, asked of the scan
-                // rather than worked out again here - a reach set past it is a promise this
-                // screen cannot keep, and two places computing the same ceiling is how they
-                // came to disagree in the first place.
-                float most = job.Kind == JobKind.Chop
-                    ? Resources.ChoppingGround.SearchRadius
-                    : 128f;
+                // The bound comes from the place, never from the current value.
+                //
+                // Taking it from what is displayed makes the row a one-way ratchet: on a
+                // two-hundred-metre flag a single tap down writes 196, and the bound then
+                // follows that number, so the last four metres can never be nudged back -
+                // the job works a smaller area than the flag it is pointed at, permanently
+                // and with no way to say otherwise. Deriving it from the place instead keeps
+                // the ceiling still while the value moves under it. The other way round -
+                // a bound below what is shown - collapses the job to the bound on the first
+                // tap, which is the failure this replaced.
+                float most = job.Kind == JobKind.Chop ? Resources.ChoppingGround.SearchRadius : 128f;
+                float bound = Mathf.Max(most, Effective(colony, Unbounded(job)));
 
-                // Never below what is actually in force. Clipping the shown value to the cap
-                // would misreport a job on a wide flag - and worse, the nudge buttons write
-                // from the displayed number, so pressing + on a clipped row would silently
-                // shrink the job to the cap.
-                // Displayed as it is, bounded as it must be. Clipping what is shown
-                // misreported a job on a wide flag; letting the bound follow what is shown
-                // gave up the cap entirely and let a reach be written past what the search
-                // honours. Showing the effective number makes the two agree.
-                // Never below what is in force. The nudge buttons write from the displayed
-                // value clamped to this bound, so a bound under it does not merely refuse to
-                // grow - one tap either way collapses the job to the bound. That shrank a
-                // haul job on a wide flag from two hundred metres to a hundred and twenty
-                // eight, with no way to nudge it back. For chopping the shown value is
-                // already held to the search radius, so raising the bound to meet it cannot
-                // let a reach past what the search honours.
-                Widgets.Number(radius, "How far it reaches", shown, 8f, Mathf.Max(shown, most), 4f,
+                Widgets.Number(radius, "How far it reaches", shown, 8f, bound, 4f,
                     value => $"{value:F0} m",
-                    value => Edit(host, j => j.WorkRadius = value));
+                    value =>
+                    {
+                        Edit(host, j => j.WorkRadius = value);
+
+                        // Redrawn, because the row reads the radius in force and an edit that
+                        // leaves it showing the old number reads as a control that did not
+                        // take.
+                        host.Refresh();
+                    });
             }
 
             if (column.TryRow(out Row remove))
@@ -342,6 +333,23 @@ namespace Kukolony.Gui
                 host.Refresh();
             });
         }
+
+        /// <summary>The radius this job works, whatever decided it.</summary>
+        private static float Effective(Colony colony, JobDefinition job) =>
+            job.Kind == JobKind.Chop
+                ? Jobs.Chop.ChopJob.Area(colony, job).Radius
+                : WorkArea.For(colony, job).Radius;
+
+        /// <summary>
+        ///     The same job with no reach of its own, for asking what its place reaches.
+        /// </summary>
+        /// <remarks>
+        ///     Only the kind and the place matter to that question, and a copy is used rather
+        ///     than clearing and restoring the real one - a screen that mutated the record to
+        ///     read from it would write that mutation to the colony if anything threw between.
+        /// </remarks>
+        private static JobDefinition Unbounded(JobDefinition job) =>
+            new JobDefinition { Kind = job.Kind, WorkArea = job.WorkArea };
 
         private JobDefinition Find(Colony colony) => colony.State.GetJobs().Find(j => j.Id == _id);
 
