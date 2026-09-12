@@ -2902,9 +2902,16 @@ namespace Kukolony.Debug
                     GameObject bound = ZNetScene.instance?.FindInstance(
                         new VillagerState(view.GetZDO()).Destination);
 
+                    // The caption follows the frame rather than asserting one. A trip can have
+                    // its destination cleared while the load is still held - the chest gone,
+                    // the chest full, the load bound elsewhere - and a picture of a villager
+                    // standing alone, captioned as being at the chest that asked for it, is a
+                    // lie told in exactly the case the picture exists to diagnose.
                     yield return BenchmarkUiScenario.PhotographAtWork("haul-delivering.png",
                         hand.transform.position,
-                        $"'{hand.DisplayName()}' is '{hand.Activity}' at the chest that asked for it",
+                        bound != null
+                            ? $"'{hand.DisplayName()}' is '{hand.Activity}' at the chest that asked for it"
+                            : $"'{hand.DisplayName()}' is '{hand.Activity}' with a load and nowhere bound",
                         bound != null ? bound.transform.position : (Vector3?)null);
                 }
             }
