@@ -2893,11 +2893,19 @@ namespace Kukolony.Debug
 
                 if (!caughtCarrying && new VillagerState(view.GetZDO()).Cargo.Length > 0)
                 {
+                    // Framed against the chest this trip is actually going to, resolved the same
+                    // way the setting-out shot resolves what it is walking to. Naming the wood
+                    // chest here was a picture that captioned itself "at the chest that asked
+                    // for it" while framing the one that did not: this check drops wood and
+                    // stone, and whichever the villager reaches first decides the trip.
                     caughtCarrying = true;
+                    GameObject bound = ZNetScene.instance?.FindInstance(
+                        new VillagerState(view.GetZDO()).Destination);
+
                     yield return BenchmarkUiScenario.PhotographAtWork("haul-delivering.png",
                         hand.transform.position,
                         $"'{hand.DisplayName()}' is '{hand.Activity}' at the chest that asked for it",
-                        woodChest.transform.position);
+                        bound != null ? bound.transform.position : (Vector3?)null);
                 }
             }
 
