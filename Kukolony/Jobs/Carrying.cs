@@ -84,7 +84,10 @@ namespace Kukolony.Jobs
 
             if (item.m_dropPrefab == null)
             {
-                Log.Warning($"[haul] '{drop.gameObject.name}' has no prefab to identify it; leaving it");
+                // Keyed by what it is, not by which one: a hundred anonymous logs of the same
+                // kind is one problem reported a hundred times, and the count is the useful part.
+                Chatter.Warn("[haul] unidentified " + drop.gameObject.name,
+                    $"'{drop.gameObject.name}' has no prefab to identify it; leaving it");
                 return TakeResult.Unavailable;
             }
 

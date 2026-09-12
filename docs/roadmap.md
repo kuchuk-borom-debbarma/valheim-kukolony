@@ -452,6 +452,31 @@ A villager can be given a queue of two placeholder jobs, runs them in order with
 counts, resumes mid-cycle across a reload, reports what it is doing throughout, and yields
 rather than starving when one has nothing to do.
 
+### Where this actually got to
+
+Delivered, and verified in the gate: the queue and its four outcomes; claims; resuming across
+a reload; the **Haul** job end to end — ground to container, container to container, caps, the
+dump flag and the rule that stops the shuffle; **work areas**; **energy, rest and sleeping**;
+and screens for all of it.
+
+Three things were pulled forward from *after the foundation* because the first job could not be
+honest without them, and two were not planned at all:
+
+- **Work areas** — a hauler confined to the colony radius is not the job that was asked for.
+  Built out of registered structures rather than as a new thing to place.
+- **Energy and rest** — the thing that finally makes beds matter.
+- **Long-distance travel and a rescue ladder**, which took most of the effort and is written up
+  in [off-screen-simulation.md](off-screen-simulation.md) and
+  [valheim-findings.md](valheim-findings.md). A villager used to stop existing at about a
+  hundred metres.
+
+**Still outstanding from this milestone:**
+
+- **Presets** — named job configurations, so a settlement of a hundred is not a hundred
+  configurations. Jobs are named and shared, which is most of the benefit; presets are the
+  copy-one-to-many part.
+- **Bulk assignment** from the colony screen. Assignment works per villager today.
+
 ---
 
 ## After the foundation

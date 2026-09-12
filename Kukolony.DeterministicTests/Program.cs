@@ -1,3 +1,4 @@
+using Kukolony.Core;
 using Kukolony.Colonies;
 using Kukolony.Jobs;
 using Kukolony.Villagers.Navigation;
@@ -58,6 +59,7 @@ static class Program
         Rescuing();
         Locomoting();
         Tiring();
+        Repeating();
 
         Console.WriteLine(_failed == 0
             ? $"RESULT: PASS ({_cases} cases)"
@@ -437,6 +439,51 @@ static class Program
         // recovered a hundredth of a point would start work, spend one action, and stop again.
         Case("control: the two thresholds genuinely differ, or a villager flickers",
             Energy.ShouldRest(21f, true, 20f, 60f) && !Energy.ShouldRest(21f, false, 20f, 60f));
+    }
+
+    /// <summary>Saying a thing that keeps being true, without saying it constantly.</summary>
+    static void Repeating()
+    {
+        Console.WriteLine("repeats");
+
+        Case("the first time something happens is said immediately",
+            Repeats.DueAgain(1000d));
+        Case("and the next one, a moment later, is not",
+            !Repeats.DueAgain(.1d));
+        Case("but silence earns the right to speak again",
+            Repeats.DueAgain(Repeats.QuietForSeconds));
+
+        Said("a single occurrence is said plainly", "nowhere to put Wood", 1, 30d,
+            "nowhere to put Wood");
+        Said("a pile of them is summarised", "nowhere to put Wood", 47, 120d,
+            "nowhere to put Wood (47 times in the last 2 minutes)");
+
+        // Spans as a person would say them, not as a machine would.
+        Spans("seconds stay seconds", 45d, "45 seconds");
+        Spans("a minute and a half rounds to minutes", 92d, "2 minutes");
+        Spans("one minute is singular", 60d, "60 seconds");
+        // Minutes hold on until well past the hour, on purpose: "60 minutes" is exactly true
+        // and "an hour" would be a rounding, which is the wrong trade in a line whose whole job
+        // is to say how long something has been going wrong.
+        Spans("an hour is still counted in minutes, which is exact", 3600d, "60 minutes");
+        Spans("and past that it counts hours", 7400d, "2 hours");
+        Spans("something instantaneous is a moment", .2d, "moment");
+
+        // Control: summarising must actually depend on the count, or it would be decoration.
+        Case("control: two occurrences read differently from one",
+            Repeats.Summarise("x", 2, 30d) != Repeats.Summarise("x", 1, 30d));
+    }
+
+    static void Said(string what, string message, int times, double span, string expected)
+    {
+        string actual = Repeats.Summarise(message, times, span);
+        Case($"{what} (got \"{actual}\")", actual == expected);
+    }
+
+    static void Spans(string what, double seconds, string expected)
+    {
+        string actual = Repeats.Span(seconds);
+        Case($"{what} (got \"{actual}\")", actual == expected);
     }
 
     static void Burst(string what, int consecutive, float expected)

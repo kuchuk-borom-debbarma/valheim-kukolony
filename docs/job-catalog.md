@@ -198,8 +198,15 @@ the way path failure is already latched.
 
 Repeats are **coalesced rather than repeated**: identical messages collapse into one line
 carrying a count and a span, so a settlement with no space reports *"nowhere to put Wood (47
-times in the last two minutes)"* rather than the same sentence at 20Hz. Built as a shared utility,
-because every job after this one will want it.
+times in the last 2 minutes)"* rather than the same sentence at 20Hz. Built as a shared utility
+(`Core/Chatter`), because every job after this one wants it.
+
+The first occurrence always goes out immediately — the moment something starts going wrong is
+when a player most wants to know. Callers say the situation has changed with `Forget`, so a
+problem that is fixed and recurs is news again rather than being folded into a tally that started
+minutes ago. Keys are chosen by the caller: one that names the villager keeps two villagers'
+complaints apart, one that does not deliberately merges them into *"the settlement has nowhere
+to put Wood"*.
 
 ## Done when
 

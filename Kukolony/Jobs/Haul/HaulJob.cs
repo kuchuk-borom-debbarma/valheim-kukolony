@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using Kukolony.Core;
+using Kukolony.Gui;
 using Kukolony.Colonies;
 using Kukolony.Villagers;
 using Kukolony.Villagers.Navigation;
@@ -119,6 +121,15 @@ namespace Kukolony.Jobs.Haul
                     // Nothing it holds has anywhere to go. Put one down each pass rather than
                     // carrying them about: the bag is the villager's working space, and a load
                     // of oddments in it is a villager that can no longer haul.
+                    //
+                    // Told to the player, because this is a settlement problem rather than a
+                    // villager one - somebody needs to build a chest that wants this, or mark one
+                    // as the dump - and keyed by the item so two kinds of oddment are two
+                    // complaints rather than one confusing tally.
+                    string stranded = Carrying.NameOf(carried[0]);
+                    Chatter.Say("nowhere to put " + stranded,
+                        $"Nowhere to put {ItemCatalogue.Label(stranded)}; it was left on the ground.");
+
                     context.Animation.Reach();
                     Carrying.PutDown(context.Bag.GetInventory(), carried[0], context.Villager.transform.position);
                     return JobOutcomes.Skipped(context.State, "nowhere to put this, so I left it", out activity);

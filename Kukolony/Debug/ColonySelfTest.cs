@@ -173,6 +173,7 @@ namespace Kukolony.Debug
             yield return CheckTidying(report, colony, origin);
             yield return CheckWorkAreas(report, colony, origin);
             yield return CheckResting(report, colony, origin);
+            CheckSayingThingsOnce(report);
             yield return CheckDistantTravel(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
@@ -818,6 +819,57 @@ namespace Kukolony.Debug
         ///         the control that says the measurement apparatus itself is sound.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     A problem that keeps being true is reported once, with a count.
+        /// </summary>
+        /// <remarks>
+        ///     Driven directly rather than by staging a settlement with nowhere to put things,
+        ///     because what is under test is the collapsing and not the hauling. Fifty calls is
+        ///     roughly two and a half seconds of one villager deciding, which is the rate this
+        ///     exists to survive.
+        /// </remarks>
+        private static void CheckSayingThingsOnce(TestReport report)
+        {
+            System.Action<string> previous = Core.Report.Listener;
+            int said = 0;
+
+            try
+            {
+                Core.Report.Listener = _ => said++;
+                Core.Chatter.Clear();
+
+                for (int i = 0; i < 50; i++) Core.Chatter.Say("same", "the settlement has nowhere to put Wood");
+
+                report.Check(said == 1,
+                    "a problem that keeps being true is reported once rather than fifty times",
+                    $"said={said}");
+
+                // Control: collapsing must be per problem, or two different faults would hide
+                // each other and a settlement would report only whichever happened first.
+                said = 0;
+                Core.Chatter.Say("different", "the settlement has nowhere to put Stone");
+
+                report.Check(said == 1,
+                    "control: a different problem is still reported",
+                    $"said={said}");
+
+                // Control: once the situation changes, the next occurrence is news again rather
+                // than being counted into a tally that started minutes ago.
+                said = 0;
+                Core.Chatter.Forget("same");
+                Core.Chatter.Say("same", "the settlement has nowhere to put Wood");
+
+                report.Check(said == 1,
+                    "control: a problem that went away and came back is reported again",
+                    $"said={said}");
+            }
+            finally
+            {
+                Core.Report.Listener = previous;
+                Core.Chatter.Clear();
+            }
+        }
+
         /// <summary>
         ///     A tired villager stops, goes to bed, sleeps, and gets up again.
         /// </summary>
