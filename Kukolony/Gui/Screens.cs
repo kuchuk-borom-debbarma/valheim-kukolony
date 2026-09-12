@@ -71,6 +71,13 @@ namespace Kukolony.Gui
                 Widgets.Button(structuresRow, "Manage", 160f, () => host.Push(new StructureListScreen()));
             }
 
+            if (column.TryRow(out Row jobsRow))
+            {
+                Widgets.Caption(jobsRow, "Jobs");
+                Widgets.Caption(jobsRow, colony.State.GetJobs().Count.ToString(), 80f);
+                Widgets.Button(jobsRow, "Manage", 160f, () => host.Push(new JobListScreen()));
+            }
+
             // Registering what the player was looking at when the screen opened. Offered only
             // when there is something to offer: a row reading "Register nothing" would be
             // worse than the subtitle already saying they were looking at nothing.

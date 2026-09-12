@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Kukolony.Colonies;
 using Kukolony.Core;
+using Kukolony.Jobs;
 using Kukolony.Villagers;
 using UnityEngine;
 
@@ -142,6 +143,27 @@ namespace Kukolony.Gui
                 Widgets.Choice(bedRow, "Sleeps in", bed == null ? string.Empty : bed.Name,
                     () => host.Push(new PickerScreen("Which bed", filter => FreeBeds(colony, bed, filter),
                         bed == null ? null : new[] { bed.PersistentId }, false, chosen => AssignBed(colony, chosen))));
+            }
+
+            // The queue is a multi-select whose order is kept, because a queue IS an order: a
+            // villager works the first job its repeats allow, then the next. Storing it on the
+            // villager rather than the colony means reassigning one person does not rewrite the
+            // settlement's record and invalidate every cached answer built from it.
+            List<string> queue = new VillagerState(zdo).GetQueue();
+            if (column.TryRow(out Row jobs))
+            {
+                Widgets.Choice(jobs, "Works at", DescribeQueue(colony, queue),
+                    () => host.Push(new PickerScreen("Which jobs, in order",
+                        filter => JobOptions(colony, filter), queue, true,
+                        chosen =>
+                        {
+                            zdo.SetOwner(ZDOMan.GetSessionID());
+                            new VillagerState(zdo).SetQueue(chosen);
+                            Report.Say(chosen.Count == 0
+                                ? "Given nothing to do."
+                                : $"Assigned {chosen.Count} job(s).");
+                            host.Refresh();
+                        })), 260f);
             }
 
             BuildEquipment(host, column, zdo);
@@ -339,6 +361,38 @@ namespace Kukolony.Gui
                 if (filter.Length > 0 &&
                     bed.Name.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
                 options.Add(new PickerScreen.Option(bed.PersistentId, bed.Name));
+            }
+
+            return options;
+        }
+
+        /// <summary>What a villager's queue reads as on one line.</summary>
+        /// <remarks>
+        ///     Names the first and counts the rest. A queue of five reads as "Haul +4" rather
+        ///     than as a list that would not fit and would be truncated somewhere arbitrary.
+        /// </remarks>
+        private static string DescribeQueue(Colony colony, List<string> queue)
+        {
+            if (queue.Count == 0) return "nothing";
+
+            JobDefinition first = colony.State.GetJobs().Find(j => j.Id == queue[0]);
+            string lead = first != null ? first.Name : "a job that is gone";
+            return queue.Count == 1 ? lead : $"{lead} +{queue.Count - 1}";
+        }
+
+        private static List<PickerScreen.Option> JobOptions(Colony colony, string filter)
+        {
+            List<PickerScreen.Option> options = new List<PickerScreen.Option>();
+            foreach (JobDefinition job in colony.State.GetJobs())
+            {
+                if (!string.IsNullOrEmpty(filter) &&
+                    job.Name.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                options.Add(new PickerScreen.Option(job.Id,
+                    $"{job.Name} - {JobListScreen.Where(colony, job)}"));
             }
 
             return options;

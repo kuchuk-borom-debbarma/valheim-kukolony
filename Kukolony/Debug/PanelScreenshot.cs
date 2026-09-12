@@ -4,6 +4,7 @@ using System.IO;
 using Kukolony.Colonies;
 using Kukolony.Core;
 using Kukolony.Gui;
+using Kukolony.Jobs;
 using Kukolony.Villagers;
 using UnityEngine;
 
@@ -161,6 +162,29 @@ namespace Kukolony.Debug
                 Log.Error("[Screenshot] no processing structure to photograph settings on");
                 _captureFailed = true;
             }
+
+            // Jobs, with one pointed at a work area so the screen shows a configured job
+            // rather than an empty one. A screenshot must frame its subject.
+            if (subject != null)
+            {
+                List<JobDefinition> jobs = colony.State.GetJobs();
+                jobs.Add(new JobDefinition
+                {
+                    Id = "screenshot-haul", Name = "Haul to the shed", Kind = JobKind.Haul,
+                    Repeat = 4, Items = new List<string> { "Wood" },
+                    WorkArea = subject.PersistentId, WorkRadius = 24f
+                });
+                colony.State.SetJobs(jobs);
+            }
+
+            screen.Root(new ColonyHomeScreen());
+            screen.Push(new JobListScreen());
+            yield return new WaitForSecondsRealtime(.4f);
+            yield return Capture("colony-screen-jobs.png");
+
+            screen.Push(new JobDetailScreen("screenshot-haul"));
+            yield return new WaitForSecondsRealtime(.4f);
+            yield return Capture("colony-screen-job.png");
 
             screen.Root(new ColonyHomeScreen());
             screen.Push(new VillagerListScreen());

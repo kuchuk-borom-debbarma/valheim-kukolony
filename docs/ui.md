@@ -118,6 +118,30 @@ Both processing lists are read from the **prefab**, so a station that is nowhere
 can still be configured, and a station with no fuel item shows no fuel row at all rather than an
 empty one. A screen must not offer a setting the structure ignores.
 
+## The job screens
+
+Jobs belong to the **colony** — named, shared, and changed only when a player edits them. The
+queue lives on the **villager**, because that changes per person and must not rewrite the
+settlement's record every time somebody is reassigned.
+
+- **Jobs** — every job the settlement knows, what it does, and where it happens.
+- **A job** — its name, how many times it repeats before the queue advances, which items it
+  handles, whether it tidies containers, whether it fills the bag before setting out, and
+  **where it works**.
+
+"Where it works" offers the whole settlement first, then anything registered to the colony. That
+is what a work area is: a registered structure used as a centre, plus a radius. There is nothing
+new to place, and a job pointed at a structure that has since been destroyed reads *"a place that
+is gone"* rather than silently ranging over the whole settlement without saying why.
+
+Deleting a job leaves villagers' queues alone. `QueueRunner` already bypasses a job that is no
+longer defined, so a deleted job strands nobody, and rewriting every villager to remove one entry
+would be a great many ZDO writes to achieve what the runner does for nothing.
+
+A villager's **Works at** row is a multi-select whose order is kept, because a queue *is* an
+order. It reads as the first job plus a count — "Haul +4" — rather than a list that would not fit
+and would be truncated somewhere arbitrary.
+
 ## The villager screens
 
 A villagers list off the colony screen, and a screen per villager: name, what they are doing,
