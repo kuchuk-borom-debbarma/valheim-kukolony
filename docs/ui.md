@@ -197,8 +197,23 @@ for, and one that only appears once you are standing in it is no help at all. A 
 far away to be loaded says so when clicked rather than opening a screen built on state it cannot
 read.
 
-Settlements and villagers use different pin icons, and there is a check for that: two kinds of
-thing that look identical on a map are one kind of thing as far as a player is concerned.
+**Work areas are pinned too** — but only the structures a job is actually pointed at, named after
+the job that sends people there. Every registered chest on the map would be noise; "Quarry —
+Quarry haul" explains why anybody is standing in it. Point a job somewhere and the pin appears;
+stop, and it goes.
+
+**Icon says what a thing is; colour says whose it is.** Every pin a settlement owns — itself, its
+work areas and its people — shares one colour, hashed from the settlement's name, so you can see
+which village an outpost belongs to without reading a label. Two signals that do not interfere.
+
+The colour is hashed with `GetStableHashCode` rather than `string.GetHashCode`, which is not
+guaranteed to agree between processes — a colour that changed when you reloaded would be worse
+than none. Saturation and brightness are fixed rather than hashed, because the point is telling
+settlements apart on a dark map, and a hash left free would eventually choose something
+unreadable.
+
+There is a check that a settlement and a villager do not share an icon: two kinds of thing that
+look identical on a map are one kind of thing as far as a player is concerned.
 
 The game already does exactly this for other players — a pin whose position is rewritten as they
 move, with `m_pinUpdateRequired` set so the map redraws — so villager pins need no patching, only

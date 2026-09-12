@@ -969,6 +969,45 @@ namespace Kukolony.Debug
                 "control: a settlement and a villager do not look the same on the map",
                 $"settlement={home?.m_type} villager={pin?.m_type}");
 
+            // A job pointed at a structure puts that structure on the map, named after the job
+            // that sends people there.
+            GameObject post = Spawn("piece_chest_wood", colony.transform.position + new Vector3(9f, 0f, 0f));
+            yield return new WaitForSecondsRealtime(.3f);
+            StructureRecord marked = post == null ? null : Register(colony, post, "Quarry");
+
+            if (marked != null)
+            {
+                colony.State.SetJobs(new List<JobDefinition>
+                {
+                    new JobDefinition
+                    {
+                        Id = "pin-job", Name = "Quarry haul", Kind = JobKind.Haul,
+                        WorkArea = marked.PersistentId
+                    }
+                });
+
+                yield return new WaitForSecondsRealtime(2f);
+
+                Minimap.PinData area = FindPin("Quarry");
+                report.Check(area != null, "a work area a job is pointed at is shown on the map",
+                    $"looking for a pin named like 'Quarry'");
+
+                report.Check(area == null || area.m_name.Contains("Quarry haul"),
+                    "control: the work area says which job sends people there",
+                    $"label='{area?.m_name}'");
+
+                // Only the ones a job names. Every registered chest on the map would be noise.
+                colony.State.SetJobs(new List<JobDefinition>());
+                yield return new WaitForSecondsRealtime(2f);
+
+                report.Check(FindPin("Quarry") == null,
+                    "control: a structure no job works at is not a work area, and is not pinned",
+                    $"stillPinned={(FindPin("Quarry") != null)}");
+
+                colony.RemoveStructure(marked.Id);
+                Release(post);
+            }
+
             report.Check(pin == null || !pin.m_save,
                 "control: villager pins are never written into the player's saved map",
                 $"save={(pin == null ? "no pin" : pin.m_save.ToString())}");
