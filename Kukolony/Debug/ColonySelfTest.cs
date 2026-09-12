@@ -201,6 +201,7 @@ namespace Kukolony.Debug
             yield return CheckWalkingUpToAVillager(report, colony);
             yield return ClearTheGround(colony, "CheckWalkingUpToAVillager");
             yield return CheckBulkAssignment(report, colony);
+            yield return ClearTheGround(colony, "CheckBulkAssignment");
             yield return CheckDistantTravel(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
@@ -409,7 +410,6 @@ namespace Kukolony.Debug
             // bulk - and it kept that queue, into the save, for a later build to resume. The
             // remark below says there is no work for it to do; this is what makes that true.
             persisted.SetQueue(new List<string>());
-            persisted.ResetJob();
 
             // Fill the bag here rather than earlier so nothing can spend it before the save.
             // There is no work for a villager to do yet, so it simply idles until the save.
@@ -2653,9 +2653,8 @@ namespace Kukolony.Debug
             ZDO primaryRecord = primary.IsNone() ? null : ZDOMan.instance?.GetZDO(primary);
             if (primaryRecord != null)
             {
-                VillagerState primaryState = new VillagerState(primaryRecord);
-                primaryState.SetQueue(new List<string>());
-                primaryState.ResetJob();
+                // SetQueue resets position, attempt and the job itself, so that is all of it.
+                new VillagerState(primaryRecord).SetQueue(new List<string>());
             }
 
             colony.State.SetJobs(new List<JobDefinition>());
@@ -2885,6 +2884,13 @@ namespace Kukolony.Debug
                         bound != null ? bound.transform.position : (Vector3?)null);
                 }
 
+                // Asked again, because the capture above yields several frames and the villager
+                // can be unloaded inside them. A destroyed MonoBehaviour still hands back its
+                // stale ZDO rather than throwing, so the cargo test passes and the two lines
+                // below - its position and its name - are what would throw, killing the
+                // coroutine and taking the whole run with it.
+                if (hand == null || ZNetScene.instance?.FindInstance(who) == null) break;
+
                 if (!caughtCarrying && new VillagerState(view.GetZDO()).Cargo.Length > 0)
                 {
                     caughtCarrying = true;
@@ -2903,30 +2909,34 @@ namespace Kukolony.Debug
             // so a missed one ends the run with "missing screenshot" long after the hauling it
             // was photographing, which is a failure message pointing nowhere near its cause.
             // Catching the moment is worth trying for and must not be worth failing for.
-            bool stillHere = hand != null && ZNetScene.instance?.FindInstance(who) != null;
-            Vector3 subject = stillHere ? hand.transform.position : woodChest.transform.position;
-            string whoOrWhat = stillHere
-                ? $"'{hand.DisplayName()}', doing '{hand.Activity}'"
-                : "the villager is no longer loaded";
-            string holdings = $"wood chest holds {inWood}, stone chest holds {inStone}";
+            // Asked fresh for each one. These run back to back and each costs several frames,
+            // so a villager still on its feet has moved on by the third - a position and an
+            // activity read once would aim the last photograph where the subject used to be and
+            // caption it with what it used to be doing.
+            bool Loaded() => hand != null && ZNetScene.instance?.FindInstance(who) != null;
+            Vector3 Subject() => Loaded() ? hand.transform.position : woodChest.transform.position;
+            string Caption(string why) => Loaded()
+                ? $"{why}'{hand.DisplayName()}', doing '{hand.Activity}'; " +
+                  $"wood chest holds {inWood}, stone chest holds {inStone}"
+                : $"{why}the villager is no longer loaded; " +
+                  $"wood chest holds {inWood}, stone chest holds {inStone}";
 
             if (!caughtFetching)
             {
-                yield return BenchmarkUiScenario.PhotographAtWork("haul-fetching.png", subject,
-                    $"no setting-out moment was sampled; {whoOrWhat}, {holdings}",
-                    woodChest.transform.position);
+                yield return BenchmarkUiScenario.PhotographAtWork("haul-fetching.png", Subject(),
+                    Caption("no setting-out moment was sampled; "), woodChest.transform.position);
             }
 
             if (!caughtCarrying)
             {
-                yield return BenchmarkUiScenario.PhotographAtWork("haul-delivering.png", subject,
-                    $"no carrying moment was sampled; {whoOrWhat}, {holdings}",
-                    woodChest.transform.position);
+                yield return BenchmarkUiScenario.PhotographAtWork("haul-delivering.png", Subject(),
+                    Caption("no carrying moment was sampled; "), woodChest.transform.position);
             }
 
-            yield return BenchmarkUiScenario.PhotographAtWork("haul-settled.png", subject,
-                $"after the hauling: {whoOrWhat}; {holdings}",
-                woodChest.transform.position);
+            // Framed against the stone chest, so a settled shot taken with nobody to photograph
+            // has two distinct points and shows both chests rather than collapsing onto one.
+            yield return BenchmarkUiScenario.PhotographAtWork("haul-settled.png", Subject(),
+                Caption("after the hauling: "), stoneChest.transform.position);
 
             string did = string.Join(" > ", story.ToArray());
 
