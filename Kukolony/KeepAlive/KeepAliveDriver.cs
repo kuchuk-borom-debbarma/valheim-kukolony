@@ -123,6 +123,7 @@ namespace Kukolony.KeepAlive
             // Everything chopping remembers is per-world: prefab hashes are per-session once
             // mods can register their own, a colony's identity does not survive a world, and
             // "my axe cannot cut that tree" is about a tree that no longer exists.
+            Colonies.Stock.Clear();
             Resources.Choppable.Clear();
             Resources.ChoppingGround.Clear();
             Jobs.Chop.ChopJob.Clear();

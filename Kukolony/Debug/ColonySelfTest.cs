@@ -5148,6 +5148,9 @@ namespace Kukolony.Debug
             GameObject tree = Spawn(species, site + new Vector3(6f, 0f, 0f));
             yield return new WaitForSecondsRealtime(.4f);
 
+            // The scan caches for five seconds; the tree was planted a moment ago.
+            ChoppingGround.ResetForTest();
+
             report.Check(tree != null, "control: there is a tree to fell", $"species={species}");
             if (tree == null)
             {
@@ -5435,17 +5438,35 @@ namespace Kukolony.Debug
 
             // Leave-standing, which is about the place rather than the store. Planted as a
             // small stand so the threshold has something to count.
+            //
+            // A claimed flag goes in first, because the scan is bounded per anchor and this
+            // site is beyond the config radius from the hearth. Without it the count is
+            // always zero, the positive assertion passes vacuously, and the control that
+            // says "a lower threshold is still work" fails for a reason that has nothing to
+            // do with the rule.
+            GameObject standFlag = Spawn(WorkFlagPrefab.PrefabName, site);
+            yield return new WaitForSecondsRealtime(.3f);
+            WorkFlag standAnchor = standFlag != null ? standFlag.GetComponent<WorkFlag>() : null;
+            bool anchored = standAnchor != null &&
+                            ColonyOperations.AssignFlag(colony.Id, standAnchor) == RegisterOutcome.Registered;
+            report.Check(anchored,
+                "control: the stand is inside the Kolony's reach, so the scan can see it");
+
             string species = Choppable.SampleTree(0, 0);
             List<GameObject> stand = new List<GameObject>();
             if (!string.IsNullOrEmpty(species))
             {
                 for (int i = 0; i < 3; i++)
                 {
-                    stand.Add(Spawn(species, site + new Vector3(i * 5f, 0f, 0f)));
+                    stand.Add(Spawn(species, site + new Vector3(8f + i * 5f, 0f, 0f)));
                 }
             }
 
             yield return new WaitForSecondsRealtime(.5f);
+
+            // The scan caches for five seconds, which is right for a game and wrong for a
+            // check that just planted its subject.
+            ChoppingGround.ResetForTest();
 
             int planted = Nearby<TreeBase>(site, 24f);
             report.Check(planted >= 3, "control: there is a stand of trees to thin",
@@ -5469,7 +5490,10 @@ namespace Kukolony.Debug
             }
 
             foreach (GameObject tree in stand) Release(tree);
+            if (standAnchor != null) colony.RemoveStructure(standAnchor.Id);
+            Release(standFlag);
             SweepFelling(site, 24f);
+            ChoppingGround.ResetForTest();
             yield return new WaitForSecondsRealtime(.2f);
         }
 

@@ -81,7 +81,7 @@ namespace Kukolony.Villagers
         ///         frame and the next reads as a glitch even when the new facing is right.
         ///     </para>
         /// </remarks>
-        internal static void FaceTowards(MonsterAI ai, Vector3 target)
+        internal static void FaceTowards(MonsterAI ai, Vector3 target, float deltaTime)
         {
             if (ai == null) return;
 
@@ -89,13 +89,18 @@ namespace Kukolony.Villagers
             bearing.y = 0f;
             if (bearing.sqrMagnitude < .01f) return;
 
-            // Stepped by the AI's own fixed interval, not by the render frame. This is called
-            // from inside the AI update, which is driven at a fixed rate, so Time.deltaTime
-            // here is the frame time - and a turn scaled by it is three times faster at 30fps
-            // than at 144. MoveTowards documents the same trap for its own step.
+            // Stepped by the AI's own interval, handed down from the tick.
+            //
+            // Neither of the obvious clocks is that interval. Time.deltaTime is the render
+            // frame, so the turn would be three times faster at 30fps than at 144; and
+            // Time.fixedDeltaTime is the physics step, which this project has already been
+            // caught by once - the AI runs at 0.05s while physics runs at 0.02, so anything
+            // scaled by it moves at forty per cent of the rate its own constant claims.
+            float step = deltaTime > 0f ? deltaTime : Time.deltaTime;
+
             ai.transform.rotation = Quaternion.RotateTowards(
                 ai.transform.rotation, Quaternion.LookRotation(bearing.normalized),
-                TurnDegreesPerSecond * Time.fixedDeltaTime);
+                TurnDegreesPerSecond * step);
         }
 
         /// <summary>How fast a standing villager turns. Brisk, but visibly a turn.</summary>

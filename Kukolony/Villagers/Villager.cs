@@ -224,7 +224,8 @@ namespace Kukolony.Villagers
         internal string Explain(Vector3 target) => VillagerMovement.Explain(_ai, target);
 
         /// <summary>Turns to face something, for work done standing still.</summary>
-        internal void FaceTowards(Vector3 target) => VillagerMovement.FaceTowards(_ai, target);
+        internal void FaceTowards(Vector3 target, float deltaTime) =>
+            VillagerMovement.FaceTowards(_ai, target, deltaTime);
 
         internal bool TryTakeOver(float deltaTime)
         {
@@ -271,7 +272,7 @@ namespace Kukolony.Villagers
                 return true;
             }
 
-            if (TryWork()) return true;
+            if (TryWork(deltaTime)) return true;
 
             // A villager whose hearth was destroyed has nowhere to belong. Walking to
             // where the hearth used to be would look like ordinary behaviour, so it stops
@@ -606,7 +607,7 @@ namespace Kukolony.Villagers
         ///         visible steps.
         ///     </para>
         /// </remarks>
-        private bool TryWork()
+        private bool TryWork(float deltaTime)
         {
             Colonies.Colony colony = Colonies.Colony.FindFor(_nview.GetZDO());
             if (colony == null) return false;
@@ -627,13 +628,23 @@ namespace Kukolony.Villagers
 
             List<Jobs.JobDefinition> jobs = colony.State.GetJobs();
             Jobs.JobDefinition job = Jobs.QueueRunner.Current(state, jobs);
+
+            // A tool is held while the work is being done. Only the chopping job writes the
+            // visible right hand, so anything else being current - a haul entry, or a chop
+            // job the player deleted - has to put the axe away, or the villager carries one
+            // for the rest of the session with nothing left to write the slot again.
+            if (job == null || job.Kind != Jobs.JobKind.Chop)
+            {
+                Jobs.Chop.ChopJob.PutAxeAway(_visEquipment);
+            }
+
             if (job == null)
             {
                 _working = false;
                 return false;
             }
 
-            Jobs.JobResult result = Run(colony, job, state, out string doing);
+            Jobs.JobResult result = Run(colony, job, state, deltaTime, out string doing);
             Jobs.QueueRunner.Apply(state, jobs, result);
 
             // Work is paid for when something is actually decided - a finished trip, or a failed
@@ -654,7 +665,7 @@ namespace Kukolony.Villagers
         }
 
         private Jobs.JobResult Run(Colonies.Colony colony, Jobs.JobDefinition job,
-            VillagerState state, out string doing)
+            VillagerState state, float deltaTime, out string doing)
         {
             switch (job.Kind)
             {
@@ -685,7 +696,8 @@ namespace Kukolony.Villagers
                         // see it holding. Nothing is placed in the creature's own inventory:
                         // the routine that equips a creature's best weapon on load would strip
                         // it, so the bag is the truth and this is the reflection.
-                        Equipment = _visEquipment
+                        Equipment = _visEquipment,
+                        DeltaTime = deltaTime
                     }, out doing);
 
                 default:

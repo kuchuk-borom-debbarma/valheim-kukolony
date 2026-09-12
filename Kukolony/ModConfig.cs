@@ -215,8 +215,10 @@ namespace Kukolony
                 96f,
                 new ConfigDescription(
                     "How far from a hearth to look for trees and other gatherable world objects. "
-                    + "This bounds the scan itself; a gathering job's own search radius narrows it "
-                    + "further, and cannot reach past this.",
+                    + "A Kolony Flag also anchors the search, out to its own reach rather than "
+                    + "this whole distance, which is how an outpost beyond this radius still has "
+                    + "work. This bounds the scan itself; a gathering job's own search radius "
+                    + "narrows it further, and cannot reach past this.",
                     new AcceptableValueRange<float>(16f, 256f)));
 
             ClaimsEnabled = config.Bind(

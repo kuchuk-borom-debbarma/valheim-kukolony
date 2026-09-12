@@ -48,6 +48,16 @@ namespace Kukolony.Resources
         internal static void Clear() => Caches.Clear();
 
         /// <summary>
+        ///     Forces the next ask to rescan.
+        /// </summary>
+        /// <remarks>
+        ///     For checks that plant trees and then ask about them. The refresh interval is
+        ///     tuned for a running game, where five seconds of staleness is invisible; in a
+        ///     check it is the difference between measuring the rule and measuring the cache.
+        /// </remarks>
+        internal static void ResetForTest() => Caches.Clear();
+
+        /// <summary>
         ///     Everything loaded and choppable that this colony can see, as ZDOIDs.
         /// </summary>
         /// <remarks>
@@ -94,13 +104,23 @@ namespace Kukolony.Resources
             // the search the same way the hearth does.
             float bound = ModConfig.ResourceScanRadius.Value;
 
+            // Each anchor carries its own reach, as (x, y, z, radius). The hearth gets the
+            // config distance; a flag gets its own radius, capped by the config, because a
+            // flag's radius is already the answer to "how far does this outpost reach" - the
+            // player set it, the job's work area uses it, and the map draws it. Giving every
+            // flag the full config distance instead would make a settlement of a dozen
+            // outposts scan a far larger candidate set than the setting appears to allow.
             Anchors.Clear();
-            Anchors.Add(colony.transform.position);
-            foreach (Vector4 flag in Colonies.KolonyReach.FlagAreas(colony))
+            Vector3 hearth = colony.transform.position;
+            Anchors.Add(new Vector4(hearth.x, hearth.y, hearth.z, bound));
+
+            IReadOnlyList<Vector4> flags = Colonies.KolonyReach.FlagAreas(colony);
+            for (int i = 0; i < flags.Count; i++)
             {
-                // Copied out immediately: that list is a shared scratch buffer, rebuilt on
-                // the next ask by anyone.
-                Anchors.Add(new Vector3(flag.x, flag.y, flag.z));
+                // Copied out immediately, and by index: that list is a shared scratch buffer
+                // rebuilt on the next ask by anyone.
+                Vector4 flag = flags[i];
+                Anchors.Add(new Vector4(flag.x, flag.y, flag.z, Mathf.Min(bound, flag.w)));
             }
 
             foreach (ZNetView view in ZNetScene.instance.m_instances.Values)
@@ -109,7 +129,7 @@ namespace Kukolony.Resources
 
                 ZDO zdo = view.GetZDO();
                 if (Choppable.Of(zdo.GetPrefab()) == ChopKind.None) continue;
-                if (!WithinAnyAnchor(zdo.GetPosition(), bound)) continue;
+                if (!WithinAnyAnchor(zdo.GetPosition())) continue;
 
                 cache.Found.Add(zdo.m_uid);
             }
@@ -117,14 +137,21 @@ namespace Kukolony.Resources
             return cache.Found;
         }
 
-        /// <summary>Reused so the per-colony scan allocates nothing per refresh.</summary>
-        private static readonly List<Vector3> Anchors = new List<Vector3>();
+        /// <summary>
+        ///     Where this colony works and how far, reused across refreshes so the scan does
+        ///     not allocate a list per colony per five seconds.
+        /// </summary>
+        private static readonly List<Vector4> Anchors = new List<Vector4>();
 
-        private static bool WithinAnyAnchor(Vector3 at, float bound)
+        private static bool WithinAnyAnchor(Vector3 at)
         {
-            foreach (Vector3 anchor in Anchors)
+            for (int i = 0; i < Anchors.Count; i++)
             {
-                if (Utils.DistanceXZ(at, anchor) <= bound) return true;
+                Vector4 anchor = Anchors[i];
+                if (Utils.DistanceXZ(at, new Vector3(anchor.x, anchor.y, anchor.z)) <= anchor.w)
+                {
+                    return true;
+                }
             }
 
             return false;

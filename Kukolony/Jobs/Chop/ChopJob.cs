@@ -24,6 +24,16 @@ namespace Kukolony.Jobs.Chop
         ///     player can see it holding.
         /// </summary>
         internal VisEquipment Equipment;
+
+        /// <summary>
+        ///     The AI tick's own interval, for anything that moves by rate.
+        /// </summary>
+        /// <remarks>
+        ///     Handed down rather than read from a clock, because neither available clock is
+        ///     this interval: the render frame varies, and the physics step is two fifths of
+        ///     it - a trap this project has already paid for once.
+        /// </remarks>
+        internal float DeltaTime;
     }
 
     /// <summary>
@@ -158,6 +168,20 @@ namespace Kukolony.Jobs.Chop
             Settled.Remove(villager);
         }
 
+        /// <summary>
+        ///     Puts the axe away, for a villager that is no longer chopping.
+        /// </summary>
+        /// <remarks>
+        ///     The right hand is written only while a chop job is the current queue entry, so
+        ///     without this a villager carries a visible axe through every haul that follows -
+        ///     and for ever if its chop job is deleted, because nothing would write the slot
+        ///     again and the slot is ZDO-backed. A tool is held while the work is being done.
+        /// </remarks>
+        internal static void PutAxeAway(VisEquipment equipment)
+        {
+            if (equipment != null) VillagerWardrobe.Set(equipment, WearSlot.RightHand, null);
+        }
+
         internal static JobResult Tick(ChopContext context, out string activity)
         {
             VillagerState state = context.State;
@@ -171,12 +195,13 @@ namespace Kukolony.Jobs.Chop
 
             ItemDrop.ItemData axe = Axe(context);
 
-            // Asked only where the table reads it, because answering costs a walk of every
-            // registered container: the stopping rule is consulted when choosing what to do
-            // next, not between blows, and computing it every tick for every chopper is the
-            // per-villager-per-tick cost the scan cache exists to avoid.
-            bool choosing = (ChopState)state.WorkState == ChopState.Choosing;
-            bool enough = choosing && Enough(context);
+            // Asked every tick, and cheap because the answer is cached per colony for a
+            // moment rather than recounted. Gating it on the recorded state instead looked
+            // like a saving and was a bug: the table reaches its choosing arm by falling
+            // through from Approaching when the target is gone, and from an unrecognised
+            // state - so a villager whose tree was felled by somebody else was told the
+            // store was empty and went and felled another one past the stopping rule.
+            bool enough = Enough(context);
 
             ChopFacts facts = new ChopFacts(
                 hasTool: axe != null,
@@ -247,7 +272,13 @@ namespace Kukolony.Jobs.Chop
             // is left here" is a fact about the place rather than about who is asking, so it
             // cannot be folded into the same pass that applies this villager's claims and
             // refusals - two villagers would each see a thin wood as untouched.
-            int standing = StandingIn(context.Colony, area);
+            // Only asked when the answer can matter. Counting is a second walk of the
+            // candidate list with a ZDO lookup per entry, and the default job leaves nothing
+            // standing - so for most jobs this was hundreds of lookups per choose, thrown
+            // away, in the loop the lazy stopping rule above exists to keep cheap.
+            int standing = context.Job != null && context.Job.LeaveStanding > 0
+                ? StandingIn(context.Colony, area)
+                : 0;
 
             // The anti-clear-cut rule removes standing trees from candidacy rather than
             // ending the search. Vetoing the winner instead meant a protected tree four
@@ -366,7 +397,7 @@ namespace Kukolony.Jobs.Chop
             // a villager that arrived and then stood chopping would swing at whatever bearing
             // it happened to stop on. Kept up between blows rather than only at the moment of
             // one, so a trunk that rolls does not leave the villager chopping past it.
-            context.Villager.FaceTowards(target.transform.position);
+            context.Villager.FaceTowards(target.transform.position, context.DeltaTime);
 
             // The walk is over. Said plainly so its stall clock stops running against a
             // villager that is standing still on purpose - which is what made the working
