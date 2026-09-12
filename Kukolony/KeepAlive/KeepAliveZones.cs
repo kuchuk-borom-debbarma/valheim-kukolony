@@ -65,6 +65,16 @@ namespace Kukolony.KeepAlive
             // should mean cleared, and the next reader of these buffers need not wonder.
             foreach (List<Vector2s> buffer in CircleBuffers) buffer.Clear();
             CircleAnchors.Clear();
+
+            // And the reporting, which is the part that actually leaked: latched at a
+            // dead world's state, entering a capped world from a capped world logged no
+            // warning at all - the transition never happened - so the "never truncate
+            // silently" rule was broken by the very latch that exists to keep it. The
+            // other way round it announced being back under a cap belonging to a world
+            // that no longer exists. DroppedAnchors likewise answered for the dead world
+            // until the next rebuild, and the self-test reads it.
+            _reportedCapped = false;
+            _dropped = 0;
         }
 
         /// <summary>

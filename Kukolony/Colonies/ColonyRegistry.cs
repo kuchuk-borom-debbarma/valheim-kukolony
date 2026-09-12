@@ -113,8 +113,21 @@ namespace Kukolony.Colonies
             _nextSweep = 0f;
         }
 
-        /// <summary>Whether a sweep is in flight, for screens that want to say "looking".</summary>
-        internal static bool Sweeping => _sweeping;
+        /// <summary>
+        ///     Whether a sweep is in flight, for screens that want to say "looking".
+        /// </summary>
+        /// <remarks>
+        ///     Answered from a heartbeat rather than a bare flag, because a coroutine can
+        ///     stop existing without unwinding: Unity abandons a host's iterators when the
+        ///     host is destroyed, and <c>finally</c> never runs. The flag screen rebuilds
+        ///     itself - destroying the very object it hosted its sweep on - every time
+        ///     Jotunn raises its GUI-available event, so this is a thing that happens, not
+        ///     a thing that could. A flag alone would then read "sweeping" with nothing
+        ///     walking, for good: the screen says it is looking forever, and the guard in
+        ///     <see cref="Scan" /> refuses every future sweep, freezing the registry.
+        /// </remarks>
+        internal static bool Sweeping =>
+            _sweeping && Time.time - _heartbeat <= SweepGrace;
 
         /// <summary>
         ///     Bumped when a sweep lands with anything a screen would draw differently, for
@@ -124,21 +137,22 @@ namespace Kukolony.Colonies
         /// </summary>
         internal static int Revision { get; private set; }
 
-        /// <summary>
-        ///     How many sweeps have completed. Bumped even by a sweep that found nothing
-        ///     new, so a screen that said it was looking can tell when looking is over -
-        ///     <see cref="Revision" /> alone left "Looking for Kolonies..." on screen for
-        ///     good in an empty world, where every sweep lands with the same nothing.
-        /// </summary>
-        internal static int Sweeps { get; private set; }
-
         private static bool _sweeping;
         private static float _nextSweep;
+        private static float _heartbeat;
         private static int _generation;
         private static long _stamp;
 
         /// <summary>How stale the registry may go between sweeps.</summary>
         private const float SweepSeconds = 10f;
+
+        /// <summary>
+        ///     How long a sweep may go without a heartbeat before it is presumed dead. A
+        ///     living sweep touches it every frame, so this only has to outlast a frame -
+        ///     generously, because being early here means two sweeps at once, which is
+        ///     merely wasteful, while being late means the registry stays frozen.
+        /// </summary>
+        private const float SweepGrace = 2f;
 
         /// <summary>
         ///     Rescans if the registry may be stale, throttled. Any consumer may poke this
@@ -157,8 +171,11 @@ namespace Kukolony.Colonies
         /// </remarks>
         internal static void EnsureFresh(MonoBehaviour host)
         {
-            if (host == null || !host.isActiveAndEnabled) return;
-            if (_sweeping || Time.time < _nextSweep) return;
+            // The GameObject, not the component: StartCoroutine fails on an inactive
+            // object but runs perfectly well for a disabled component on an active one, so
+            // isActiveAndEnabled would refuse sweeps that could have happened.
+            if (host == null || !host.gameObject.activeInHierarchy) return;
+            if (Sweeping || Time.time < _nextSweep) return;
             if (ZNet.instance == null || ZDOMan.instance == null) return;
 
             // Armed before starting, not only on completion. StartCoroutine on an inactive
@@ -183,10 +200,14 @@ namespace Kukolony.Colonies
             // poke EnsureFresh, so two sweeps could overlap - and the first to finish
             // cleared the in-flight flag and armed the throttle while the second was still
             // walking, which reported "not sweeping" mid-sweep and did the work twice.
+            // Deferring only to a sweep that is actually alive, never to a bare flag: an
+            // abandoned coroutine cannot clear it, and a guard that trusted it would make
+            // one destroyed GUI host freeze the registry for the whole session.
             // Checked before the try, so this early exit cannot run the cleanup below.
-            if (_sweeping) yield break;
+            if (Sweeping) yield break;
 
             _sweeping = true;
+            _heartbeat = Time.time;
             int generation = _generation;
 
             try
@@ -221,6 +242,9 @@ namespace Kukolony.Colonies
                         break;
                     }
 
+                    // Still walking. Said every frame, so a sweep that stops saying it is
+                    // presumed dead and another may take over.
+                    _heartbeat = Time.time;
                     yield return null;
                 }
 
@@ -238,10 +262,6 @@ namespace Kukolony.Colonies
                     _stamp = stamp;
                     Revision++;
                 }
-
-                // Every completed sweep, changed or not - a screen showing "looking" needs
-                // to know the looking is over even when the answer is still "nothing".
-                Sweeps++;
             }
             finally
             {

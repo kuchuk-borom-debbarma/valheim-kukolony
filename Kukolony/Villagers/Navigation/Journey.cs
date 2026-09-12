@@ -372,28 +372,26 @@ namespace Kukolony.Villagers.Navigation
         }
 
         /// <summary>
-        ///     Whether there is anywhere within reach this villager could stand and walk from.
+        ///     Whether there is anywhere within reach this villager could stand and walk
+        ///     from, and whether that somewhere is within a stride.
         /// </summary>
         /// <remarks>
-        ///     Asked before deciding, and answered without moving anything, so the decision and
-        ///     the action agree about the world. The alternative - deciding to put a villager
-        ///     back on its feet and only then discovering there is nowhere to put it - is what
-        ///     left one standing still for five minutes, allowed to do neither.
-        /// </remarks>
-        internal bool CanStand(Character body) => TryFindStanding(body, out _);
-
-        /// <summary>
-        ///     Where this villager could stand, and whether that somewhere is within a
-        ///     stride.
-        /// </summary>
-        /// <remarks>
-        ///     Both answers from one search, because the decision needs both every tick
-        ///     while rescuing and the narrow question is the wide one's first ring - asking
-        ///     them separately put two identical pathfinder queries on the same tick.
-        ///     <paramref name="near" /> is the one decision where <see cref="CanStand" />'s
-        ///     sixty-metre generosity is wrong: a watched water crossing must land only
-        ///     where landing reads as stepping ashore, not as snapping to a shore across
-        ///     the bay.
+        ///     <para>
+        ///         Asked before deciding, and answered without moving anything, so the
+        ///         decision and the action agree about the world. The alternative - deciding
+        ///         to put a villager back on its feet and only then discovering there is
+        ///         nowhere to put it - is what left one standing still for five minutes,
+        ///         allowed to do neither.
+        ///     </para>
+        ///     <para>
+        ///         Both answers come from one search, because the decision needs both every
+        ///         tick while rescuing and the narrow question is the wide one's first ring -
+        ///         asking them separately put two identical pathfinder queries on the same
+        ///         tick. <paramref name="near" /> is the one decision where the ladder's
+        ///         sixty-metre generosity is wrong: a watched water crossing must land only
+        ///         where landing reads as stepping ashore, not as snapping to a shore across
+        ///         the bay.
+        ///     </para>
         /// </remarks>
         internal bool CanStand(Character body, out bool near)
         {

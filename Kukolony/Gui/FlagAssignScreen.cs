@@ -34,7 +34,6 @@ namespace Kukolony.Gui
         private WorkFlag _flag;
         private bool _blocked;
         private int _seenRevision;
-        private int _seenSweeps;
         private bool _drewWhileSweeping;
         private int _page;
 
@@ -66,7 +65,6 @@ namespace Kukolony.Gui
             // of saying it is looking.
             ColonyRegistry.EnsureFresh(_instance);
             _instance._seenRevision = ColonyRegistry.Revision;
-            _instance._seenSweeps = ColonyRegistry.Sweeps;
 
             _instance._flag = flag;
             _instance._page = 0;
@@ -115,17 +113,18 @@ namespace Kukolony.Gui
             // latch armed only at open missed the driver's scans on a host and the pins'
             // sweeps on a client, so rows only ever appeared after close-and-reopen.
             //
-            // "News" includes a sweep finishing while this screen was saying it was
-            // looking, even when the sweep found the same nothing it found before: keyed
-            // on the revision alone, an empty world never bumped anything and the screen
-            // claimed to still be searching for the rest of the session. That is the same
-            // lie as the definitive message it replaced, told the other way round.
+            // And a screen that said it was looking is owed a redraw when the looking
+            // ends, even where the sweep found the same nothing as last time - keyed on
+            // the revision alone, an empty world bumped nothing and the screen claimed to
+            // still be searching for the rest of the session, which is the same lie as the
+            // definitive message it replaced, told the other way round. "Settled" asks
+            // only whether that sweep has stopped, so every way one can end counts:
+            // finishing, throwing, losing its world, or being abandoned with its host.
             bool news = _seenRevision != ColonyRegistry.Revision;
-            bool settled = _drewWhileSweeping && _seenSweeps != ColonyRegistry.Sweeps;
+            bool settled = _drewWhileSweeping && !ColonyRegistry.Sweeping;
             if (news || settled)
             {
                 _seenRevision = ColonyRegistry.Revision;
-                _seenSweeps = ColonyRegistry.Sweeps;
                 Refresh();
             }
         }
