@@ -171,6 +171,7 @@ namespace Kukolony.Debug
             yield return CheckJobQueue(report, colony);
             yield return CheckHauling(report, colony, origin);
             yield return CheckTidying(report, colony, origin);
+            yield return CheckWorkAreas(report, colony, origin);
             yield return CheckDistantTravel(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
@@ -814,6 +815,118 @@ namespace Kukolony.Debug
         ///         the control that says the measurement apparatus itself is sound.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     A job pointed at an outpost works there and leaves the rest of the settlement alone.
+        /// </summary>
+        /// <remarks>
+        ///     Both halves matter and the second is the one that can be got wrong silently: it is
+        ///     easy to write a work area that a villager respects by accident because it never
+        ///     looked that far anyway. So the item it must ignore is put well inside the
+        ///     settlement, where it would certainly be picked up if the area were not doing
+        ///     anything.
+        /// </remarks>
+        private static IEnumerator CheckWorkAreas(TestReport report, Colony colony, Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            // The outpost: a chest at the edge of the settlement, used as the centre of a small
+            // area. Anything already registered can be one - that is the point of building work
+            // areas out of structures rather than as a new thing to place.
+            GameObject post = Spawn("piece_chest_wood", origin + new Vector3(30f, 0f, 0f));
+            GameObject shed = Spawn("piece_chest_wood", origin + new Vector3(6f, 0f, 6f));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            StructureRecord outpost = Register(colony, post, "Outpost");
+            StructureRecord store = Register(colony, shed, "Wood shed");
+            if (outpost == null || store == null)
+            {
+                report.Check(false, "work area check could register an outpost and a shed");
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, store.Id, s => s.Accepts = new List<string> { "Wood" });
+            ColonyOperations.EditSettings(colony, outpost.Id, s => s.Accepts = new List<string> { "Coal" });
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition
+                {
+                    Id = "outpost", Name = "Outpost haul", Kind = JobKind.Haul, Repeat = 20,
+                    WorkArea = outpost.PersistentId, WorkRadius = 12f
+                }
+            });
+
+            JobDefinition stored = colony.State.GetJobs().Find(j => j.Id == "outpost");
+            report.Check(stored != null && stored.WorkArea == outpost.PersistentId &&
+                         Mathf.Approximately(stored.WorkRadius, 12f),
+                "a job's work area survives being written to the colony record",
+                $"area='{(stored == null ? "none" : stored.WorkArea)}' radius={stored?.WorkRadius ?? -1f}");
+
+            // One log inside the area, one well outside it but comfortably inside the settlement.
+            ItemDrop inside = DropItem("Wood", origin + new Vector3(27f, 0f, 3f), 3);
+            ItemDrop outside = DropItem("Wood", origin + new Vector3(4f, 0f, -4f), 3);
+            report.Check(inside != null && outside != null,
+                "control: there is wood both inside and outside the work area",
+                $"inside={(inside != null)} outside={(outside != null)}");
+            if (inside == null || outside == null) yield break;
+
+            ZDOID outsideId = outside.GetComponent<ZNetView>().GetZDO().m_uid;
+
+            Villager hand = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (hand == null || !hand.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "work area check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "outpost" });
+
+            int delivered = 0;
+            for (int attempt = 0; attempt < 120 && delivered == 0; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                delivered = StructureInventory.Count(store.Id, "Wood");
+            }
+
+            report.Check(delivered > 0,
+                "a villager assigned to an outpost works there",
+                $"delivered={delivered} doing='{hand.Activity}'");
+
+            // The half that proves the area is doing something: the log by the hearth, which any
+            // unbounded hauler would have taken first because it was nearer.
+            bool leftAlone = ZNetScene.instance.FindInstance(outsideId) != null;
+            report.Check(leftAlone,
+                "control: it leaves alone wood outside its work area, however near the hearth",
+                $"stillThere={leftAlone}");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.State.SetJobs(new List<JobDefinition>());
+            colony.RemoveStructure(outpost.Id);
+            colony.RemoveStructure(store.Id);
+            Release(post);
+            Release(shed);
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>Puts an item on the ground with an identity, the way a real drop has one.</summary>
+        private static ItemDrop DropItem(string prefabName, Vector3 where, int stack)
+        {
+            if (ZoneSystem.instance.GetSolidHeight(where, out float ground)) where.y = ground + .5f;
+
+            GameObject prefab = ObjectDB.instance.GetItemPrefab(prefabName);
+            if (prefab == null) return null;
+
+            GameObject spawned = UnityEngine.Object.Instantiate(prefab, where, Quaternion.identity);
+            if (!spawned.TryGetComponent(out ItemDrop drop)) return null;
+
+            drop.SetStack(stack);
+            return drop;
+        }
+
         private static IEnumerator CheckDistantTravel(TestReport report, Colony colony, Vector3 origin)
         {
             Player player = Player.m_localPlayer;

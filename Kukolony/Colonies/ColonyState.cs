@@ -114,7 +114,7 @@ namespace Kukolony.Colonies
             try
             {
                 ZPackage p = new ZPackage(encoded);
-                if (p.ReadInt() != 1) return result;
+                if (p.ReadInt() != 2) return result;
 
                 int count = p.ReadInt();
                 if (count < 0 || count > 256) return result;
@@ -134,7 +134,7 @@ namespace Kukolony.Colonies
         internal void SetJobs(List<Jobs.JobDefinition> jobs)
         {
             ZPackage p = new ZPackage();
-            p.Write(1);
+            p.Write(2);
             p.Write(jobs.Count);
             foreach (Jobs.JobDefinition job in jobs) job.Write(p);
             _zdo.Set(JobsKey, p.GetBase64());

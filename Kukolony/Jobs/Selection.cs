@@ -38,9 +38,8 @@ namespace Kukolony.Jobs
             destination = null;
             if (colony == null || asker == null) return false;
 
-            Vector3 centre = colony.transform.position;
+            WorkArea area = WorkArea.For(colony, job);
             Vector3 from = asker.transform.position;
-            float reach = colony.EffectiveRadius;
             float best = float.MaxValue;
 
             // The game keeps its own registry of loose items, so this never walks every loaded
@@ -48,7 +47,11 @@ namespace Kukolony.Jobs
             foreach (ItemDrop drop in ItemDrop.s_instances)
             {
                 if (drop == null || drop.m_itemData?.m_dropPrefab == null) continue;
-                if (Utils.DistanceXZ(drop.transform.position, centre) > reach) continue;
+
+                // Bounded by the job's work area rather than by the settlement. A job pointed at
+                // an outpost gathers there and nowhere else, which is the whole point of being
+                // able to point one.
+                if (!area.Contains(drop.transform.position)) continue;
 
                 if (!drop.TryGetComponent(out ZNetView view) || !view.IsValid()) continue;
 
@@ -116,10 +119,16 @@ namespace Kukolony.Jobs
             int bestImprovement = 0;
             float bestDistance = float.MaxValue;
 
+            WorkArea area = WorkArea.For(colony, job);
+
             foreach (StructureRecord record in SettlementIndex.WhatMayBeTidied(colony))
             {
                 GameObject instance = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(record.Id) : null;
                 if (instance == null) continue;
+
+                // Same rule as loose items: a job only tidies the containers it was pointed at.
+                // Destinations are deliberately not bounded - see WorkArea.
+                if (!area.Contains(instance.transform.position)) continue;
                 if (TargetClaims.IsClaimedByOther(record.Id, asker)) continue;
 
                 Container container = instance.GetComponentInChildren<Container>(true);

@@ -47,6 +47,21 @@ namespace Kukolony.Jobs
         /// <summary>Whether to fill the bag before delivering, or set out with the first load.</summary>
         internal bool FillBagFirst = true;
 
+        /// <summary>
+        ///     The registered structure this job works around, by durable token. Empty means the
+        ///     whole settlement.
+        /// </summary>
+        /// <remarks>
+        ///     A token rather than an address, for the reason every other reference here is:
+        ///     loading renumbers every ZDOID, so an address alone points at whatever later
+        ///     occupies that slot - and a job pointed at the wrong place is a villager working
+        ///     somewhere nobody asked it to.
+        /// </remarks>
+        internal string WorkArea = string.Empty;
+
+        /// <summary>How far that reaches. Zero means the default.</summary>
+        internal float WorkRadius;
+
         internal void Write(ZPackage package)
         {
             package.Write(Id ?? string.Empty);
@@ -55,6 +70,8 @@ namespace Kukolony.Jobs
             package.Write(Repeat);
             package.Write(TidyContainers);
             package.Write(FillBagFirst);
+            package.Write(WorkArea ?? string.Empty);
+            package.Write(WorkRadius);
 
             List<string> items = Items ?? new List<string>();
             package.Write(items.Count);
@@ -70,7 +87,14 @@ namespace Kukolony.Jobs
                 Kind = (JobKind)package.ReadInt(),
                 Repeat = package.ReadInt(),
                 TidyContainers = package.ReadBool(),
-                FillBagFirst = package.ReadBool()
+                FillBagFirst = package.ReadBool(),
+
+                // Read in the order Write wrote them. An object initializer runs its assignments
+                // top to bottom, so this is safe - but it is safe by a language guarantee rather
+                // than by anything visible here, which is worth a line of warning to whoever adds
+                // the next field.
+                WorkArea = package.ReadString(),
+                WorkRadius = package.ReadSingle()
             };
 
             int count = package.ReadInt();
