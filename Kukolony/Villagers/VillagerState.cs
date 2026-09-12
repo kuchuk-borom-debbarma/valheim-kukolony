@@ -272,6 +272,36 @@ namespace Kukolony.Villagers
             SetWorkState(0);
         }
 
+        /// <summary>
+        ///     Says this villager is still working on what it claimed.
+        /// </summary>
+        /// <remarks>
+        ///     The claim's age is what stops a stuck villager holding a resource for ever, and
+        ///     it was stamped once when the target was taken - so the clock ran against the
+        ///     walk rather than against being stuck, and a villager on any errand longer than
+        ///     the timeout had its claim expire underneath it while it was walking perfectly
+        ///     well. A second villager then set off for the same thing.
+        ///
+        ///     Refreshed on progress only, which keeps the timeout doing exactly the job it was
+        ///     added for: a villager that is getting nowhere stops refreshing, and its claim
+        ///     ages out as before.
+        /// </remarks>
+        internal void TouchClaim()
+        {
+            if (_zdo == null || Target.IsNone() || ZNet.instance == null) return;
+
+            // Rewritten rarely, not every tick. This is called from the walk, so a per-tick
+            // write would mark every walking villager's ZDO dirty every frame - one hot field
+            // written by the whole population, which is the contention shape a settlement with
+            // no population cap cannot pay for. Refreshing once the stamp is a third of the way
+            // to expiring keeps the claim comfortably alive at a fraction of the writes.
+            double now = ZNet.instance.GetTimeSeconds();
+            double age = now - ClaimedSince;
+            if (age < ModConfig.ClaimTtlSeconds.Value / 3f) return;
+
+            _zdo.Set(ClaimedSinceKey, (long)now);
+        }
+
         private void Remember(KeyValuePair<int, int> idKey, int tokenKey, ZDOID value, bool stamp)
         {
             _zdo.Set(idKey, value);

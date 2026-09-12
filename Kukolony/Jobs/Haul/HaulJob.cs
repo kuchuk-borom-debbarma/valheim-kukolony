@@ -216,11 +216,22 @@ namespace Kukolony.Jobs.Haul
                     ? context.State.Destination
                     : context.State.Target;
                 ZDO record = stalled.IsNone() ? null : ZDOMan.instance?.GetZDO(stalled);
-                Chatter.Warn("[haul] unresolved target",
-                    $"waiting for {stalled}: zdo={(record == null ? "none" : "valid=" + record.IsValid())} " +
-                    $"at={(record == null ? "?" : record.GetPosition().ToString())} " +
-                    $"sceneInstance={(ZNetScene.instance?.FindInstance(stalled) != null)} " +
-                    $"villagerAt={context.Villager.transform.position}");
+                if (record != null)
+                {
+                    Vector3 where = record.GetPosition();
+                    var itsZone = ZoneSystem.GetZone(where);
+                    var ourZone = ZoneSystem.GetZone(context.Villager.transform.position);
+                    string prefab = ZNetScene.instance != null
+                        ? ZNetScene.instance.GetPrefab(record.GetPrefab())?.name ?? "unknown"
+                        : "?";
+
+                    Chatter.Warn("[haul] unresolved target",
+                        $"waiting for {stalled} ({prefab}): valid={record.IsValid()} " +
+                        $"owner={record.GetOwner()} ours={record.IsOwner()} " +
+                        $"at={where} itsZone={itsZone} ourZone={ourZone} " +
+                        $"zoneLoaded={(ZoneSystem.instance != null && ZoneSystem.instance.IsZoneLoaded(where))} " +
+                        $"distance={Utils.DistanceXZ(where, context.Villager.transform.position):0.0}m");
+                }
 
                 return JobOutcomes.Skipped(context.State, "waiting for the world", out activity);
             }
@@ -231,10 +242,17 @@ namespace Kukolony.Jobs.Haul
             switch (context.Walk.MoveTowards(target.transform.position, Approach.DistanceTo(target)))
             {
                 case MoveResult.Moving:
+                    // Still going, so the claim on what it is going to is still live. Without
+                    // this the reservation ages against the length of the walk rather than
+                    // against being stuck, and any errand longer than the timeout loses its
+                    // claim halfway - which is two villagers converging on one log, arrived at
+                    // by both of them behaving correctly.
+                    context.State.TouchClaim();
                     activity = doing;
                     return JobResult.Running;
 
                 case MoveResult.Arrived:
+                    context.State.TouchClaim();
                     activity = doing;
                     return JobResult.Running;
 

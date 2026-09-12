@@ -115,6 +115,19 @@ Choosing ──► Claiming ──► Fetching ──► Collecting ──► De
 
   The invalidation lives inside `VillagerState.SetTarget` rather than in its callers, so no
   route to a target can forget it — and every clearing path runs through that one method.
+
+  **A claim ages against being stuck, not against the length of the walk.** The timeout that
+  stops a stuck villager holding a resource for ever was stamped once, when the target was
+  taken — so a villager on any errand longer than the timeout lost its claim halfway while
+  walking perfectly well, and a second villager set off for the same thing. Both of them behaved
+  correctly and the settlement double-handled the log. The stamp is now refreshed while the walk
+  reports progress, which leaves the timeout doing exactly the job it was added for: a villager
+  getting nowhere stops refreshing and ages out as before.
+
+  Refreshed *rarely* — once the stamp is a third of the way to expiring — because this is called
+  from the walk, and a per-tick write would mark every walking villager's ZDO dirty every frame.
+  One hot field written by the whole population is the contention shape a settlement with no
+  population cap cannot pay for.
 - **Fetching** — walk to the first source.
 - **Collecting** — take items, up to bag capacity, with the pickup animation. Several per trip,
   not one.

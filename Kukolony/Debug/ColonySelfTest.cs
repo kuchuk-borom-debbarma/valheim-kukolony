@@ -177,6 +177,7 @@ namespace Kukolony.Debug
             yield return CheckFillingTheBagFirst(report, colony, origin);
             yield return CheckAChestMayBeLeftAlone(report, colony, origin);
             yield return CheckAPartlyFullChestTakesWhatFits(report, colony, origin);
+            yield return CheckTheItemVanishingMidWalk(report, colony, origin);
             yield return CheckTidying(report, colony, origin);
             yield return CheckTidyingKeepsUnidentifiedItems(report, colony, origin);
             yield return CheckWorkAreas(report, colony, origin);
@@ -1635,6 +1636,115 @@ namespace Kukolony.Debug
             }
 
             return false;
+        }
+
+        /// <summary>
+        ///     The thing being fetched is taken away while the villager is walking to it.
+        /// </summary>
+        /// <remarks>
+        ///     The player picking up a log a villager is halfway to is an ordinary afternoon in
+        ///     a settlement, and the failure it causes is the quiet kind: a villager holding a
+        ///     target that no longer exists, walking to where it used to be, or standing still
+        ///     holding a claim nobody can take off it. The claim being released matters as much
+        ///     as the villager recovering, because a held claim outlives the villager's interest
+        ///     in it and stops everyone else.
+        /// </remarks>
+        private static IEnumerator CheckTheItemVanishingMidWalk(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(5f, 0f, 7f));
+            yield return new WaitForSecondsRealtime(.3f);
+            StructureRecord store = Register(colony, chest, "Vanishing store");
+            if (store == null)
+            {
+                report.Check(false, "vanishing-item check could register a chest");
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, store.Id, s => s.Accepts = new List<string> { "Wood" });
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "chase", Name = "Chase", Kind = JobKind.Haul, Repeat = 30 }
+            });
+
+            // Far enough out that there is a walk to interrupt.
+            ItemDrop bait = DropItem("Wood", origin + new Vector3(-4f, 0f, 14f), 4);
+            if (bait == null || !bait.TryGetComponent(out ZNetView baitView) || !baitView.IsValid())
+            {
+                report.Check(false, "vanishing-item check could drop an item");
+                yield break;
+            }
+
+            ZDOID baitId = baitView.GetZDO().m_uid;
+
+            Villager chaser = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (chaser == null || !chaser.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "vanishing-item check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "chase" });
+
+            // Wait until it has actually committed to the item, so this interrupts a walk
+            // rather than racing the decision to start one.
+            VillagerState chaserState = new VillagerState(view.GetZDO());
+            bool committed = false;
+            for (int sample = 0; sample < 60 && !committed; sample++)
+            {
+                yield return new WaitForSecondsRealtime(.25f);
+                committed = chaserState.Target == baitId;
+            }
+
+            report.Check(committed,
+                "control: the villager set off for the item before it was taken away",
+                $"committed={committed} doing='{chaser?.Activity}'");
+            if (!committed) yield break;
+
+            // Snatched, the way a player picking it up would.
+            baitView.Destroy();
+            yield return new WaitForSecondsRealtime(.5f);
+
+            bool released = false;
+            for (int sample = 0; sample < 40 && !released; sample++)
+            {
+                yield return new WaitForSecondsRealtime(.25f);
+                released = chaserState.Target != baitId;
+            }
+
+            report.Check(released,
+                "a villager lets go of something that was taken away while it walked to it",
+                $"target={chaserState.Target} doing='{chaser?.Activity}'");
+
+            report.Check(ZNetScene.instance.FindInstance(who) != null,
+                "control: and it is still alive to do something else",
+                $"loaded={ZNetScene.instance.FindInstance(who) != null}");
+
+            // And it gets on with the next thing rather than standing where the item was.
+            DropItem("Wood", origin + new Vector3(3f, 0f, 5f), 3);
+            int delivered = 0;
+            for (int sample = 0; sample < 100 && delivered == 0; sample++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                delivered = StructureInventory.Count(store.Id, "Wood");
+            }
+
+            report.Check(delivered > 0,
+                "and takes new work rather than waiting for what is gone",
+                $"delivered={delivered} doing='{chaser?.Activity}'");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.RemoveStructure(store.Id);
+            Release(chest);
+            colony.State.SetJobs(new List<JobDefinition>());
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
         }
 
         /// <summary>
