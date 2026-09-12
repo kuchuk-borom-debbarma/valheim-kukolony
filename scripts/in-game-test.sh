@@ -110,7 +110,7 @@ set_value BenchmarkRunId "$RUN_ID"
 set_value BenchmarkOutputPath "$OUTPUT"
 set_value BenchmarkScreenshots "${BENCHMARK_SCREENSHOTS:-true}"
 set_value BenchmarkAutoExit true
-set_value BenchmarkWorld KukolonyBenchmark
+set_value BenchmarkWorld KukolonyHaulTest
 
 # A hang before the benchmark starts is in world loading, not in anything being
 # tested, so it is worth one retry rather than a failed run.

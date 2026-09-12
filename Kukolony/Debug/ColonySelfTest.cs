@@ -170,6 +170,7 @@ namespace Kukolony.Debug
             yield return CheckVillagerLiving(report, colony, origin);
             yield return CheckJobQueue(report, colony);
             yield return CheckHauling(report, colony, origin);
+            yield return CheckHaulingThoroughly(report, colony, origin);
             yield return CheckTidying(report, colony, origin);
             yield return CheckWorkAreas(report, colony, origin);
             yield return CheckResting(report, colony, origin);
@@ -1539,6 +1540,135 @@ namespace Kukolony.Debug
         }
 
         /// <summary>
+        ///     A full haul: two kinds of thing, two chests, and a villager that stays put.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The wandering check is the reason this exists. A villager walking off in a
+        ///         direction unrelated to its work is the loudest possible symptom and the
+        ///         easiest to miss in a check that only asks whether the wood arrived - it can
+        ///         arrive eventually while the villager spends a minute walking to the horizon
+        ///         and back.
+        ///     </para>
+        ///     <para>
+        ///         So how far it strays is measured every half second and asserted against the
+        ///         settlement's own radius. Work is bounded by that radius, so anything beyond it
+        ///         is by definition not work.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckHaulingThoroughly(TestReport report, Colony colony, Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject woodChest = Spawn("piece_chest_wood", origin + new Vector3(5f, 0f, 7f));
+            GameObject stoneChest = Spawn("piece_chest_wood", origin + new Vector3(8f, 0f, 7f));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            StructureRecord woodStore = Register(colony, woodChest, "Wood store");
+            StructureRecord stoneStore = Register(colony, stoneChest, "Stone store");
+            if (woodStore == null || stoneStore == null)
+            {
+                report.Check(false, "haul check could register two chests");
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, woodStore.Id, s => s.Accepts = new List<string> { "Wood" });
+            ColonyOperations.EditSettings(colony, stoneStore.Id, s => s.Accepts = new List<string> { "Stone" });
+
+            ItemDrop wood = DropItem("Wood", origin + new Vector3(3f, 0f, 3f), 5);
+            ItemDrop stone = DropItem("Stone", origin + new Vector3(-3f, 0f, 3f), 5);
+            report.Check(wood != null && stone != null,
+                "control: there is wood and stone on the ground to sort",
+                $"wood={(wood != null)} stone={(stone != null)}");
+            if (wood == null || stone == null) yield break;
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "sort", Name = "Sort", Kind = JobKind.Haul, Repeat = 20 }
+            });
+
+            Villager hand = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (hand == null || !hand.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "haul check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "sort" });
+
+            float strayed = 0f;
+            int inWood = 0;
+            int inStone = 0;
+            List<string> story = new List<string>();
+
+            for (int attempt = 0; attempt < 160 && (inWood < 5 || inStone < 5); attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+
+                if (hand == null || ZNetScene.instance.FindInstance(who) == null) break;
+
+                float away = Utils.DistanceXZ(hand.transform.position, colony.transform.position);
+                if (away > strayed) strayed = away;
+
+                inWood = StructureInventory.Count(woodStore.Id, "Wood");
+                inStone = StructureInventory.Count(stoneStore.Id, "Stone");
+
+                if (story.Count == 0 || story[story.Count - 1] != hand.Activity) story.Add(hand.Activity);
+            }
+
+            string did = string.Join(" > ", story.ToArray());
+
+            report.Check(inWood >= 5, "a villager hauls loose wood to the chest that asked for wood",
+                $"inWoodStore={inWood} did='{did}'");
+
+            report.Check(inStone >= 5, "and loose stone to the chest that asked for stone",
+                $"inStoneStore={inStone}");
+
+            // Specificity: neither ends up in the other's chest, which is what a settlement that
+            // sorts means as opposed to one that merely tidies up.
+            report.Check(StructureInventory.Count(woodStore.Id, "Stone") <= 0 &&
+                         StructureInventory.Count(stoneStore.Id, "Wood") <= 0,
+                "control: neither ends up in the other chest",
+                $"stoneInWoodStore={StructureInventory.Count(woodStore.Id, "Stone")} " +
+                $"woodInStoneStore={StructureInventory.Count(stoneStore.Id, "Wood")}");
+
+            // The wandering check. Everything it was asked to do was within a few metres of the
+            // hearth, so anything beyond the settlement's own reach is a villager going somewhere
+            // nobody sent it.
+            report.Check(strayed <= colony.EffectiveRadius,
+                "a working villager stays within the settlement it works for",
+                $"strayed {strayed:0}m from a hearth with {colony.EffectiveRadius:0}m of reach");
+
+            report.Check(ZNetScene.instance.FindInstance(who) != null,
+                "control: it survived the job rather than being destroyed by it",
+                $"loaded={ZNetScene.instance.FindInstance(who) != null}");
+
+            // The vanilla despawn flags, which walk a creature away from the nearest player and
+            // then destroy it. Neither check asks whether the creature is tamed, so being
+            // somebody's villager is no protection - and the symptoms are exactly "it wandered
+            // off for no reason" and "it faded away in front of me".
+            MonsterAI brain = hand == null ? null : hand.GetComponent<MonsterAI>();
+            report.Check(brain != null && !brain.DespawnInDay() && !brain.IsEventCreature(),
+                "a villager is never one of the creatures the game despawns by itself",
+                brain == null
+                    ? "no MonsterAI"
+                    : $"despawnInDay={brain.DespawnInDay()} eventCreature={brain.IsEventCreature()}");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.State.SetJobs(new List<JobDefinition>());
+            colony.RemoveStructure(woodStore.Id);
+            colony.RemoveStructure(stoneStore.Id);
+            Release(woodChest);
+            Release(stoneChest);
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
         ///     Organising: wood in the wrong chest moves to the right one, and then everything
         ///     stops.
         /// </summary>
@@ -2542,12 +2672,29 @@ namespace Kukolony.Debug
             report.Check(colony.State.GetStructures().Any(r => r.Id == record.Id),
                 "control: a living structure survives a sweep");
 
+            ZDOID doomedId = doomed.GetComponent<ZNetView>().GetZDO().m_uid;
             Release(doomed);
-            yield return new WaitForSecondsRealtime(.4f);
 
-            int reaped = StructureReaper.Sweep(colony);
+            // Swept repeatedly rather than once after a fixed pause. A destroy has to travel
+            // through ZDOMan before the death is recorded, and a single sweep four tenths of a
+            // second later was reading the answer before it existed - which failed as
+            // "reaped=0", indistinguishable from a reaper that does not work.
+            int reaped = 0;
+            float waited = 0f;
+            while (waited < 5f && reaped == 0)
+            {
+                yield return new WaitForSecondsRealtime(.25f);
+                waited += .25f;
+                reaped = StructureReaper.Sweep(colony);
+            }
+
+            bool gone = ZDOMan.instance.GetZDO(doomedId) == null;
+            bool listed = ZDOMan.instance.m_deadZDOs != null &&
+                          ZDOMan.instance.m_deadZDOs.ContainsKey(doomedId);
+
             report.Check(reaped >= 1 && !colony.State.GetStructures().Any(r => r.Id == record.Id),
-                "a destroyed structure's record is removed", $"reaped={reaped}");
+                "a destroyed structure's record is removed",
+                $"reaped={reaped} after {waited:0.0}s, zdoGone={gone}, listedAsDead={listed}");
 
             // The control. This record's object cannot be resolved and is not in the dead
             // list - exactly what an unloaded outpost looks like to a peer that cannot see it.

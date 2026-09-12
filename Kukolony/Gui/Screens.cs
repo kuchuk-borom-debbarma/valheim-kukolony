@@ -208,8 +208,12 @@ namespace Kukolony.Gui
             List<Option> results = _search(_filter) ?? new List<Option>();
             if (results.Count == 0 && column.TryRow(out Row empty))
             {
+                // Nothing with no filter means there is nothing to offer at all - a settlement
+                // with no jobs defined, no free beds, nobody to assign. Saying "type to search"
+                // there sends a player hunting for something that was never there, which is
+                // exactly what it did: an empty job picker read as a broken job picker.
                 Widgets.Label(empty, string.IsNullOrEmpty(_filter)
-                    ? "Type to search."
+                    ? "Nothing to choose from yet."
                     : "Nothing matches.", Color.gray);
             }
 

@@ -71,6 +71,15 @@ namespace Kukolony.Villagers.Navigation
 
         private readonly MonsterAI _ai;
 
+        /// <summary>How far a destination must move to count as somewhere else.</summary>
+        /// <remarks>
+        ///     Small, because the question is "is this the same errand", and a job re-reading the
+        ///     world nudges a target by centimetres rather than metres. Anything larger lets one
+        ///     journey's latch follow a villager onto the next.
+        /// </remarks>
+        private const float DestinationMoved = 5f;
+
+        private Vector3 _destination = new Vector3(float.MaxValue, 0f, float.MaxValue);
         private Vector3 _waypoint;
         private bool _travelling;
         private float _nextPoke;
@@ -101,6 +110,17 @@ namespace Kukolony.Villagers.Navigation
         {
             Vector3 here = _ai.transform.position;
             float remaining = Utils.DistanceXZ(here, destination);
+
+            // A latch belongs to one journey. Being sent somewhere else is a new journey, however
+            // near it is - and without noticing that, a villager which once had a far target went
+            // on walking towards a leg forty-five metres ahead after its target became a chest
+            // ten metres away, which is what wandering off in a random direction looks like from
+            // the outside.
+            if (Utils.DistanceXZ(_destination, destination) > DestinationMoved)
+            {
+                _destination = destination;
+                _travelling = false;
+            }
 
             if (!_travelling && remaining > HopLength) _travelling = true;
             if (_travelling && remaining <= arriveWithin) _travelling = false;

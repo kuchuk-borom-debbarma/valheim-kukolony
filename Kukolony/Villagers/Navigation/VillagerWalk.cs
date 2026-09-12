@@ -193,6 +193,13 @@ namespace Kukolony.Villagers.Navigation
                 // that arrived mid-rescue still covering ground, so it began its next errand
                 // gliding and never touched the ground again - a hundred and fifty metres home
                 // in twenty-one seconds. Every errand starts on foot.
+                // The journey itself starts again too. Travelling latches on and is only
+                // cleared by arriving, so without this a villager that once had a far target
+                // kept walking towards a leg forty-five metres ahead long after its target
+                // became a chest ten metres away - which looks exactly like a villager
+                // wandering off in a random direction, because it is one.
+                _journey.Forget();
+
                 if (_reckoning)
                 {
                     _reckoning = false;

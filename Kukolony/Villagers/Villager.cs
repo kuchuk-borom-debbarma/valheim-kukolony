@@ -239,6 +239,7 @@ namespace Kukolony.Villagers
 
             // Identity first: everything below reports by name, and taming used to log
             // an empty one because it ran before the villager had been named.
+            EnsureStaysPut();
             EnsureSoftEdges();
             EnsureIdentity();
             EnsureHumanSkin();
@@ -449,6 +450,40 @@ namespace Kukolony.Villagers
         ///     arrive with new colliders, and a villager loaded long before them never met the
         ///     old ones.
         /// </remarks>
+        /// <summary>
+        ///     Stops the game deciding a villager should wander off and disappear.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <c>BaseAI.MoveAwayAndDespawn</c> walks a creature <em>away from the nearest
+        ///         player</em> five metres at a time, and destroys its ZNetView once no player is
+        ///         within forty. That is both of the things a settlement must never do: a villager
+        ///         that appears to wander off in a meaningless direction, and one that fades away
+        ///         in front of you.
+        ///     </para>
+        ///     <para>
+        ///         It is reached from two flags - <c>despawnInDay</c> and <c>eventCreature</c> -
+        ///         and <b>neither check asks whether the creature is tamed</b>, so being somebody's
+        ///         villager is no protection. The flags live on the ZDO, re-read every four
+        ///         seconds, so clearing the component's fields alone would not hold.
+        ///     </para>
+        ///     <para>
+        ///         Cleared once per villager rather than every tick: the ZDO write is the point,
+        ///         and rewriting it constantly is the shape a settlement with no population cap
+        ///         cannot afford.
+        ///     </para>
+        /// </remarks>
+        private void EnsureStaysPut()
+        {
+            if (_staysPut || _ai == null || _nview == null || !_nview.IsValid() || !_nview.IsOwner()) return;
+
+            _staysPut = true;
+            _ai.SetDespawnInDay(false);
+            _ai.SetEventCreature(false);
+        }
+
+        private bool _staysPut;
+
         private void EnsureSoftEdges()
         {
             Player player = Player.m_localPlayer;
