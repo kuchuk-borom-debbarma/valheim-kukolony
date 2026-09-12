@@ -470,12 +470,11 @@ honest without them, and two were not planned at all:
   [valheim-findings.md](valheim-findings.md). A villager used to stop existing at about a
   hundred metres.
 
-**Still outstanding from this milestone:**
+**Presets and bulk assignment** landed too: a preset is a named queue, applied to everyone or to
+a chosen few, and it reaches villagers nobody has loaded — which is most of the point, since a
+settlement worth assigning in bulk is spread over enough ground that some of it always is.
 
-- **Presets** — named job configurations, so a settlement of a hundred is not a hundred
-  configurations. Jobs are named and shared, which is most of the benefit; presets are the
-  copy-one-to-many part.
-- **Bulk assignment** from the colony screen. Assignment works per villager today.
+**Nothing is outstanding from this milestone.**
 
 ---
 
