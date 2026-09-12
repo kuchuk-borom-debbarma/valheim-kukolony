@@ -223,7 +223,12 @@ namespace Kukolony.Jobs
         ///     so the working pattern is to prefer an existing compatible stack and fall back to
         ///     an empty slot.
         /// </remarks>
-        internal static TakeResult Deposit(Inventory bag, ItemDrop.ItemData item, Container into)
+        /// <param name="allowed">
+        ///     How many more of this item the destination was told to take, or a negative
+        ///     number for no limit.
+        /// </param>
+        internal static TakeResult Deposit(Inventory bag, ItemDrop.ItemData item, Container into,
+            int allowed = -1)
         {
             if (bag == null || item == null || into == null) return TakeResult.Unavailable;
             if (!into.TryGetComponent(out ZNetView view) || !view.IsValid()) return TakeResult.Unavailable;
@@ -246,6 +251,13 @@ namespace Kukolony.Jobs
             // asked the yes-or-no question and believed it, and the job is specified the other
             // way: partial deposits are fine, and what will not fit stays in the bag.
             int room = RoomFor(destination, item);
+
+            // Bounded by the cap as well as by the shelf space. The cap used to be enforced
+            // only by the shuffle that carried an overshoot back out again - and now that a
+            // chest keeps what it holds, nothing would ever bring it back down. A shed told
+            // to keep ten, holding nine, would take a villager's fifty and sit at fifty-nine
+            // for good, with its own screen still reading "at most 10".
+            if (allowed >= 0) room = Mathf.Min(room, allowed);
             if (room <= 0) return TakeResult.Full;
 
             if (!TryFindSlot(destination, item, out int x, out int y)) return TakeResult.Full;

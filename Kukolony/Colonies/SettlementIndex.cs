@@ -234,6 +234,31 @@ namespace Kukolony.Colonies
         }
 
         /// <summary>
+        ///     How many more of an item a container was told to take, or -1 for no limit.
+        /// </summary>
+        /// <remarks>
+        ///     The cap as a bound on arriving goods, which is the only thing now enforcing it.
+        ///     It used to be enforced by accident: an overshoot scored the chest Refused for
+        ///     its own contents and the excess was carried away - the shuffle loop. With a
+        ///     chest keeping what it holds, a delivery that overshoots stays overshot, so the
+        ///     limit has to be applied where the goods go in. Unknown contents mean no limit,
+        ///     the same answer the score gives, because refusing a chest we cannot see into
+        ///     costs the settlement a destination it really had.
+        /// </remarks>
+        internal static int RoomUnderCap(StructureRecord record, string itemPrefab)
+        {
+            if (record?.Settings == null || string.IsNullOrEmpty(itemPrefab)) return -1;
+
+            int cap = record.Settings.CapFor(itemPrefab);
+            if (cap < 0) return -1;
+
+            int held = StructureInventory.Count(record.Id, itemPrefab);
+            if (held == StructureInventory.Unknown) return -1;
+
+            return Mathf.Max(0, cap - held);
+        }
+
+        /// <summary>
         ///     Best home first, and among equals the nearest.
         /// </summary>
         /// <remarks>

@@ -5546,22 +5546,35 @@ namespace Kukolony.Debug
             });
             ColonyOperations.EditSettings(colony, overflowRecord.Id, s => s.Accepts = new List<string>());
 
+            // Filled through the shared helper, which reports what it actually stored. Built
+            // by hand and unchecked, a fixture that quietly failed would leave the chest under
+            // its cap and the failure would read as a fault in the scoring.
             Container box = shed.GetComponentInChildren<Container>(true);
-            GameObject woodPrefab = ObjectDB.instance?.GetItemPrefab("Wood");
-            if (box != null && woodPrefab != null && woodPrefab.TryGetComponent(out ItemDrop woodDrop))
-            {
-                ItemDrop.ItemData stack = woodDrop.m_itemData.Clone();
-                stack.m_dropPrefab = woodPrefab;
-                stack.m_stack = 10;
-                box.GetInventory().AddItem(stack);
-            }
+            int stocked = PutIn(box, "Wood", 10);
+            report.Check(stocked == 10, "control: the shed is filled to its cap",
+                $"stored={stocked}");
 
             SettlementIndex.ResetForTest();
             yield return new WaitForSecondsRealtime(.2f);
 
-            int atCap = SettlementIndex.ScoreOf(shedRecord, "Wood", holding: true);
-            int asDestination = SettlementIndex.ScoreOf(shedRecord, "Wood");
-            int elsewhere = SettlementIndex.ScoreOf(overflowRecord, "Wood");
+            // Re-read after the edits. A record is a value decoded fresh on every ask, and
+            // EditSettings mutates its own decoded copy - so the ones captured at
+            // registration still describe a chest that accepts anything and caps nothing.
+            // This suite records that trap elsewhere and this check walked into it: every
+            // score below was being taken against a chest with no cap at all.
+            StructureRecord cappedNow = SettlementIndex.Find(colony, shedRecord.Id);
+            StructureRecord overflowNow = SettlementIndex.Find(colony, overflowRecord.Id);
+            if (cappedNow == null || overflowNow == null)
+            {
+                report.Check(false, "capped-chest check could re-read its chests after editing");
+                Release(shed);
+                Release(overflow);
+                yield break;
+            }
+
+            int atCap = SettlementIndex.ScoreOf(cappedNow, "Wood", holding: true);
+            int asDestination = SettlementIndex.ScoreOf(cappedNow, "Wood");
+            int elsewhere = SettlementIndex.ScoreOf(overflowNow, "Wood");
 
             report.Check(!Placement.MayMove(atCap, elsewhere),
                 "a chest at its cap keeps the wood it is already holding",
@@ -5571,8 +5584,36 @@ namespace Kukolony.Debug
                 "control: and still refuses more of it, which is what the cap is for",
                 $"asDestination={asDestination}");
 
-            report.Check(Placement.MayMove(elsewhere, asDestination) == false,
-                "control: so nothing is sent to it either");
+            // A control that can actually fail: the same chest below its cap is offered
+            // again. Asserting nothing is sent to a Refused chest only restates the line
+            // above, because MayMove cannot accept a Refused destination by definition.
+            ColonyOperations.EditSettings(colony, shedRecord.Id, s => s.SetCap("Wood", 50));
+            SettlementIndex.ResetForTest();
+            StructureRecord roomy = SettlementIndex.Find(colony, shedRecord.Id);
+            int withRoom = roomy == null ? -99 : SettlementIndex.ScoreOf(roomy, "Wood");
+
+            report.Check(withRoom == Placement.Named,
+                "control: raise the cap and the same chest is the best home again",
+                $"withRoom={withRoom}");
+
+            // And the cap bounds what arrives, which is the only thing enforcing it now that
+            // a chest keeps what it holds.
+            ColonyOperations.EditSettings(colony, shedRecord.Id, s => s.SetCap("Wood", 10));
+            SettlementIndex.ResetForTest();
+            StructureRecord bounded = SettlementIndex.Find(colony, shedRecord.Id);
+            report.Check(bounded != null && SettlementIndex.RoomUnderCap(bounded, "Wood") == 0,
+                "a chest at its cap has no room under it for more",
+                $"room={(bounded == null ? -99 : SettlementIndex.RoomUnderCap(bounded, "Wood"))}");
+
+            ColonyOperations.EditSettings(colony, shedRecord.Id, s => s.SetCap("Wood", 25));
+            SettlementIndex.ResetForTest();
+            StructureRecord partial = SettlementIndex.Find(colony, shedRecord.Id);
+            report.Check(partial != null && SettlementIndex.RoomUnderCap(partial, "Wood") == 15,
+                "control: below its cap it has exactly the difference",
+                $"room={(partial == null ? -99 : SettlementIndex.RoomUnderCap(partial, "Wood"))}");
+
+            ColonyOperations.EditSettings(colony, shedRecord.Id, s => s.SetCap("Wood", 10));
+            SettlementIndex.ResetForTest();
 
             // And the loop itself, through the job's own chooser rather than the scores.
             colony.State.SetJobs(new List<JobDefinition>

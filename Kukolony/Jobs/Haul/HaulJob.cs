@@ -417,7 +417,11 @@ namespace Kukolony.Jobs.Haul
 
             context.Animation.Reach();
 
-            switch (Carrying.Deposit(context.Bag.GetInventory(), load, container))
+            // What this chest has room for under its own cap, so a delivery cannot overshoot
+            // a limit nothing will later correct.
+            int allowed = SettlementIndex.RoomUnderCap(belongs, Carrying.NameOf(load));
+
+            switch (Carrying.Deposit(context.Bag.GetInventory(), load, container, allowed))
             {
                 case TakeResult.Took:
                     activity = "putting it away";

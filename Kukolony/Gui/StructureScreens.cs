@@ -182,18 +182,7 @@ namespace Kukolony.Gui
                     () => host.Push(new PickerScreen("What belongs here", SearchItems,
                         settings.Accepts, true, chosen =>
                         {
-                            ColonyOperations.EditSettings(colony, record.Id, s =>
-                            {
-                                s.Accepts = chosen;
-
-                                // Caps are kept beside the list rather than in it, and the
-                                // only row that can show or clear one is drawn per accepted
-                                // item - so a cap left behind by an item no longer accepted
-                                // is enforced by the index and invisible everywhere. A chest
-                                // emptied of its list became an overflow chest that silently
-                                // refused wood past ten, with nothing on screen to say why.
-                                s.ForgetCapsOutside(chosen);
-                            });
+                            ColonyOperations.EditSettings(colony, record.Id, s => s.Accepts = chosen);
                             host.Refresh();
                         })));
             }
@@ -216,10 +205,17 @@ namespace Kukolony.Gui
                 });
             }
 
-            // A cap row per item this chest was told to hold, plus one way to add another.
-            // Offered only for named items, because a cap on a chest that takes anything has
-            // nothing to name - the settings screen must not offer a setting that does nothing.
-            foreach (string item in settings.Accepts)
+            // A cap row per item this chest was told to hold - and per item that still has a
+            // cap, whether or not it is still named.
+            //
+            // A cap is stored beside the list rather than in it, so taking an item out of the
+            // list used to leave its cap enforced by the index with no row anywhere able to
+            // show or clear it: a chest emptied of its list became an overflow chest that
+            // silently refused wood past ten. Pruning the cap on write was tried and is
+            // worse - the picker commits on every toggle, so retyping a list destroyed the
+            // caps of items about to be put straight back, and clearing the last item wiped
+            // every cap in one tap. Showing the orphan is what lets a person decide.
+            foreach (string item in CappedOrAccepted(settings))
             {
                 if (!column.TryRow(out Row cap)) continue;
 
@@ -254,6 +250,21 @@ namespace Kukolony.Gui
         ///     than an empty one: a charcoal kiln burns nothing, and offering to configure its
         ///     fuel would be offering a setting the structure ignores.
         /// </remarks>
+        /// <summary>
+        ///     Everything this container needs a cap row for: what it accepts, and anything
+        ///     that still carries a cap from when it did.
+        /// </summary>
+        private static List<string> CappedOrAccepted(StructureSettings settings)
+        {
+            List<string> named = new List<string>(settings.Accepts);
+            foreach (KeyValuePair<string, int> cap in settings.Caps)
+            {
+                if (!named.Contains(cap.Key)) named.Add(cap.Key);
+            }
+
+            return named;
+        }
+
         private static void BuildProcessing(ColonyScreen host, Column column, Colony colony,
             StructureRecord record, StructureSettings settings)
         {
