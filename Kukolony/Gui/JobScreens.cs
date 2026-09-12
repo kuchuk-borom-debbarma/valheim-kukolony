@@ -191,7 +191,7 @@ namespace Kukolony.Gui
                 // screen cannot keep, and two places computing the same ceiling is how they
                 // came to disagree in the first place.
                 float most = job.Kind == JobKind.Chop
-                    ? Mathf.Min(128f, Resources.ChoppingGround.SearchRadius)
+                    ? Resources.ChoppingGround.SearchRadius
                     : 128f;
 
                 // Never below what is actually in force. Clipping the shown value to the cap
@@ -202,7 +202,14 @@ namespace Kukolony.Gui
                 // misreported a job on a wide flag; letting the bound follow what is shown
                 // gave up the cap entirely and let a reach be written past what the search
                 // honours. Showing the effective number makes the two agree.
-                Widgets.Number(radius, "How far it reaches", shown, 8f, most, 4f,
+                // Never below what is in force. The nudge buttons write from the displayed
+                // value clamped to this bound, so a bound under it does not merely refuse to
+                // grow - one tap either way collapses the job to the bound. That shrank a
+                // haul job on a wide flag from two hundred metres to a hundred and twenty
+                // eight, with no way to nudge it back. For chopping the shown value is
+                // already held to the search radius, so raising the bound to meet it cannot
+                // let a reach past what the search honours.
+                Widgets.Number(radius, "How far it reaches", shown, 8f, Mathf.Max(shown, most), 4f,
                     value => $"{value:F0} m",
                     value => Edit(host, j => j.WorkRadius = value));
             }

@@ -403,9 +403,12 @@ namespace Kukolony.Jobs.Chop
 
                 Vector3 at = zdo.GetPosition();
 
-                // The work area narrows the colony-wide scan and cannot widen it, because
-                // Area has already held it to the search radius. That used to be asserted
-                // here and enforced nowhere, which is how the gap stayed invisible.
+                // The work area narrows what the scan already returned. It cannot widen it
+                // in the sense that matters - every candidate here came from inside an
+                // anchor's circle, so nothing outside the search can be chosen whatever this
+                // radius says. Area holds the radius to the search radius as well, which
+                // keeps the two numbers from disagreeing; what it cannot do is make an area
+                // centred away from any anchor cover only searched ground.
                 if (!area.Contains(at)) continue;
 
                 if (!Wanted(context.Job, kind, zdo)) continue;
@@ -719,8 +722,9 @@ namespace Kukolony.Jobs.Chop
         ///     Where this job works, held to what the search can reach.
         /// </summary>
         /// <remarks>
-        ///     The one place chopping decides its own ground, so the screen and the scan can
-        ///     both be told the same answer instead of each working one out.
+        ///     The one place chopping decides its own ground, so the screen and the scan are
+        ///     told the same answer instead of each working one out - which is how three
+        ///     rounds of review found them disagreeing in three different shapes.
         /// </remarks>
         internal static WorkArea Area(Colony colony, JobDefinition job) =>
             WorkArea.For(colony, job).NoWiderThan(ChoppingGround.SearchRadius);

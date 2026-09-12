@@ -5521,6 +5521,11 @@ namespace Kukolony.Debug
         private static IEnumerator CheckTheAxeIsPutAway(TestReport report, Colony colony)
         {
             Villager villager = VillagerLifecycle.Spawn(colony);
+
+            // Taken now, while the villager is certainly valid - Spawn cannot have registered
+            // it otherwise. Read later, on a failure path, it is None exactly when it is
+            // needed, and the cleanup that depends on it becomes unreachable.
+            ZDOID spawned = villager != null ? villager.Id : ZDOID.None;
             yield return new WaitForSecondsRealtime(.4f);
 
             ZNetView view = villager != null && villager.TryGetComponent(out ZNetView found) &&
@@ -5539,25 +5544,19 @@ namespace Kukolony.Debug
                 // record to remove it by - which is the case that most often lands here. A
                 // villager left behind is counted by the next check's claim and collision
                 // measurements.
-                if (view != null)
+                // Destroying the object is not removing the villager: Spawn only returns once
+                // the member has been written to the colony's persisted state, and it is
+                // Unregister that takes it out again. Skipping that leaves a phantom id in the
+                // roster for the rest of the world - unnamed in every picker, counted by
+                // assignment, and pinned on the map. The id is the one captured at spawn,
+                // because by here the record may be exactly what has gone invalid.
+                if (!spawned.IsNone())
                 {
-                    VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
-                }
-                else if (villager != null)
-                {
-                    // Destroying the object is not removing the villager: Spawn only returns
-                    // once the member has been written to the colony's persisted state, and
-                    // Unregister is what takes it out. Skipping it leaves a phantom id in the
-                    // roster for the rest of the world - shown as unnamed in every picker,
-                    // counted by assignment, and pinned on the map.
-                    if (villager.TryGetComponent(out ZNetView record) && record.IsValid())
-                    {
-                        colony.Unregister(ColonyMemberKind.Villager, record.GetZDO().m_uid);
-                    }
-
-                    Release(villager.gameObject);
+                    VillagerLifecycle.Remove(colony, spawned);
+                    colony.Unregister(ColonyMemberKind.Villager, spawned);
                 }
 
+                if (villager != null) Release(villager.gameObject);
                 yield break;
             }
 

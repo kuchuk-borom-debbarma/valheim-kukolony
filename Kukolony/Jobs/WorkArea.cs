@@ -45,13 +45,27 @@ namespace Kukolony.Jobs
         ///     The same area, no wider than a limit.
         /// </summary>
         /// <remarks>
-        ///     For work whose search has a ceiling of its own. A work area wider than the
-        ///     search that feeds it is a band of ground the job reports as in range and can
-        ///     never act on - which is not a hypothetical: a colony radius of 128 against the
-        ///     default 96 m scan, or a flag set to 200, both produce it, and the villager
-        ///     stands reporting nothing to do about trees its own screen has listed.
-        ///     Narrowing is the job's to apply rather than this type's to assume, because
-        ///     hauling has no such ceiling and must keep the radius it was given.
+        ///     <para>
+        ///         For work whose search has a ceiling of its own. A work area wider than the
+        ///         search that feeds it is a band of ground the job reports as in range and
+        ///         will never act on - not a hypothetical: a colony radius of 128 against the
+        ///         default 96 m scan, or a flag set to 200, both produce it, and the villager
+        ///         stands reporting nothing to do about trees its own screen has listed.
+        ///     </para>
+        ///     <para>
+        ///         Narrowing is the job's to apply rather than this type's to assume, because
+        ///         hauling has no such ceiling and must keep the radius it was given.
+        ///     </para>
+        ///     <para>
+        ///         <b>This shrinks the mismatch; it does not abolish it.</b> The search is
+        ///         circles around the hearth and the flags, while a work area may be centred
+        ///         on any registered structure - so an area on a chest near the edge still
+        ///         reaches ground no circle covers. Nothing breaks there: the search simply
+        ///         never offers those candidates, so the job works what it can see. Closing
+        ///         the last of it would mean testing the area against the anchor set, which
+        ///         is machinery for a promise a row makes rather than for anything a villager
+        ///         does wrong.
+        ///     </para>
         /// </remarks>
         internal WorkArea NoWiderThan(float limit) =>
             limit > 0f && limit < Radius ? new WorkArea(Centre, limit, Name) : this;
