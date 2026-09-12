@@ -115,11 +115,22 @@ namespace Kukolony.Colonies
             try
             {
                 ZPackage p = new ZPackage(encoded);
-                if (p.ReadInt() != 2) return result;
+
+                // Both versions are decoded, which every other format in this file refuses to
+                // do on purpose - a blob written by an older build is normally discarded rather
+                // than read against the wrong layout, because that does not fail, it produces
+                // records full of plausible nonsense.
+                //
+                // That trade is right when nobody is playing. It is wrong here: chopping added
+                // settings to a job while the mod was in use, and discarding would have thrown
+                // away a player's configured work to make room for a feature they could not use
+                // yet. Version 2 stops after the item list; the new fields keep their defaults.
+                int version = p.ReadInt();
+                if (version != 2 && version != 3) return result;
 
                 int count = p.ReadInt();
                 if (count < 0 || count > 256) return result;
-                for (int i = 0; i < count; i++) result.Add(Jobs.JobDefinition.Read(p));
+                for (int i = 0; i < count; i++) result.Add(Jobs.JobDefinition.Read(p, version));
             }
             catch (System.Exception e)
             {
@@ -170,7 +181,7 @@ namespace Kukolony.Colonies
         internal void SetJobs(List<Jobs.JobDefinition> jobs)
         {
             ZPackage p = new ZPackage();
-            p.Write(2);
+            p.Write(3);
             p.Write(jobs.Count);
             foreach (Jobs.JobDefinition job in jobs) job.Write(p);
             _zdo.Set(JobsKey, p.GetBase64());

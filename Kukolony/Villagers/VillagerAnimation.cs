@@ -37,10 +37,21 @@ namespace Kukolony.Villagers
         /// </remarks>
         private static readonly string[] SleepNames = { "sleeping", "sleep", "attach_bed", "sitting" };
 
+        /// <summary>
+        ///     Names an axe swing might go by, best first.
+        /// </summary>
+        /// <remarks>
+        ///     Several, because the rig is a clone of a creature and carries the player's
+        ///     parameter set, and which of these a given build ships is asset data no
+        ///     decompiled assembly can answer.
+        /// </remarks>
+        private static readonly string[] SwingNames = { "swing_axe", "swing_axe0", "swing_pickaxe", "attack" };
+
         private static bool _describedRig;
 
         private readonly ZSyncAnimation _animation;
         private readonly bool _canInteract;
+        private readonly string _swing;
         private readonly string _sleep;
 
         internal VillagerAnimation(GameObject villager)
@@ -73,7 +84,41 @@ namespace Kukolony.Villagers
                 Log.Info($"[villager] the rig has no '{Interact}' trigger; " +
                          "picking things up will be silent");
             }
+
+            // Probed, not assumed. The rig turns out to carry the player's own parameter set,
+            // so an axe swing is likely - but "likely" is what this project has already been
+            // wrong about three times, and the answer is one call away.
+            foreach (string name in SwingNames)
+            {
+                if (!_animation.HasParameter(name, AnimatorControllerParameterType.Trigger)) continue;
+
+                _swing = name;
+                break;
+            }
+
+            if (_swing == null)
+            {
+                Log.Info("[villager] the rig has no axe swing; chopping will be silent");
+            }
         }
+
+        /// <summary>
+        ///     Swings an axe. Harmless when the rig cannot do it.
+        /// </summary>
+        /// <remarks>
+        ///     A trigger rather than a bool, deliberately: triggers are RPCs and are not
+        ///     persisted, which is exactly right for a momentary gesture and exactly wrong for
+        ///     a lasting state like sleeping. A blow that a peer was not watching is simply a
+        ///     blow they did not see.
+        /// </remarks>
+        internal void Swing()
+        {
+            if (_animation == null || _swing == null) return;
+            _animation.SetTrigger(_swing);
+        }
+
+        /// <summary>Whether this rig can be seen to swing at all.</summary>
+        internal bool CanSwing => _swing != null;
 
         /// <summary>Reaches for something. Harmless when the rig cannot do it.</summary>
         internal void Reach()

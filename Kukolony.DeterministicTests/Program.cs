@@ -4,6 +4,7 @@ using Kukolony.Jobs;
 using Kukolony.Villagers.Navigation;
 using Kukolony.Villagers;
 using Kukolony.Jobs.Haul;
+using Kukolony.Jobs.Chop;
 
 /// <summary>
 ///     Verification for logic that needs no game running.
@@ -60,6 +61,7 @@ static class Program
         Locomoting();
         Tiring();
         Repeating();
+        Chopping();
 
         Console.WriteLine(_failed == 0
             ? $"RESULT: PASS ({_cases} cases)"
@@ -552,6 +554,100 @@ static class Program
     static void Label(string expected, StructureCapability capabilities) =>
         Case($"\"{expected}\" is what {(int)capabilities} reads as",
             StructureCapabilities.Describe(capabilities) == expected);
+
+    static void Chopping()
+    {
+        Console.WriteLine("chopping");
+
+        // The ordinary way round: find something, walk to it, hit it until it is not there.
+        Step("a villager with an axe and nothing chosen goes looking",
+            ChopState.Choosing, Chop(hasTool: true), ChopAction.ChooseWork);
+        Step("having chosen, it walks",
+            ChopState.Approaching, Chop(hasTool: true, hasTarget: true), ChopAction.MoveToTarget);
+        Step("arriving, it swings",
+            ChopState.Approaching, Chop(hasTool: true, hasTarget: true, atTarget: true), ChopAction.Chop);
+        Step("and keeps swinging",
+            ChopState.Chopping, Chop(hasTool: true, hasTarget: true, atTarget: true), ChopAction.Chop);
+
+        // The target going away is what success looks like here. A job built on hauling's
+        // shape would call this a failure and report every felled tree as an error.
+        Step("the target being gone finishes the trip rather than failing it",
+            ChopState.Chopping, Chop(hasTool: true), ChopAction.Complete);
+        Step("control: a target still standing is not a finished trip",
+            ChopState.Chopping, Chop(hasTool: true, hasTarget: true, atTarget: true), ChopAction.Chop);
+
+        // Three ordinary reasons to do nothing, none of them a failure, none of them
+        // spending a repetition.
+        Step("no axe means no work rather than a failed job",
+            ChopState.Choosing, Chop(), ChopAction.Yield);
+        Step("a tired villager yields even with an axe and work to do",
+            ChopState.Choosing, Chop(hasTool: true, tired: true), ChopAction.Yield);
+        Step("enough in store means there is nothing worth cutting",
+            ChopState.Choosing, Chop(hasTool: true, enough: true), ChopAction.Yield);
+        Step("control: below that, the same villager goes looking",
+            ChopState.Choosing, Chop(hasTool: true), ChopAction.ChooseWork);
+
+        // Having enough is checked when choosing, not mid-trunk. A villager that abandoned a
+        // half-chopped tree the moment the store filled would leave it standing at half
+        // health for the next one to start again from.
+        Step("a villager already at a tree finishes it even once the store is full",
+            ChopState.Chopping, Chop(hasTool: true, hasTarget: true, atTarget: true, enough: true),
+            ChopAction.Chop);
+
+        // Losing the axe mid-tree. Swinging an empty hand forever is indistinguishable from
+        // working, which is the whole reason this branch exists.
+        Step("losing the axe mid-tree stops the swinging",
+            ChopState.Chopping, Chop(hasTarget: true, atTarget: true), ChopAction.Yield);
+
+        // Pushed off the trunk by a falling log, or shoved by anything else.
+        Step("a villager knocked away from its tree walks back",
+            ChopState.Chopping, Chop(hasTool: true, hasTarget: true), ChopAction.MoveToTarget);
+
+        // Facts outrank the recorded state: each of these resumes into a state the world has
+        // already moved past.
+        Step("a target taken by somebody else sends it back to choosing",
+            ChopState.Approaching, Chop(hasTool: true), ChopAction.ChooseWork);
+        Step("an unknown state restarts rather than acting",
+            (ChopState)99, Chop(hasTool: true), ChopAction.ChooseWork);
+
+        // Control: the table always terminates. If it ever gains a cycle this is what catches
+        // it, because the guard's fallback is the only path to a Yield with work available.
+        Case("control: a decision is always reached with an axe and a target",
+            ChopTransitions.Next(ChopState.Choosing, Chop(hasTool: true, hasTarget: true)).Action
+                != ChopAction.Yield);
+
+        // Exhaustive, because the cost of one wrong branch here is a villager swinging at
+        // nothing forever and looking busy while it does. Sixty-four combinations is cheap.
+        int swingingWithoutAnAxe = 0;
+        for (int bits = 0; bits < 32; bits++)
+        {
+            ChopFacts facts = Chop(
+                hasTool: (bits & 1) != 0,
+                hasTarget: (bits & 2) != 0,
+                atTarget: (bits & 4) != 0,
+                enough: (bits & 8) != 0,
+                tired: (bits & 16) != 0);
+
+            foreach (ChopState from in new[] { ChopState.Choosing, ChopState.Approaching, ChopState.Chopping })
+            {
+                if (facts.HasTool) continue;
+                if (ChopTransitions.Next(from, facts).Action == ChopAction.Chop) swingingWithoutAnAxe++;
+            }
+        }
+
+        Case($"no combination of facts ever swings without an axe (swung in {swingingWithoutAnAxe})",
+            swingingWithoutAnAxe == 0);
+    }
+
+    static ChopFacts Chop(bool hasTool = false, bool hasTarget = false, bool atTarget = false,
+        bool enough = false, bool tired = false) =>
+        new ChopFacts(hasTool, hasTarget, atTarget, enough, tired);
+
+    static void Step(string what, ChopState state, ChopFacts facts, ChopAction expected)
+    {
+        ChopAction actual = ChopTransitions.Next(state, facts).Action;
+        Case($"{what} (got {actual})", actual == expected);
+    }
 
     static void Case(string what, bool passed)
     {

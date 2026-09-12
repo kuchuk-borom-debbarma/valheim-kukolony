@@ -8,7 +8,10 @@ namespace Kukolony.Jobs
     internal enum JobKind
     {
         /// <summary>Put things where they belong.</summary>
-        Haul = 0
+        Haul = 0,
+
+        /// <summary>Cut down what an axe can cut down.</summary>
+        Chop = 1
     }
 
     /// <summary>
@@ -62,6 +65,55 @@ namespace Kukolony.Jobs
         /// <summary>How far that reaches. Zero means the default.</summary>
         internal float WorkRadius;
 
+        /// <summary>
+        ///     Which choppable things this job takes: standing trees, fallen logs, undergrowth.
+        /// </summary>
+        /// <remarks>
+        ///     Trees and logs by default; stumps and bushes are opt-in. Classification admits
+        ///     anything an axe demonstrably bites, and that is a wide net to point a villager
+        ///     at without being asked - a settlement should not quietly flatten the scenery
+        ///     because something had a Destructible on it.
+        /// </remarks>
+        internal bool ChopTrees = true;
+
+        internal bool ChopLogs = true;
+
+        internal bool ChopUndergrowth;
+
+        /// <summary>
+        ///     Tree prefabs this job will fell. Empty means all of them.
+        /// </summary>
+        /// <remarks>
+        ///     The same shape as <see cref="Items" />, including that empty means everything.
+        ///     This is how a player says "leave the birches" - an answer the mod has no
+        ///     business choosing for them.
+        /// </remarks>
+        internal List<string> Species = new List<string>();
+
+        /// <summary>
+        ///     How many standing trees to leave in the work area. Zero means take them all.
+        /// </summary>
+        /// <remarks>
+        ///     The rule against clear-cutting, and it is free: the scan already counts what it
+        ///     found, so below the threshold there is simply no work. It answers a different
+        ///     question from <see cref="StockTarget" /> and neither substitutes for the other -
+        ///     a full woodshed beside a bare hillside is the failure this one prevents.
+        /// </remarks>
+        internal int LeaveStanding;
+
+        /// <summary>What the settlement is gathering, for the purpose of knowing when to stop.</summary>
+        internal string StockItem = string.Empty;
+
+        /// <summary>
+        ///     How much of it is enough. Zero means never stop.
+        /// </summary>
+        /// <remarks>
+        ///     The terminus this job otherwise lacks. Hauling stops when nothing is misplaced,
+        ///     which is visible and self-limiting; a forest has no such point, and a woodcutter
+        ///     without a stopping rule strips the map while looking correct the whole time.
+        /// </remarks>
+        internal int StockTarget;
+
         internal void Write(ZPackage package)
         {
             package.Write(Id ?? string.Empty);
@@ -73,12 +125,31 @@ namespace Kukolony.Jobs
             package.Write(WorkArea ?? string.Empty);
             package.Write(WorkRadius);
 
+            package.Write(ChopTrees);
+            package.Write(ChopLogs);
+            package.Write(ChopUndergrowth);
+            package.Write(LeaveStanding);
+            package.Write(StockItem ?? string.Empty);
+            package.Write(StockTarget);
+
             List<string> items = Items ?? new List<string>();
             package.Write(items.Count);
             foreach (string item in items) package.Write(item ?? string.Empty);
+
+            List<string> species = Species ?? new List<string>();
+            package.Write(species.Count);
+            foreach (string name in species) package.Write(name ?? string.Empty);
         }
 
-        internal static JobDefinition Read(ZPackage package)
+        /// <summary>
+        ///     Reads a record written by <see cref="Write" />, or by the build before it.
+        /// </summary>
+        /// <remarks>
+        ///     <paramref name="version" /> is the colony's job-blob version rather than one of
+        ///     this record's own. Version 2 stops after the item list and knows nothing of the
+        ///     chopping settings, which simply keep their defaults.
+        /// </remarks>
+        internal static JobDefinition Read(ZPackage package, int version)
         {
             JobDefinition job = new JobDefinition
             {
@@ -97,6 +168,16 @@ namespace Kukolony.Jobs
                 WorkRadius = package.ReadSingle()
             };
 
+            if (version >= 3)
+            {
+                job.ChopTrees = package.ReadBool();
+                job.ChopLogs = package.ReadBool();
+                job.ChopUndergrowth = package.ReadBool();
+                job.LeaveStanding = package.ReadInt();
+                job.StockItem = package.ReadString();
+                job.StockTarget = package.ReadInt();
+            }
+
             int count = package.ReadInt();
             if (count < 0 || count > 256)
             {
@@ -105,6 +186,17 @@ namespace Kukolony.Jobs
             }
 
             for (int i = 0; i < count; i++) job.Items.Add(package.ReadString());
+
+            if (version < 3) return job;
+
+            int species = package.ReadInt();
+            if (species < 0 || species > 256)
+            {
+                Log.Warning($"[job] '{job.Name}' claims {species} species - ignoring them.");
+                return job;
+            }
+
+            for (int i = 0; i < species; i++) job.Species.Add(package.ReadString());
             return job;
         }
 
@@ -122,6 +214,7 @@ namespace Kukolony.Jobs
             switch (kind)
             {
                 case JobKind.Haul: return "Haul";
+                case JobKind.Chop: return "Chop";
                 default: return string.Empty;
             }
         }

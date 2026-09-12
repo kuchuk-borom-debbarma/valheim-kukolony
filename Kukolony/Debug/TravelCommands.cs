@@ -40,6 +40,14 @@ namespace Kukolony.Debug
                 "says whether this mod is holding your input, and lets go if it is",
                 args => Unstick(args.Context), isCheat: false, isNetwork: false, onlyServer: false);
 
+            new Terminal.ConsoleCommand("kukolony_buildmenu",
+                "opens the hammer's build menu directly, bypassing the key entirely",
+                args => BuildMenu(args.Context), isCheat: false, isNetwork: false, onlyServer: false);
+
+            new Terminal.ConsoleCommand("kukolony_input",
+                "reports what is blocking player input a few seconds from now, once the console is shut",
+                args => InputLater(args.Context), isCheat: false, isNetwork: false, onlyServer: false);
+
             new Terminal.ConsoleCommand("kukolony_where",
                 "says what every loaded villager is doing and how far away it is",
                 args => Where(args.Context), isCheat: false, isNetwork: false, onlyServer: false);
@@ -130,10 +138,13 @@ namespace Kukolony.Debug
         private static void Unstick(Terminal console)
         {
             Player player = Player.m_localPlayer;
-            bool takingInput = player != null && player.TakeInput();
             bool screenOpen = ColonyScreen.Instance != null && ColonyScreen.Instance.IsOpen;
 
-            Tell(console, $"player accepting input: {takingInput}");
+            // Deliberately not reporting TakeInput here any more. Having the console open is
+            // itself one of the things that stops a player taking input, and the console is
+            // the only way to run this - so it read False every single time and looked like a
+            // finding. kukolony_input takes that reading after the console shuts, which is the
+            // only moment the answer means anything.
             Tell(console, $"colony screen open: {screenOpen}");
             Tell(console, $"build menu visible: {Hud.IsPieceSelectionVisible()}");
             Tell(console, $"hammer equipped: {(player != null && player.GetRightItem() != null ? player.GetRightItem().m_shared.m_name : "nothing")}");
@@ -141,9 +152,103 @@ namespace Kukolony.Debug
             if (screenOpen) ColonyScreen.Instance.Close();
             Jotunn.Managers.GUIManager.BlockInput(false);
 
-            Tell(console, takingInput
-                ? "this mod was not holding your input; the problem is elsewhere"
-                : "input released - try the build menu again");
+            // The build menu is a toggle, and the game decides which way to toggle it by
+            // asking whether its window is already active - so a window left active while
+            // nothing is drawn turns every press into a close. The symptom is a build menu
+            // that never opens no matter which key is tried, on a player who can otherwise
+            // move and select pieces normally, which is nothing like what a held input looks
+            // like. Putting it back to closed costs nothing when it was already closed.
+            bool pieceWindowOpen = Hud.IsPieceSelectionVisible();
+            if (pieceWindowOpen) Hud.HidePieceSelection();
+
+            Tell(console, pieceWindowOpen
+                ? "the build menu was flagged open while showing nothing - closed it, press the key again"
+                : "the build menu is flagged closed, so the next press should open it");
+
+            Tell(console, "run kukolony_input to see what is actually blocking input, if anything");
+        }
+
+        /// <summary>
+        ///     Opens the build menu without going through the key, which splits one question
+        ///     into two answerable ones.
+        /// </summary>
+        /// <remarks>
+        ///     If the menu appears, the window and every gate in front of it are fine and the
+        ///     fault is that the key press never became a "BuildMenu" button — a binding, not a
+        ///     state. If it does not appear, the window itself is the problem and the key was
+        ///     never the question. Either answer rules out half of everything, which is worth
+        ///     more than another reading of a flag.
+        /// </remarks>
+        private static void BuildMenu(Terminal console)
+        {
+            if (Hud.instance == null)
+            {
+                Tell(console, "no hud yet");
+                return;
+            }
+
+            bool before = Hud.IsPieceSelectionVisible();
+            Hud.instance.TogglePieceSelection();
+            bool after = Hud.IsPieceSelectionVisible();
+
+            Tell(console, $"build menu {(before ? "was open" : "was closed")}, now {(after ? "open" : "closed")}");
+            Tell(console, after
+                ? "if you can SEE it, the window works and the key is the problem"
+                : "the window refused to open, so the key was never the question");
+        }
+
+        /// <summary>
+        ///     Reports the input gates a few seconds from now, rather than right now.
+        /// </summary>
+        /// <remarks>
+        ///     <b>Reading them immediately is worthless, and the first version of this did.</b>
+        ///     Having the console open is itself one of the things that stops a player taking
+        ///     input, and the console is the only way to ask — so "player accepting input:
+        ///     False" was a check that could never say anything else. It looked like a finding
+        ///     and was an artefact of the question.
+        ///
+        ///     So this schedules the reading for after the console is shut, and names each gate
+        ///     separately: "something is blocking input" is not an answer, and the eleven things
+        ///     that can be are fixed in eleven different ways.
+        /// </remarks>
+        private static void InputLater(Terminal console)
+        {
+            Tell(console, "close the console - the reading is taken in three seconds, and logged");
+
+            GameObject host = new GameObject("KukolonyInputProbe");
+            host.AddComponent<InputProbe>();
+            Object.DontDestroyOnLoad(host);
+        }
+
+        /// <summary>Takes one reading of the input gates, a moment after being created.</summary>
+        private sealed class InputProbe : MonoBehaviour
+        {
+            private float _at;
+
+            private void Awake() => _at = Time.time + 3f;
+
+            private void Update()
+            {
+                if (Time.time < _at) return;
+
+                Player player = Player.m_localPlayer;
+                Log.Info("[input] " +
+                         $"takeInput={(player != null && player.TakeInput())} " +
+                         $"console={Console.IsVisible()} " +
+                         $"chat={(Chat.instance != null && Chat.instance.HasFocus())} " +
+                         $"inventory={InventoryGui.IsVisible()} " +
+                         $"menu={Menu.IsVisible()} " +
+                         $"textInput={TextInput.IsVisible()} " +
+                         $"store={StoreGui.IsVisible()} " +
+                         $"map={Minimap.IsOpen()} " +
+                         $"freeFly={GameCamera.InFreeFly()} " +
+                         $"radial={Hud.InRadial()} " +
+                         $"pieceWindow={Hud.IsPieceSelectionVisible()} " +
+                         $"colonyScreen={(ColonyScreen.Instance != null && ColonyScreen.Instance.IsOpen)}");
+
+                Report.Say("input reading written to the log");
+                Destroy(gameObject);
+            }
         }
 
         /// <summary>Sends the nearest villager to the player, however far that is.</summary>

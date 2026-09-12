@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="../Kukolony/Colonies/StructureCapabilities.cs" Link="StructureCapabilities.cs" />
     <Compile Include="../Kukolony/Jobs/Haul/HaulTransitions.cs" Link="HaulTransitions.cs" />
+    <Compile Include="../Kukolony/Jobs/Chop/ChopTransitions.cs" Link="ChopTransitions.cs" />
     <Compile Include="../Kukolony/Jobs/Placement.cs" Link="Placement.cs" />
     <Compile Include="../Kukolony/Jobs/Stacking.cs" Link="Stacking.cs" />
     <Compile Include="../Kukolony/Villagers/Navigation/Reckoning.cs" Link="Reckoning.cs" />
