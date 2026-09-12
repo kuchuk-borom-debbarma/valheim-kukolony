@@ -181,15 +181,19 @@ namespace Kukolony.Gui
                 // could have stated the truth.
                 float shown = WorkArea.For(colony, job).Radius;
 
-                // Capped for chopping at the ceiling the scan will honour, because a reach
-                // set past it is a promise this screen cannot keep: the search never looks
-                // that far, so the job would report nothing to chop for trees this row said
-                // were in range.
+                // Capped for chopping at the ceiling the scan will honour, asked of the scan
+                // rather than worked out again here - a reach set past it is a promise this
+                // screen cannot keep, and two places computing the same ceiling is how they
+                // came to disagree in the first place.
                 float most = job.Kind == JobKind.Chop
-                    ? Mathf.Min(128f, ModConfig.ResourceScanRadius.Value)
+                    ? Mathf.Min(128f, Resources.ChoppingGround.SearchRadius)
                     : 128f;
 
-                Widgets.Number(radius, "How far it reaches", Mathf.Min(shown, most), 8f, most, 4f,
+                // Never below what is actually in force. Clipping the shown value to the cap
+                // would misreport a job on a wide flag - and worse, the nudge buttons write
+                // from the displayed number, so pressing + on a clipped row would silently
+                // shrink the job to the cap.
+                Widgets.Number(radius, "How far it reaches", shown, 8f, Mathf.Max(shown, most), 4f,
                     value => $"{value:F0} m",
                     value => Edit(host, j => j.WorkRadius = value));
             }

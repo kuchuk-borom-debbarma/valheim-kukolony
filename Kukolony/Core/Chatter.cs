@@ -62,6 +62,17 @@ namespace Kukolony.Core
         /// <summary>Drops everything, so one world's complaints do not leak into the next.</summary>
         internal static void Clear() => Recent.Clear();
 
+        /// <summary>
+        ///     Whether anything has been said under this key.
+        /// </summary>
+        /// <remarks>
+        ///     For checks asserting that a situation was reported rather than swallowed. A
+        ///     branch whose whole purpose is to be loud needs something able to hear it, or
+        ///     the check can only prove the quiet half and would pass just as well if the
+        ///     branch had gone silent.
+        /// </remarks>
+        internal static bool Said(string key) => key != null && Recent.ContainsKey(key);
+
         private static void Emit(string key, string message, System.Action<string> speak)
         {
             if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(message)) return;

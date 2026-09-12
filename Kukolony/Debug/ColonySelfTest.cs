@@ -5535,9 +5535,12 @@ namespace Kukolony.Debug
             {
                 report.Check(false, "axe check could spawn a villager with equipment");
 
-                // Removed even on this path. A villager left behind is counted by the next
-                // check's claim and collision measurements.
+                // Removed even on this path, and destroyed outright when there is no valid
+                // record to remove it by - which is the case that most often lands here. A
+                // villager left behind is counted by the next check's claim and collision
+                // measurements.
                 if (view != null) VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
+                else if (villager != null) Release(villager.gameObject);
                 yield break;
             }
 
@@ -5604,6 +5607,26 @@ namespace Kukolony.Debug
                 VillagerWardrobe.Set(vis, WearSlot.RightHand, null);
             }
 
+            // And the third answer, which is the one this round added and the one the control
+            // above cannot distinguish: a hash that resolves to nothing must be left alone
+            // *and* said out loud. Without this an Identify that had regressed to calling
+            // everything unknown would still pass both checks above.
+            const string unknownKey = "[chop] unknown held item";
+            Core.Chatter.Forget(unknownKey);
+            vis.SetRightItem(0, 1);
+            zdo.Set(ZDOVars.s_rightItem, "kukolony_not_a_real_item".GetStableHashCode());
+
+            int mystery = VillagerWardrobe.Worn(zdo, WearSlot.RightHand);
+            ChopJob.PutAxeAway(vis, zdo);
+
+            report.Check(VillagerWardrobe.Worn(zdo, WearSlot.RightHand) == mystery,
+                "an item it cannot identify is left in place rather than taken",
+                $"worn={mystery}");
+
+            report.Check(Core.Chatter.Said(unknownKey),
+                "control: and it says so, rather than swallowing it");
+
+            zdo.Set(ZDOVars.s_rightItem, 0);
             VillagerLifecycle.Remove(colony, who);
             yield return new WaitForSecondsRealtime(.2f);
         }

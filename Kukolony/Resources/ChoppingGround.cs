@@ -44,6 +44,18 @@ namespace Kukolony.Resources
 
         private static readonly Dictionary<ZDOID, Cache> Caches = new Dictionary<ZDOID, Cache>();
 
+        /// <summary>
+        ///     How far from any of a Kolony's places chopping looks for work.
+        /// </summary>
+        /// <remarks>
+        ///     The single answer, asked by everything that needs it rather than each deriving
+        ///     its own from the config. Three rounds of review found the scan, the work area
+        ///     and the screen's reach row disagreeing about this number in three different
+        ///     shapes; they disagreed because each computed it. Now there is one.
+        /// </remarks>
+        internal static float SearchRadius =>
+            ModConfig.ResourceScanRadius != null ? ModConfig.ResourceScanRadius.Value : 96f;
+
         /// <summary>Dropped when a world unloads; a colony's identity does not survive one.</summary>
         internal static void Clear() => Caches.Clear();
 
@@ -102,25 +114,24 @@ namespace Kukolony.Resources
             // "nothing to chop" forever - the scan had already discarded the trees before the
             // work area was consulted. An outpost is a place the Kolony works, so it anchors
             // the search the same way the hearth does.
-            float bound = ModConfig.ResourceScanRadius.Value;
+            float bound = SearchRadius;
 
-            // The hearth and every claimed flag both anchor the search, each out to the
-            // config distance - but never past the ground the keep-alive actually holds
-            // open for it.
+            // The hearth and every claimed flag anchor the search, each out to the same
+            // distance: this is the one number that says how far chopping may look, and
+            // everything that needs to know - the work area, the job screen's reach row -
+            // asks for it rather than deriving its own.
             //
-            // That second bound is the one that took three attempts. The config alone
-            // inverted nothing, but it let the scan offer trees in zones nothing keeps
-            // loaded: a flag with a small radius holds only its own circle plus a ring, so
-            // work beyond that exists while a player happens to be out there and vanishes
-            // when they walk home. A job that finds work only when watched is the exact
-            // fault off-screen simulation is for. Capping at the flag's bare radius instead
-            // was worse - it inverted the rule the job relies on, that the scan bounds and
-            // the work area narrows. So: the config is the ceiling, and what is kept loaded
-            // is the floor under it.
+            // Three rounds of review went on this knob, capping it at a flag's radius and
+            // then at what the keep-alive holds, and each cap broke the rule the job relies
+            // on: the scan bounds, the work area narrows. The second one was also answering
+            // a question this class never had. Discovery is bounded by what is *loaded* -
+            // the scan walks live instances, as the remarks above say - so a tree in an
+            // unheld zone is undiscoverable whatever radius is used, while a tree in a zone
+            // the villager's own travelling halo holds open is discoverable and legitimately
+            // work. Bounding by the kept circles refused the second kind for no gain.
             Anchors.Clear();
             Vector3 hearth = colony.transform.position;
-            Anchors.Add(new Vector4(hearth.x, hearth.y, hearth.z,
-                Mathf.Min(bound, Kept(Colonies.Colony.ConfiguredRadius))));
+            Anchors.Add(new Vector4(hearth.x, hearth.y, hearth.z, bound));
 
             IReadOnlyList<Vector4> flags = Colonies.KolonyReach.FlagAreas(colony);
             for (int i = 0; i < flags.Count; i++)
@@ -128,7 +139,7 @@ namespace Kukolony.Resources
                 // Copied out immediately, and by index: that list is a shared scratch buffer
                 // rebuilt on the next ask by anyone.
                 Vector4 flag = flags[i];
-                Anchors.Add(new Vector4(flag.x, flag.y, flag.z, Mathf.Min(bound, Kept(flag.w))));
+                Anchors.Add(new Vector4(flag.x, flag.y, flag.z, bound));
             }
 
             foreach (ZNetView view in ZNetScene.instance.m_instances.Values)
@@ -144,19 +155,6 @@ namespace Kukolony.Resources
 
             return cache.Found;
         }
-
-        /// <summary>
-        ///     How far from a circle's centre the keep-alive actually holds zones open.
-        /// </summary>
-        /// <remarks>
-        ///     The same arithmetic <c>KeepAliveZones</c> applies to a circle anchor: its own
-        ///     radius plus one ring of neighbouring zones, so the edge of an outpost is
-        ///     walkable ground rather than a cliff into nothing. Written here rather than
-        ///     shared because the two are asking different questions of the same number - one
-        ///     decides which zones to hold, this decides how far it is honest to look - and a
-        ///     single helper would invite changing both by editing one.
-        /// </remarks>
-        private static float Kept(float radius) => radius + 64f;
 
         /// <summary>
         ///     Where this colony works and how far, reused across refreshes so the scan does

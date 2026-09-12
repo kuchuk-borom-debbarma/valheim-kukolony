@@ -250,22 +250,26 @@ namespace Kukolony.Jobs.Chop
         /// </remarks>
         private static HandItem Identify(int prefabHash)
         {
-            if (ObjectDB.instance == null) return HandItem.Unknown;
+            if (ObjectDB.instance?.m_itemByHash == null) return HandItem.Unknown;
 
-            foreach (GameObject prefab in ObjectDB.instance.m_items)
+            // The table's own index, not a walk of it. This runs per villager per work tick -
+            // and every frame for a villager whose hearth was destroyed, which is ahead of
+            // the throttle - so scanning five hundred entries and hashing each name was a
+            // per-tick cost in a file whose whole argument is against paying those.
+            if (!ObjectDB.instance.m_itemByHash.TryGetValue(prefabHash, out GameObject prefab) ||
+                prefab == null)
             {
-                if (prefab == null || prefab.name.GetStableHashCode() != prefabHash) continue;
-                if (!prefab.TryGetComponent(out ItemDrop drop) || drop.m_itemData?.m_shared == null)
-                {
-                    return HandItem.Other;
-                }
-
-                return drop.m_itemData.m_shared.m_damages.m_chop > 0f
-                    ? HandItem.Axe
-                    : HandItem.Other;
+                return HandItem.Unknown;
             }
 
-            return HandItem.Unknown;
+            if (!prefab.TryGetComponent(out ItemDrop drop) || drop.m_itemData?.m_shared == null)
+            {
+                return HandItem.Other;
+            }
+
+            return drop.m_itemData.m_shared.m_damages.m_chop > 0f
+                ? HandItem.Axe
+                : HandItem.Other;
         }
 
         /// <summary>This villager's own record, for reading what it is wearing.</summary>
