@@ -182,7 +182,18 @@ namespace Kukolony.Gui
                     () => host.Push(new PickerScreen("What belongs here", SearchItems,
                         settings.Accepts, true, chosen =>
                         {
-                            ColonyOperations.EditSettings(colony, record.Id, s => s.Accepts = chosen);
+                            ColonyOperations.EditSettings(colony, record.Id, s =>
+                            {
+                                s.Accepts = chosen;
+
+                                // Caps are kept beside the list rather than in it, and the
+                                // only row that can show or clear one is drawn per accepted
+                                // item - so a cap left behind by an item no longer accepted
+                                // is enforced by the index and invisible everywhere. A chest
+                                // emptied of its list became an overflow chest that silently
+                                // refused wood past ten, with nothing on screen to say why.
+                                s.ForgetCapsOutside(chosen);
+                            });
                             host.Refresh();
                         })));
             }

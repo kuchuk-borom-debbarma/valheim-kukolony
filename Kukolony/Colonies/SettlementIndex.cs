@@ -192,15 +192,43 @@ namespace Kukolony.Colonies
         ///     refusing a destination we cannot see into would cost the settlement a chest it
         ///     really had. The walk is the cheaper mistake.
         /// </remarks>
-        internal static int ScoreOf(StructureRecord record, string itemPrefab)
+        /// <summary>
+        ///     What a container is worth for an item, as a place to put one or as the place
+        ///     one already is.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>A cap refuses arrivals, never residents.</b> <paramref name="holding" />
+        ///         is what tells the two apart, and without it the cap was a shuffle loop -
+        ///         the precise failure the scoring exists to make impossible, arrived at by
+        ///         the one route the score could not see.
+        ///     </para>
+        ///     <para>
+        ///         A wood shed capped at ten, filled to ten, scored Refused for the wood
+        ///         inside it. Refused is below an overflow chest, so the move read as an
+        ///         improvement and the shed's own stack was carried out; emptied, the shed
+        ///         scored Named again, which beats overflow, so the same stack came straight
+        ///         back. Two villagers could pass one stack between them for ever, each
+        ///         decision correct. <c>Placement.Score</c> has always documented the right
+        ///         rule - "the items already inside it still score Named and are left where
+        ///         they are" - and nothing implemented it.
+        ///     </para>
+        /// </remarks>
+        internal static int ScoreOf(StructureRecord record, string itemPrefab, bool holding = false)
         {
             StructureSettings settings = record.Settings;
             bool names = settings.Accepts.Contains(itemPrefab);
             bool takesAnything = settings.Accepts.Count == 0;
 
-            int cap = settings.CapFor(itemPrefab);
-            int held = cap < 0 ? 0 : StructureInventory.Count(record.Id, itemPrefab);
-            bool atCap = cap >= 0 && held != StructureInventory.Unknown && held >= cap;
+            // Asked only of a destination. For something already here the cap has nothing to
+            // say: being full is not a reason to start moving things out.
+            bool atCap = false;
+            if (!holding)
+            {
+                int cap = settings.CapFor(itemPrefab);
+                int held = cap < 0 ? 0 : StructureInventory.Count(record.Id, itemPrefab);
+                atCap = cap >= 0 && held != StructureInventory.Unknown && held >= cap;
+            }
 
             return Placement.Score(names, takesAnything, settings.TakeUnclaimed, atCap);
         }

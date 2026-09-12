@@ -134,7 +134,22 @@ namespace Kukolony.Gui
 
             if (column.TryRow(out Row name))
             {
-                Widgets.Text(name, "Name", job.Name, value => Edit(host, j => j.Name = value.Trim()));
+                // Refused rather than stored, as the structure rename beside it does. A job
+                // has no unnamed fallback, so an empty name draws a blank row and leaves the
+                // job identifiable only by its kind and its position in the list.
+                Widgets.Text(name, "Name", job.Name, value =>
+                {
+                    string trimmed = (value ?? string.Empty).Trim();
+                    if (trimmed.Length == 0)
+                    {
+                        Report.Say("A job needs a name.");
+                        host.Refresh();
+                        return;
+                    }
+
+                    Edit(host, j => j.Name = trimmed);
+                    host.Refresh();
+                });
             }
 
             if (column.TryRow(out Row kind))

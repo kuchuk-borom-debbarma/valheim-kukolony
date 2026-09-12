@@ -214,6 +214,7 @@ namespace Kukolony.Debug
             yield return CheckChoppingIndex(report);
             yield return CheckTreesAreKeptLoaded(report);
             yield return CheckTheAxeIsPutAway(report, colony);
+            yield return CheckACappedChestKeepsWhatItHas(report, colony, origin);
             yield return CheckUnclaimedDamageDoesNothing(report, origin);
             yield return CheckGivingUpOnAnUncuttableTree(report, origin);
             yield return CheckChopSettings(report, origin);
@@ -5504,6 +5505,101 @@ namespace Kukolony.Debug
             Release(standFlag);
             SweepFelling(site, 24f);
             ChoppingGround.ResetForTest();
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A full chest keeps what it has.
+        /// </summary>
+        /// <remarks>
+        ///     The shuffle loop, reached by the one route the scoring could not see. A cap
+        ///     refuses arrivals; scored against the item already inside, it read as a reason
+        ///     to carry that item out - and the chest, now under its cap, immediately scored
+        ///     best for it again. Nothing covered this because no check had ever set a cap,
+        ///     which is exactly how a rule the design calls impossible went unimplemented.
+        /// </remarks>
+        private static IEnumerator CheckACappedChestKeepsWhatItHas(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject shed = Spawn("piece_chest_wood", origin + new Vector3(-7f, 0f, 5f));
+            GameObject overflow = Spawn("piece_chest_wood", origin + new Vector3(-7f, 0f, 9f));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            StructureRecord shedRecord = Register(colony, shed, "Capped shed");
+            StructureRecord overflowRecord = Register(colony, overflow, "Overflow");
+            if (shedRecord == null || overflowRecord == null)
+            {
+                report.Check(false, "capped-chest check could register its chests");
+                Release(shed);
+                Release(overflow);
+                yield break;
+            }
+
+            // Named and capped; the other takes anything, which is what an overflow chest is.
+            ColonyOperations.EditSettings(colony, shedRecord.Id, s =>
+            {
+                s.Accepts = new List<string> { "Wood" };
+                s.SetCap("Wood", 10);
+            });
+            ColonyOperations.EditSettings(colony, overflowRecord.Id, s => s.Accepts = new List<string>());
+
+            Container box = shed.GetComponentInChildren<Container>(true);
+            GameObject woodPrefab = ObjectDB.instance?.GetItemPrefab("Wood");
+            if (box != null && woodPrefab != null && woodPrefab.TryGetComponent(out ItemDrop woodDrop))
+            {
+                ItemDrop.ItemData stack = woodDrop.m_itemData.Clone();
+                stack.m_dropPrefab = woodPrefab;
+                stack.m_stack = 10;
+                box.GetInventory().AddItem(stack);
+            }
+
+            SettlementIndex.ResetForTest();
+            yield return new WaitForSecondsRealtime(.2f);
+
+            int atCap = SettlementIndex.ScoreOf(shedRecord, "Wood", holding: true);
+            int asDestination = SettlementIndex.ScoreOf(shedRecord, "Wood");
+            int elsewhere = SettlementIndex.ScoreOf(overflowRecord, "Wood");
+
+            report.Check(!Placement.MayMove(atCap, elsewhere),
+                "a chest at its cap keeps the wood it is already holding",
+                $"here={atCap} overflow={elsewhere}");
+
+            report.Check(asDestination == Placement.Refused,
+                "control: and still refuses more of it, which is what the cap is for",
+                $"asDestination={asDestination}");
+
+            report.Check(Placement.MayMove(elsewhere, asDestination) == false,
+                "control: so nothing is sent to it either");
+
+            // And the loop itself, through the job's own chooser rather than the scores.
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "tidy", Name = "Tidy", Kind = JobKind.Haul, Repeat = 4,
+                    TidyContainers = true }
+            });
+
+            Villager tidier = VillagerLifecycle.Spawn(colony);
+            ZDOID who = tidier != null ? tidier.Id : ZDOID.None;
+            yield return new WaitForSecondsRealtime(.3f);
+
+            bool wouldMove = tidier != null && Selection.TryFindContainerWork(colony,
+                colony.State.GetJobs()[0], tidier, out GameObject from, out StructureRecord _) &&
+                from == shed;
+
+            report.Check(!wouldMove,
+                "and no tidying trip is invented to empty it",
+                $"wouldMove={wouldMove}");
+
+            if (!who.IsNone()) VillagerLifecycle.Remove(colony, who);
+            colony.State.SetJobs(new List<JobDefinition>());
+            colony.RemoveStructure(shedRecord.Id);
+            colony.RemoveStructure(overflowRecord.Id);
+            Release(shed);
+            Release(overflow);
+            SettlementIndex.ResetForTest();
             yield return new WaitForSecondsRealtime(.2f);
         }
 

@@ -146,7 +146,10 @@ namespace Kukolony.Jobs
                     string prefab = Carrying.NameOf(held);
                     if (prefab.Length == 0 || !Wanted(job, prefab)) continue;
 
-                    int here = SettlementIndex.ScoreOf(record, prefab);
+                    // Scored as where the item already is, so this chest's own cap does not
+                    // count against the thing it is holding - which read as a reason to carry
+                    // it out, and then straight back once the chest was under its cap again.
+                    int here = SettlementIndex.ScoreOf(record, prefab, holding: true);
 
                     foreach (StructureRecord elsewhere in SettlementIndex.WhereDoesItGo(colony, prefab,
                                  instance.transform.position))
@@ -191,7 +194,10 @@ namespace Kukolony.Jobs
                 string prefab = Carrying.NameOf(held);
                 if (prefab.Length == 0 || !Wanted(job, prefab)) continue;
 
-                if (Placement.MayMove(SettlementIndex.ScoreOf(source, prefab),
+                // The same asymmetry the trip was chosen under: the source holds this item,
+                // the destination is being offered it. Re-deriving both as destinations here
+                // would have confirmed on arrival a trip that should never have been taken.
+                if (Placement.MayMove(SettlementIndex.ScoreOf(source, prefab, holding: true),
                         SettlementIndex.ScoreOf(destination, prefab)))
                 {
                     return held;

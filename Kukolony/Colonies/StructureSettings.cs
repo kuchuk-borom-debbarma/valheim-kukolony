@@ -75,6 +75,26 @@ namespace Kukolony.Colonies
         }
 
         /// <summary>Sets or clears a cap. A negative amount removes it.</summary>
+        /// <summary>
+        ///     Drops caps for items this container no longer accepts.
+        /// </summary>
+        /// <remarks>
+        ///     A cap outlives the list it was set against otherwise, and only an accepted
+        ///     item gets a row to show one - so the setting goes on being enforced with no
+        ///     way to see it or clear it. An empty list means "takes anything", where a
+        ///     surviving cap is at its most surprising.
+        /// </remarks>
+        internal void ForgetCapsOutside(List<string> accepted)
+        {
+            if (accepted == null || accepted.Count == 0)
+            {
+                Caps.Clear();
+                return;
+            }
+
+            Caps.RemoveAll(cap => !accepted.Contains(cap.Key));
+        }
+
         internal void SetCap(string itemPrefab, int amount)
         {
             if (string.IsNullOrEmpty(itemPrefab)) return;
