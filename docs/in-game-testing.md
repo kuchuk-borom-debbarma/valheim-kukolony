@@ -93,6 +93,26 @@ images and by checking element bounds against the panel content column described
 7. Yield between real character spawns and keep work within the configured deadline.
 8. Update this guide and `automated-testing.md` with the new coverage.
 
+### The reload phase asks whether work survived, not just whether fields did
+
+It used to prove that names, homes and bags come back from a save, and said nothing about
+whether a villager's *work* does — which is the claim the whole design rests on, because
+*facts outrank the recorded state* is what makes reloads repair themselves. So a villager is now
+left carrying an undelivered load moments before the save, and the reload phase asserts it
+finishes the delivery. The phase is a coroutine for that reason; it was a plain method that
+returned before the villager could take a step.
+
+Two things that fixture got wrong first, both of which read as passes:
+
+- **The villager finished before the save.** Setting up a half-done trip does not stop the game,
+  and the villager simply walked over and delivered it, so the reload phase found an empty bag
+  and a cleared trip and reported a villager that had resumed nothing. It is now held still by
+  being made tired — a tired villager yields without touching its trip — and the reload phase
+  wakes it deliberately before watching.
+- **The delivery was counted as a total, not a difference.** What the chest already held is not
+  what this villager delivered, and reading the total passed while the load had in fact been
+  delivered before the save.
+
 ### The world is emptied before every run
 
 The benchmark world was reused. Eight runs of colonies, chests and villagers accumulated in it,

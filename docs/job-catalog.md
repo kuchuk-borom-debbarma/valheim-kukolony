@@ -127,6 +127,14 @@ Choosing ──► Claiming ──► Fetching ──► Collecting ──► De
   in the usual way — it is cargo only while the bag actually holds some.
 - **Delivering** — walk to the destination.
 - **Depositing** — put them in. Partial deposits are fine; what will not fit stays in the bag.
+
+  **Room is counted, not asked about.** `Inventory.CanAddItem` answers for the whole stack at
+  once — free stack space plus empty slots, measured against `item.m_stack` — so a villager
+  carrying fifty wood to a chest with room for twenty was told no and put down *nothing*, then
+  reported the chest full and went looking for another. The taking half had always worked the
+  room out properly; this half asked the yes-or-no question and believed it. Both halves now
+  share one `RoomFor`, so a chest with room for part of a load is treated the same way on the
+  way in as on the way out.
   The head of the load is re-checked against the destination before each deposit, because the
   rest of a load can be bound somewhere else entirely — and that same check is how a chest that
   filled up mid-trip is noticed.

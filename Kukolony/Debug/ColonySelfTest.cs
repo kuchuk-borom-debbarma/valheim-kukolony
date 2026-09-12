@@ -38,6 +38,7 @@ namespace Kukolony.Debug
         internal const string PersistenceName = "Kukolony Benchmark Persistence V1";
         private const string PersistedVillagerName = "Kukolony Persisted Villager V1";
         private const string PersistedStructureName = "Kukolony Persisted Storage V1";
+        private const string PersistedHaulerName = "Kukolony Interrupted Hauler V1";
         private static readonly int RunIdKey = "kukolony.benchmark.run".GetStableHashCode();
         private static readonly int PrimaryMemberKey =
             "kukolony.benchmark.primary-member.v2".GetStableHashCode();
@@ -175,6 +176,7 @@ namespace Kukolony.Debug
             yield return CheckTwoVillagersOneItem(report, colony, origin);
             yield return CheckFillingTheBagFirst(report, colony, origin);
             yield return CheckAChestMayBeLeftAlone(report, colony, origin);
+            yield return CheckAPartlyFullChestTakesWhatFits(report, colony, origin);
             yield return CheckTidying(report, colony, origin);
             yield return CheckTidyingKeepsUnidentifiedItems(report, colony, origin);
             yield return CheckWorkAreas(report, colony, origin);
@@ -210,7 +212,7 @@ namespace Kukolony.Debug
         ///     including cross-ZDO references that a chunked save renormalises, then clean up
         ///     the run's fixtures.
         /// </summary>
-        internal static void RunReload(Colony colony)
+        internal static IEnumerator RunReload(Colony colony)
         {
             LastPassed = false;
             TestReport report = new TestReport("Colony acceptance run 2 - reload");
@@ -265,7 +267,87 @@ namespace Kukolony.Debug
                 report.Check(StoredBagCount(zdo, "Coal") == 3,
                     "villager bag contents survived save and relaunch");
             }
+
+            yield return CheckAnInterruptedHaulFinishes(report, colony, storage);
+
             LastPassed = report.Print();
+        }
+
+        /// <summary>
+        ///     A villager that was carrying a load when the world was saved delivers it.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         This is the one claim the reload phase could not make before, because it is
+        ///         about behaviour rather than stored values and the phase was a plain method
+        ///         that returned before the villager could take a step. Everything else here
+        ///         asks whether a field came back; this asks whether the work did.
+        ///     </para>
+        ///     <para>
+        ///         The recorded state is checked first and separately. A villager that resumed by
+        ///         forgetting everything and starting over would also end up delivering the wood,
+        ///         and would be indistinguishable from one that resumed properly if delivery were
+        ///         the only thing asserted.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckAnInterruptedHaulFinishes(TestReport report, Colony colony,
+            StructureRecord destination)
+        {
+            ZDO hauler = null;
+            foreach (ZDOID member in colony.State.GetMembers(ColonyMemberKind.Villager))
+            {
+                ZDO candidate = ZDOMan.instance.GetZDO(member);
+                if (candidate == null) continue;
+                if (new VillagerState(candidate).Name == PersistedHaulerName) hauler = candidate;
+            }
+
+            report.Check(hauler != null,
+                "the villager that was carrying a load when the world was saved is still here",
+                $"found={(hauler != null)}");
+            if (hauler == null || destination == null) yield break;
+
+            VillagerState state = new VillagerState(hauler);
+            report.Check(state.GetQueue().Contains("resume") && state.Cargo == "Wood",
+                "its orders and what it was carrying came back with it",
+                $"queue=[{string.Join(",", state.GetQueue())}] cargo='{state.Cargo}' " +
+                $"workState={state.WorkState} inBag={StoredBagCount(hauler, "Wood")}");
+
+            report.Check(StoredBagCount(hauler, "Wood") == 5,
+                "control: the load itself survived, so there is something left to deliver",
+                $"inBag={StoredBagCount(hauler, "Wood")}");
+
+            // What the chest holds already is not what this villager delivered. Counting the
+            // total rather than the difference made this pass while the load it was supposed to
+            // be carrying had been delivered before the save.
+            int already = StructureInventory.Count(destination.Id, "Wood");
+
+            GameObject woken = ZNetScene.instance == null
+                ? null
+                : ZNetScene.instance.FindInstance(hauler.m_uid);
+            if (woken != null && woken.TryGetComponent(out ZNetView wokenView) && wokenView.IsValid())
+            {
+                SendRested(wokenView);
+            }
+            else
+            {
+                state.SetEnergy(Energy.Full);
+            }
+
+            int delivered = 0;
+            for (int attempt = 0; attempt < 120 && delivered < 5; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                delivered = StructureInventory.Count(destination.Id, "Wood") - already;
+            }
+
+            GameObject loaded = ZNetScene.instance == null
+                ? null
+                : ZNetScene.instance.FindInstance(hauler.m_uid);
+            Villager villager = loaded == null ? null : loaded.GetComponent<Villager>();
+
+            report.Check(delivered >= 5,
+                "and it finishes the delivery it was interrupted in the middle of",
+                $"delivered={delivered} alreadyThere={already} doing='{villager?.Activity}'");
         }
 
         /// <summary>
@@ -316,6 +398,8 @@ namespace Kukolony.Debug
                 Core.Log.Info($"[Benchmark] primary villager bag before save: live=" +
                               $"{Count(bag.GetInventory(), "Coal")} stored={StoredBagCount(zdo, "Coal")}");
             }
+
+            LeaveAHaulerMidDelivery(colony, target);
 
             // ZDOMan serializes its sector index, not its ID dictionary. Verify the
             // production creature followed the same indexing contract as a vanilla
@@ -1551,6 +1635,101 @@ namespace Kukolony.Debug
             }
 
             return false;
+        }
+
+        /// <summary>
+        ///     A chest with room for part of a load takes that part, rather than refusing it all.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         "Partial deposits are fine; what will not fit stays in the bag" is how the job
+        ///         is specified, and it is the taking half that was written that way - a stack
+        ///         larger than the space left is taken in part rather than refused, because all
+        ///         or nothing means a bag with four free slots ignores a chest holding one
+        ///         enormous stack.
+        ///     </para>
+        ///     <para>
+        ///         The delivering half asks <c>CanAddItem</c>, which answers for the whole stack
+        ///         at once. So this stages the case directly: a chest with room for two more wood
+        ///         and a villager carrying five.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckAPartlyFullChestTakesWhatFits(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(5f, 0f, 7f));
+            yield return new WaitForSecondsRealtime(.3f);
+            StructureRecord store = Register(colony, chest, "Nearly full store");
+            Container container = chest == null ? null : chest.GetComponentInChildren<Container>(true);
+            if (store == null || container == null)
+            {
+                report.Check(false, "partial-deposit check could register a chest");
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, store.Id, s => s.Accepts = new List<string> { "Wood" });
+
+            // Every slot taken, and the last one a wood stack two short of full: room for
+            // exactly two more wood and nowhere else for them to go.
+            Inventory inventory = container.GetInventory();
+            Fill(inventory, "Stone");
+            int width = Mathf.Max(1, inventory.GetWidth());
+            int height = Mathf.Max(1, inventory.GetHeight());
+            ItemDrop.ItemData last = inventory.GetItemAt(width - 1, height - 1);
+            if (last != null) inventory.RemoveItem(last);
+
+            GameObject woodPrefab = ObjectDB.instance?.GetItemPrefab("Wood");
+            int maximum = woodPrefab != null && woodPrefab.TryGetComponent(out ItemDrop woodDrop)
+                ? woodDrop.m_itemData.m_shared.m_maxStackSize
+                : 50;
+            Split(inventory, "Wood", maximum - 2, width - 1, height - 1);
+
+            int roomFor = maximum - CountIn(container, "Wood");
+            report.Check(roomFor == 2 && inventory.GetEmptySlots() == 0,
+                "control: the chest has room for exactly two more wood and no empty slot",
+                $"room={roomFor} emptySlots={inventory.GetEmptySlots()}");
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "squeeze", Name = "Squeeze", Kind = JobKind.Haul, Repeat = 30 }
+            });
+
+            // Five on the ground, which is more than will fit.
+            DropItem("Wood", origin + new Vector3(3f, 0f, 5f), 5);
+
+            Villager hauler = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (hauler == null || !hauler.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "partial-deposit check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "squeeze" });
+
+            int before = CountIn(container, "Wood");
+            int added = 0;
+            for (int sample = 0; sample < 100 && added < 2; sample++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                added = CountIn(container, "Wood") - before;
+            }
+
+            report.Check(added == 2,
+                "a chest with room for part of a load takes that part rather than refusing it all",
+                $"added={added} doing='{hauler?.Activity}'");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.RemoveStructure(store.Id);
+            Release(chest);
+            colony.State.SetJobs(new List<JobDefinition>());
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
         }
 
         /// <summary>
@@ -3603,6 +3782,71 @@ namespace Kukolony.Debug
         ///     "keep destructive fixtures away from other checks' subjects" lesson, arrived at
         ///     a second time by a different route.
         /// </remarks>
+        /// <summary>
+        ///     Leaves a villager holding a load it has not delivered, moments before the save.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The whole design rests on <em>facts outrank the recorded state</em>: a villager
+        ///         that reloads holding something goes straight to delivering it, which is what
+        ///         makes reloads, ownership transfers and stolen targets repair themselves with no
+        ///         migration. Nothing was testing it. The reload phase proved that names, homes
+        ///         and bags survive a save, and said nothing about whether work does.
+        ///     </para>
+        ///     <para>
+        ///         A villager of its own rather than the primary one, whose bag is asserted to
+        ///         hold exactly three coal on the other side: a hauler that delivered or put down
+        ///         part of its load would fail that check from underneath, and the two faults
+        ///         would be indistinguishable.
+        ///     </para>
+        /// </remarks>
+        private static void LeaveAHaulerMidDelivery(Colony colony, StructureRecord destination)
+        {
+            if (colony == null || destination == null) return;
+
+            ColonyOperations.EditSettings(colony, destination.Id,
+                s => s.Accepts = new List<string> { "Wood" });
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "resume", Name = "Resume haul", Kind = JobKind.Haul, Repeat = 30 }
+            });
+
+            Villager hauler = VillagerLifecycle.Spawn(colony);
+            if (hauler == null || !hauler.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                Core.Log.Error("[Benchmark] could not leave a hauler mid-delivery; the reload phase will say so");
+                return;
+            }
+
+            VillagerState state = new VillagerState(view.GetZDO());
+            state.SetName(PersistedHaulerName);
+            state.SetQueue(new List<string> { "resume" });
+
+            Container bag = VillagerInventory.Attach(hauler.gameObject, view);
+            Clear(bag.GetInventory());
+            for (int i = 0; i < 5; i++) Add(bag.GetInventory(), "Wood");
+
+            // Interrupted at the point that matters: carrying, with a destination chosen and
+            // the walk not finished.
+            state.SetCargo("Wood");
+            state.SetDestination(destination.Id);
+            state.SetWorkState((int)Jobs.Haul.HaulState.Delivering);
+
+            // And held there. The save does not happen the instant this returns, and the first
+            // attempt gave the villager long enough to walk over and finish - so the reload
+            // phase found an empty bag, a cleared cargo and a work state back at Choosing, and
+            // reported a villager that had resumed nothing because there was nothing left to
+            // resume. A tired villager yields without touching its trip, which is exactly the
+            // hold this needs; the reload phase wakes it and then watches.
+            state.SetResting(false);
+            state.SetRestRate(0f);
+            state.SetEnergy(0f);
+
+            Core.Log.Info($"[Benchmark] hauler left mid-delivery: carrying={Count(bag.GetInventory(), "Wood")} " +
+                          $"destination={destination.Id}");
+        }
+
         private static StructureRecord RegisterPersistenceSubject(Colony colony)
         {
             GameObject chest = Spawn("piece_chest_wood", colony.transform.position + new Vector3(0f, 0f, -6f));

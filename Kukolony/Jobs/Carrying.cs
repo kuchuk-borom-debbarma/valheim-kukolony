@@ -143,22 +143,24 @@ namespace Kukolony.Jobs
         }
 
         /// <summary>
-        ///     How many of an item a bag could still take.
+        ///     How many of an item an inventory could still take.
         /// </summary>
         /// <remarks>
         ///     Counted rather than asked, because <c>CanAddItem</c> answers only yes or no for a
         ///     whole stack and the interesting case is the partial one. Room in existing stacks
-        ///     of the same item, plus a full stack for every empty slot.
+        ///     of the same item, plus a full stack for every empty slot. Used by both halves of
+        ///     the trip - taking and depositing - so a chest with room for part of a load is
+        ///     treated the same way on the way in as on the way out.
         /// </remarks>
-        private static int RoomFor(Inventory bag, ItemDrop.ItemData item)
+        private static int RoomFor(Inventory inventory, ItemDrop.ItemData item)
         {
             if (item.m_shared == null) return 0;
 
             int maximum = Mathf.Max(1, item.m_shared.m_maxStackSize);
-            int room = bag.GetEmptySlots() * maximum;
+            int room = inventory.GetEmptySlots() * maximum;
 
             string prefab = NameOf(item);
-            foreach (ItemDrop.ItemData existing in bag.GetAllItems())
+            foreach (ItemDrop.ItemData existing in inventory.GetAllItems())
             {
                 if (NameOf(existing) != prefab || existing.m_quality != item.m_quality) continue;
                 room += Mathf.Max(0, maximum - existing.m_stack);
@@ -236,11 +238,20 @@ namespace Kukolony.Jobs
 
             Inventory destination = into.GetInventory();
             if (destination == null) return TakeResult.Unavailable;
-            if (!destination.CanAddItem(item)) return TakeResult.Full;
+
+            // Counted rather than asked. CanAddItem answers for the whole stack at once - it is
+            // free stack space plus empty slots measured against item.m_stack - so a villager
+            // carrying fifty wood to a chest with room for twenty was told no and put down
+            // nothing at all. The taking half has always worked this out properly; this half
+            // asked the yes-or-no question and believed it, and the job is specified the other
+            // way: partial deposits are fine, and what will not fit stays in the bag.
+            int room = RoomFor(destination, item);
+            if (room <= 0) return TakeResult.Full;
 
             if (!TryFindSlot(destination, item, out int x, out int y)) return TakeResult.Full;
 
-            return destination.MoveItemToThis(bag, item, item.m_stack, x, y)
+            int amount = Mathf.Min(item.m_stack, room);
+            return destination.MoveItemToThis(bag, item, amount, x, y)
                 ? TakeResult.Took
                 : TakeResult.Full;
         }

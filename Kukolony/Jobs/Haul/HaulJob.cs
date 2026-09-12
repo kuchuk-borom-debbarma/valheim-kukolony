@@ -206,6 +206,22 @@ namespace Kukolony.Jobs.Haul
             {
                 // Not loaded yet. Its zone may still be streaming in, but waiting forever is
                 // how the previous system hung a villager, so this yields instead.
+                //
+                // Said out loud, coalesced, because two villagers standing still for thirty
+                // seconds is indistinguishable from two villagers walking badly unless
+                // something reports which of them this was. The ZDO's own view of where it is
+                // matters: an object whose record is fine but which nothing instantiated is a
+                // different fault from one whose zone genuinely has not arrived.
+                ZDOID stalled = context.State.Target.IsNone()
+                    ? context.State.Destination
+                    : context.State.Target;
+                ZDO record = stalled.IsNone() ? null : ZDOMan.instance?.GetZDO(stalled);
+                Chatter.Warn("[haul] unresolved target",
+                    $"waiting for {stalled}: zdo={(record == null ? "none" : "valid=" + record.IsValid())} " +
+                    $"at={(record == null ? "?" : record.GetPosition().ToString())} " +
+                    $"sceneInstance={(ZNetScene.instance?.FindInstance(stalled) != null)} " +
+                    $"villagerAt={context.Villager.transform.position}");
+
                 return JobOutcomes.Skipped(context.State, "waiting for the world", out activity);
             }
 

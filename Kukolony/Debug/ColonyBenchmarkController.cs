@@ -121,8 +121,10 @@ namespace Kukolony.Debug
             else if (existing != null)
             {
                 stage = "reload";
-                passed = RunPhase("reload-verification", () => BenchmarkFunctionalScenario.RunReload(existing));
-                passed &= BenchmarkFunctionalScenario.LastPassed;
+                // A coroutine rather than a plain call, because the reload phase now asserts
+                // something that takes time: a villager interrupted mid-delivery finishing it.
+                yield return Guard("reload-verification", BenchmarkFunctionalScenario.RunReload(existing));
+                passed = !_phaseFailed && BenchmarkFunctionalScenario.LastPassed;
                 if (passed)
                 {
                     Cleanup(existing);
