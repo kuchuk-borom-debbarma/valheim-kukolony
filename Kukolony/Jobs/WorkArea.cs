@@ -66,7 +66,14 @@ namespace Kukolony.Jobs
                 ZDO zdo = ZDOMan.instance?.GetZDO(record.Id);
                 if (zdo == null) break;
 
-                float radius = job.WorkRadius > 0f ? job.WorkRadius : DefaultRadius;
+                // A flag brings its own reach - its screen says how far, and a job pointed
+                // at it working a default-sized patch of a larger outpost contradicted the
+                // number the player set. The job's own radius still wins when given, because
+                // "work the near half of the quarry" is a legitimate instruction.
+                float radius = job.WorkRadius > 0f ? job.WorkRadius
+                    : (record.Capabilities & StructureCapability.WorkArea) != 0
+                        ? WorkFlag.RadiusOf(zdo)
+                        : DefaultRadius;
                 return new WorkArea(zdo.GetPosition(), radius, record.Name);
             }
 

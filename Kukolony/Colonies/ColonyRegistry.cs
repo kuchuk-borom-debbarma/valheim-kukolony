@@ -20,14 +20,11 @@ namespace Kukolony.Colonies
         internal static int KnownColonies => ColonyZdos.Count;
 
         /// <summary>
-        ///     Positions of everything every known colony owns, members included.
-        ///     Villagers are excluded - they report their own live position elsewhere,
-        ///     and a stale ZDO position for a walking villager would hold the wrong zone.
-        /// </summary>
-        /// <summary>
         ///     The circles every known Kolony claims: each hearth with its radius, and each
         ///     claimed flag with its own. Read off ZDOs, so an unloaded outpost still holds
-        ///     its ground open - which is the point of planting a flag there.
+        ///     its ground open - which is the point of planting a flag there. The flags'
+        ///     circles come from <see cref="KolonyReach" />, so what the keep-alive holds and
+        ///     what reach answers are one rendering, not two that must stay identical.
         /// </summary>
         internal static void CollectAreas(List<Vector4> into)
         {
@@ -35,8 +32,6 @@ namespace Kukolony.Colonies
             {
                 return;
             }
-
-            float hearthRadius = ModConfig.ColonyRadius != null ? ModConfig.ColonyRadius.Value : 48f;
 
             foreach (ZDO colonyZdo in ColonyZdos)
             {
@@ -49,22 +44,17 @@ namespace Kukolony.Colonies
                 // structures fed the halo, so a hearth with neither held nothing open and a
                 // fresh Kolony's ground could unload out from under its first villager.
                 Vector3 home = colonyZdo.GetPosition();
-                into.Add(new Vector4(home.x, home.y, home.z, hearthRadius));
+                into.Add(new Vector4(home.x, home.y, home.z, Colony.ConfiguredRadius));
 
-                ColonyState state = new ColonyState(colonyZdo);
-                foreach (StructureRecord structure in state.GetStructures())
-                {
-                    if ((structure.Capabilities & StructureCapability.WorkArea) == 0) continue;
-
-                    ZDO zdo = ZDOMan.instance.GetZDO(structure.Id);
-                    if (zdo == null || !zdo.IsValid()) continue;
-
-                    Vector3 at = zdo.GetPosition();
-                    into.Add(new Vector4(at.x, at.y, at.z, WorkFlag.RadiusOf(zdo)));
-                }
+                KolonyReach.CollectFlagAreas(new ColonyState(colonyZdo), into);
             }
         }
 
+        /// <summary>
+        ///     Positions of everything every known colony owns, members included.
+        ///     Villagers are excluded - they report their own live position elsewhere,
+        ///     and a stale ZDO position for a walking villager would hold the wrong zone.
+        /// </summary>
         internal static void CollectMemberPositions(List<Vector3> into)
         {
             if (ZDOMan.instance == null)

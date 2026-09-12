@@ -116,6 +116,7 @@ namespace Kukolony.KeepAlive
             _refreshTimer = 0f;
             _villagerZdos.Clear();
             ColonyRegistry.Clear();
+            KolonyReach.Clear();
             KeepAliveZones.Clear();
             LoadAllowlist.Clear();
             StopAllCoroutines();

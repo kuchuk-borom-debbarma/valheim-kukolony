@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Kukolony.Core;
 using UnityEngine;
 
@@ -30,16 +29,9 @@ namespace Kukolony.Colonies
     /// </remarks>
     internal sealed class WorkFlag : MonoBehaviour, Hoverable, Interactable
     {
-        /// <summary>Loaded flags, maintained the way <see cref="Colony.Instances" /> is.</summary>
-        internal static List<WorkFlag> Instances { get; } = new List<WorkFlag>();
-
         private static readonly int RadiusKey = "kukolony.flag.radius.v1".GetStableHashCode();
 
         private ZNetView _nview;
-
-        private void Awake() => Instances.Add(this);
-
-        private void OnDestroy() => Instances.Remove(this);
 
         private bool Bind()
         {
@@ -67,7 +59,13 @@ namespace Kukolony.Colonies
 
         internal void SetRadius(float radius)
         {
-            if (!Bind() || !_nview.IsOwner()) return;
+            if (!Bind()) return;
+
+            // Claim, then write - the same move AssignFlag makes on this very ZDO. Gating
+            // on IsOwner instead silently dropped the change for any peer that did not
+            // happen to own the flag's zone: the screen's slider snapped back to the old
+            // number with nothing said, which reads as a broken control.
+            _nview.ClaimOwnership();
             _nview.GetZDO().Set(RadiusKey, Mathf.Max(8f, radius));
         }
 
@@ -109,14 +107,16 @@ namespace Kukolony.Colonies
 
         /// <summary>
         ///     The owning Kolony's name, readable whether or not that Kolony is loaded.
+        ///     Shared with the assign screen, so the flag and its screen cannot come to
+        ///     word the same Kolony differently.
         /// </summary>
-        private static string OwnerName(ZDOID owner)
+        internal static string OwnerName(ZDOID owner)
         {
             ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(owner) : null;
             if (zdo == null || !zdo.IsValid()) return "a Kolony that is gone";
 
             string name = new ColonyState(zdo).Name;
-            return string.IsNullOrEmpty(name) ? "an unnamed Kolony" : name;
+            return string.IsNullOrEmpty(name) ? Colony.UnnamedLabel : name;
         }
     }
 }

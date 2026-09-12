@@ -117,7 +117,14 @@ namespace Kukolony.Villagers.Navigation
             // Water ahead on a journey is crossed deliberately, not stalled at. This is
             // before the stall test on purpose: the shoreline is exactly where a villager
             // stops making progress, and waiting for the stall means waiting at the beach.
-            if (facts.Travelling && facts.WaterAhead) return Locomotion.BeginRescue;
+            //
+            // But only unseen. Crossing water is covering ground, and covering ground in
+            // view is the one thing the whole ladder exists to prevent - and the probe is a
+            // straight chord to the waypoint, so a walkable route that merely curves around
+            // a bay reads as water. Watched, the villager keeps walking; if the water really
+            // does block it, the stall ladder below takes over with its measured politeness.
+            if (facts.Travelling && facts.WaterAhead && !facts.Observed)
+                return Locomotion.BeginRescue;
 
             if (!facts.Travelling || !facts.Stalled) return Locomotion.Walk;
 

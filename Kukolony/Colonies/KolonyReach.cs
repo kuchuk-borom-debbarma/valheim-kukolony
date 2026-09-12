@@ -18,9 +18,13 @@ namespace Kukolony.Colonies
     ///     <para>
     ///         Flag positions and radii are read off ZDOs, so an unloaded flag still extends
     ///         reach — its outpost keeps working with nobody there, which is the point of it.
-    ///         Cached per Kolony against the structures revision, because reach is asked per
-    ///         record inside index rebuilds and decoding the structure list per question would
-    ///         make the rebuild quadratic.
+    ///         What is cached per Kolony against the structures revision is the expensive
+    ///         part: decoding the structure list down to the flags' ids, because reach is
+    ///         asked per record inside index rebuilds and decoding per question would make
+    ///         the rebuild quadratic. Positions and radii are read fresh on every ask — a
+    ///         radius change writes only the flag's own ZDO and bumps no revision, and a
+    ///         circle frozen at snapshot time kept answering with the reach the flag used to
+    ///         have.
     ///     </para>
     /// </remarks>
     internal static class KolonyReach
@@ -28,6 +32,7 @@ namespace Kukolony.Colonies
         private sealed class Snapshot
         {
             internal int Revision;
+            internal readonly List<ZDOID> Flags = new List<ZDOID>();
             internal readonly List<Vector4> Areas = new List<Vector4>();
         }
 
@@ -68,25 +73,55 @@ namespace Kukolony.Colonies
             if (key.IsNone()) return System.Array.Empty<Vector4>();
 
             int revision = colony.State.StructuresRevision;
-            if (Snapshots.TryGetValue(key, out Snapshot cached) && cached.Revision == revision)
+            if (!Snapshots.TryGetValue(key, out Snapshot cached) || cached.Revision != revision)
             {
-                return cached.Areas;
+                cached = new Snapshot { Revision = revision };
+                foreach (StructureRecord record in colony.State.GetStructures())
+                {
+                    if ((record.Capabilities & StructureCapability.WorkArea) == 0) continue;
+                    cached.Flags.Add(record.Id);
+                }
+
+                Snapshots[key] = cached;
             }
 
-            Snapshot fresh = new Snapshot { Revision = revision };
-            foreach (StructureRecord record in colony.State.GetStructures())
+            // Resolved on every ask, never frozen into the snapshot: a flag whose ZDO was
+            // momentarily unresolved is retried rather than staying a hole in reach until
+            // some unrelated structure edit, and an edited radius answers immediately.
+            cached.Areas.Clear();
+            foreach (ZDOID id in cached.Flags)
+            {
+                if (TryCircle(id, out Vector4 circle)) cached.Areas.Add(circle);
+            }
+
+            return cached.Areas;
+        }
+
+        /// <summary>
+        ///     Appends every claimed flag's circle from a Kolony's records, loaded or not.
+        ///     The keep-alive walks hearth ZDOs directly, so it cannot go through
+        ///     <see cref="FlagAreas" /> — but it must render the same circles, or ground
+        ///     that registers would be ground that unloads.
+        /// </summary>
+        internal static void CollectFlagAreas(ColonyState state, List<Vector4> into)
+        {
+            foreach (StructureRecord record in state.GetStructures())
             {
                 if ((record.Capabilities & StructureCapability.WorkArea) == 0) continue;
-
-                ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(record.Id) : null;
-                if (zdo == null || !zdo.IsValid()) continue;
-
-                Vector3 at = zdo.GetPosition();
-                fresh.Areas.Add(new Vector4(at.x, at.y, at.z, WorkFlag.RadiusOf(zdo)));
+                if (TryCircle(record.Id, out Vector4 circle)) into.Add(circle);
             }
+        }
 
-            Snapshots[key] = fresh;
-            return fresh.Areas;
+        /// <summary>The circle a flag's ZDO claims, when the ZDO resolves.</summary>
+        private static bool TryCircle(ZDOID id, out Vector4 circle)
+        {
+            circle = default;
+            ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(id) : null;
+            if (zdo == null || !zdo.IsValid()) return false;
+
+            Vector3 at = zdo.GetPosition();
+            circle = new Vector4(at.x, at.y, at.z, WorkFlag.RadiusOf(zdo));
+            return true;
         }
     }
 }

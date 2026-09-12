@@ -64,7 +64,7 @@ namespace Kukolony.Colonies
             {
                 case StructureSort.Type: records = records.OrderBy(r => r.Prefab).ThenBy(r => r.Name); break;
                 case StructureSort.Capability: records = records.OrderBy(r => (int)r.Capabilities).ThenBy(r => r.Name); break;
-                case StructureSort.Status: records = records.OrderByDescending(r => r.IsLiveIn(colony)).ThenBy(r => r.Name); break;
+                case StructureSort.Status: records = records.OrderByDescending(r => r.StatusIn(colony) == StructureStatus.Ready).ThenBy(r => r.Name); break;
                 default: records = records.OrderBy(r => r.Name); break;
             }
             return records.ToList();

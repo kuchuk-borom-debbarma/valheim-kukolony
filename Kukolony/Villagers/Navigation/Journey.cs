@@ -63,6 +63,13 @@ namespace Kukolony.Villagers.Navigation
 
         private const float ProbeStep = 12f;
 
+        /// <summary>
+        ///     How far under the surface ground must sit before it counts as water. A ford a
+        ///     villager can wade through on foot is not a crossing, and counting any depth at
+        ///     all sent villagers into a deliberate crossing over ankle-deep shallows.
+        /// </summary>
+        private const float WadeDepth = 1.5f;
+
         /// <summary>How far around the projected next stretch to look for walkable ground.</summary>
         private const float LegSearch = 15f;
 
@@ -139,7 +146,7 @@ namespace Kukolony.Villagers.Navigation
             for (float along = ProbeStep; along <= span; along += ProbeStep)
             {
                 Vector3 at = from + step * along;
-                if (WorldGenerator.instance.GetHeight(at.x, at.z) < water)
+                if (WorldGenerator.instance.GetHeight(at.x, at.z) < water - WadeDepth)
                 {
                     _waterAhead = true;
                     break;
@@ -177,6 +184,7 @@ namespace Kukolony.Villagers.Navigation
             {
                 _destination = destination;
                 _travelling = false;
+                ForgetWater();
             }
 
             if (!_travelling && remaining > HopLength) _travelling = true;
@@ -217,7 +225,21 @@ namespace Kukolony.Villagers.Navigation
             PokeAhead(here, destination);
         }
 
-        internal void Forget() => _travelling = false;
+        internal void Forget()
+        {
+            _travelling = false;
+
+            // The probe caches for a second, so a water flag latched at the end of one
+            // errand survived into the next one started within it - and a villager on dry
+            // land opened its new journey with a phantom crossing.
+            ForgetWater();
+        }
+
+        private void ForgetWater()
+        {
+            _waterAhead = false;
+            _nextProbe = 0f;
+        }
 
         /// <summary>
         ///     Whether anyone could see this happen.

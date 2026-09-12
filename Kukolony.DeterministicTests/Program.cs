@@ -364,13 +364,21 @@ static class Program
         Case($"every combination of facts produces an action (idle in {idle})", idle == 0);
 
         // Water. Ground that can never be walked is known in advance, so an ocean is a
-        // decision rather than a forty-five-second stall at the shoreline.
-        Case("water ahead on a journey starts the crossing without waiting to stall",
-            Locomotor.Decide(new TravelFacts(false, true, false, true, false, true, true,
+        // decision rather than a forty-five-second stall at the shoreline - but only where
+        // nobody can see it, because crossing water is covering ground, and the probe is a
+        // straight chord that reads a walkable route around a bay as water.
+        Case("water ahead on an unseen journey starts the crossing without waiting to stall",
+            Locomotor.Decide(new TravelFacts(false, true, false, false, false, true, true,
                 waterAhead: true)) == Locomotion.BeginRescue);
         Case("control: the same villager on dry ground walks",
-            Locomotor.Decide(new TravelFacts(false, true, false, true, false, true, true))
+            Locomotor.Decide(new TravelFacts(false, true, false, false, false, true, true))
                 == Locomotion.Walk);
+        Case("watched, water ahead does not start a glide - the villager keeps walking",
+            Locomotor.Decide(new TravelFacts(false, true, false, true, false, true, true,
+                waterAhead: true)) == Locomotion.Walk);
+        Case("watched and genuinely blocked, the stall ladder still takes over",
+            Locomotor.Decide(new TravelFacts(false, true, false, true, true, true, true,
+                waterAhead: true)) == Locomotion.PutBackOnNavmesh);
         Case("a crossing does not hand back onto its feet in the middle of the sea",
             Locomotor.Decide(new TravelFacts(true, true, true, true, true, true, true,
                 waterAhead: true)) == Locomotion.CoverGround);

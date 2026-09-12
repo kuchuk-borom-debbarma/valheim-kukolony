@@ -27,7 +27,15 @@ namespace Kukolony.Colonies
 
         internal ZDOID Id => Bind() && _nview.IsValid() ? _nview.GetZDO().m_uid : ZDOID.None;
 
-        internal float EffectiveRadius => ModConfig.ColonyRadius != null ? ModConfig.ColonyRadius.Value : 48f;
+        /// <summary>
+        ///     The hearth radius as configured, for callers that have no loaded instance -
+        ///     the keep-alive reads hearths straight off ZDOs. One reading of the number,
+        ///     so zones and reach cannot come to disagree about how far a hearth reaches.
+        /// </summary>
+        internal static float ConfiguredRadius =>
+            ModConfig.ColonyRadius != null ? ModConfig.ColonyRadius.Value : 48f;
+
+        internal float EffectiveRadius => ConfiguredRadius;
 
         private void Awake() => Instances.Add(this);
 
@@ -116,12 +124,18 @@ namespace Kukolony.Colonies
         {
             if (record == null || !Bind() || !_nview.IsValid()) return false;
 
-            // A flag is exempt from the liveness gate for the same reason registration's
+            // The same union reach the registration gate just approved: hearth radius or any
+            // claimed flag's circle. Gating on the hearth-only IsLiveIn here re-refused the
+            // chest a flag exists to make registrable - Register() said yes, this said no,
+            // and a structure being moved between Kolonies was released from its old one
+            // while landing in neither.
+            //
+            // A flag is exempt from the gate entirely, for the same reason registration's
             // reach check exempts it: until this very record lands in the list, the union
             // cannot include the flag's own circle, and the gate would refuse the one thing
             // whose job is to extend it.
             bool isFlag = (record.Capabilities & StructureCapability.WorkArea) != 0;
-            if (!isFlag && !record.IsLiveIn(this)) return false;
+            if (!isFlag && record.StatusIn(this) != StructureStatus.Ready) return false;
             _nview.ClaimOwnership();
             List<StructureRecord> records = State.GetStructures();
             int index = records.FindIndex(r => r.Id == record.Id);

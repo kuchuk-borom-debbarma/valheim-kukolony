@@ -97,8 +97,16 @@ namespace Kukolony.KeepAlive
             }
 
             // Circles: every zone the circle touches, plus one ring of neighbours so the
-            // edge of an outpost is walkable ground rather than a cliff into nothing. The
-            // same all-or-nothing rule, sized before committing.
+            // edge of an outpost is walkable ground rather than a cliff into nothing.
+            //
+            // Filled nearest the anchor first, and truncated rather than refused. The
+            // all-or-nothing rule that is right for a villager's halo is wrong here: the
+            // config allows radii whose footprint alone exceeds the cap, and a circle
+            // refused wholesale meant the largest outposts - the ones a flag exists for -
+            // were exactly the ones holding nothing open, while reach went on reporting
+            // their ground Ready. A truncated circle keeps the flag and the ground closest
+            // to it, which degrades instead of vanishing.
+            List<Vector2s> circle = new List<Vector2s>();
             foreach (Vector4 area in areas)
             {
                 Vector3 at = new Vector3(area.x, area.y, area.z);
@@ -107,14 +115,7 @@ namespace Kukolony.KeepAlive
                 Vector2s low = ZoneSystem.GetZone(at - new Vector3(reach, 0f, reach));
                 Vector2s high = ZoneSystem.GetZone(at + new Vector3(reach, 0f, reach));
 
-                int size = (high.x - low.x + 1) * (high.y - low.y + 1);
-                if (Zones.Count + size > cap)
-                {
-                    capped = true;
-                    dropped++;
-                    continue;
-                }
-
+                circle.Clear();
                 for (short y = low.y; y <= high.y; y++)
                 {
                     for (short x = low.x; x <= high.x; x++)
@@ -126,8 +127,25 @@ namespace Kukolony.KeepAlive
                         float dz = Mathf.Max(Mathf.Abs(at.z - zoneCentre.z) - 32f, 0f);
                         if (dx * dx + dz * dz > reach * reach) continue;
 
-                        Zones.Add(new Vector2s(x, y));
+                        circle.Add(new Vector2s(x, y));
                     }
+                }
+
+                circle.Sort((a, b) =>
+                    SquaredZoneDistance(a, at).CompareTo(SquaredZoneDistance(b, at)));
+
+                foreach (Vector2s zone in circle)
+                {
+                    if (Zones.Contains(zone)) continue;
+                    if (Zones.Count >= cap)
+                    {
+                        // Sorted nearest-first, so everything not yet added is the far edge.
+                        capped = true;
+                        dropped++;
+                        break;
+                    }
+
+                    Zones.Add(zone);
                 }
             }
 
@@ -162,13 +180,21 @@ namespace Kukolony.KeepAlive
                 if (capped)
                 {
                     Log.Warning($"[KeepAlive] zone cap of {cap} reached - {_dropped} anchor(s) " +
-                                "are not being kept loaded. Raise KeepAliveMaxZones if this is a real outpost.");
+                                "dropped or truncated. Raise KeepAliveMaxZones if this is a real outpost.");
                 }
                 else
                 {
                     Log.Info("[KeepAlive] back under the zone cap.");
                 }
             }
+        }
+
+        /// <summary>How far a zone's centre sits from an anchor, for nearest-first filling.</summary>
+        private static float SquaredZoneDistance(Vector2s zone, Vector3 anchor)
+        {
+            float dx = anchor.x - zone.x * 64f;
+            float dz = anchor.z - zone.y * 64f;
+            return dx * dx + dz * dz;
         }
     }
 }

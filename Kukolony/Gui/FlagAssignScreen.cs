@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using Jotunn.Managers;
 using Kukolony.Colonies;
@@ -33,6 +34,8 @@ namespace Kukolony.Gui
         private GameObject _content;
         private WorkFlag _flag;
         private bool _blocked;
+        private bool _scanning;
+        private int _page;
 
         internal static void Register() => GUIManager.OnCustomGUIAvailable += Rebuild;
 
@@ -58,9 +61,36 @@ namespace Kukolony.Gui
             }
 
             _instance._flag = flag;
+            _instance._page = 0;
             _instance._root.SetActive(true);
             _instance.Block(true);
             _instance.Refresh();
+            _instance.EnsureScanned();
+        }
+
+        /// <summary>
+        ///     Sweeps for hearths when none are known yet.
+        /// </summary>
+        /// <remarks>
+        ///     The registry is normally filled by the keep-alive driver's scan - which runs
+        ///     only on the server, and only while the feature is enabled. A client on a
+        ///     dedicated server, or anyone with keep-alive off, opened this screen to "No
+        ///     Kolony exists yet" with hearths standing in the world. The screen is the
+        ///     other thing that needs the list, so it sweeps for itself.
+        /// </remarks>
+        private void EnsureScanned()
+        {
+            if (_scanning || ColonyRegistry.KnownColonies > 0) return;
+
+            _scanning = true;
+            StartCoroutine(ScanThenRefresh());
+        }
+
+        private IEnumerator ScanThenRefresh()
+        {
+            yield return ColonyRegistry.Scan();
+            _scanning = false;
+            if (_root != null && _root.activeSelf && _flag != null) Refresh();
         }
 
         private void Build()
@@ -115,14 +145,19 @@ namespace Kukolony.Gui
                 Destroy(child.gameObject);
             }
 
+            // Children die at the end of the frame, so without this the new rows are laid
+            // out alongside the old ones for a frame - the same flicker the Kolony screen's
+            // rebuild already guards against.
+            _content.transform.DetachChildren();
+
             Widgets.Title(_content.transform, "Kolony Flag");
 
             ZDOID owner = _flag.Owner;
             Widgets.Subtitle(_content.transform, owner.IsNone()
                 ? "Claimed by nobody. Choose the Kolony this flag works for."
-                : "Working for " + OwnerName(owner));
+                : "Working for " + WorkFlag.OwnerName(owner));
 
-            Column column = new Column(_content.transform, 0);
+            Column column = new Column(_content.transform, _page);
 
             if (column.TryRow(out Row radius))
             {
@@ -138,7 +173,9 @@ namespace Kukolony.Gui
             IReadOnlyList<ZDO> known = ColonyRegistry.GetKnownColonies();
             if (known.Count == 0 && column.TryRow(out Row none))
             {
-                Widgets.Label(none, "No Kolony exists yet. Place a Kolony Hearth first.", Color.gray);
+                Widgets.Label(none, _scanning
+                    ? "Looking for Kolonies..."
+                    : "No Kolony exists yet. Place a Kolony Hearth first.", Color.gray);
             }
 
             foreach (ZDO hearth in known)
@@ -147,7 +184,7 @@ namespace Kukolony.Gui
                 if (!column.TryRow(out Row row)) continue;
 
                 string name = new ColonyState(hearth).Name;
-                if (string.IsNullOrEmpty(name)) name = "an unnamed Kolony";
+                if (string.IsNullOrEmpty(name)) name = Colony.UnnamedLabel;
 
                 float away = Utils.DistanceXZ(hearth.GetPosition(), _flag.transform.position);
                 Widgets.Caption(row, $"{name} <color=grey>({away:0} m away)</color>", 420f);
@@ -159,16 +196,46 @@ namespace Kukolony.Gui
                     if (current) return;
 
                     RegisterOutcome outcome = ColonyOperations.AssignFlag(id, _flag);
-                    Report.Say(ColonyOperations.Explain(outcome, name,
-                        StructureRegistry.DisplayName(_flag.gameObject)));
+                    // The flag is the "what" and the Kolony is where it went - swapped,
+                    // this reported "Registered Fort Kuku to Kolony Flag".
+                    Report.Say(ColonyOperations.Explain(outcome,
+                        StructureRegistry.DisplayName(_flag.gameObject), name));
                     Refresh();
                 });
             }
 
-            if (column.TryRow(out Row close))
+            if (column.PageOverran)
             {
-                Widgets.Button(close, "Close", 160f, Close);
+                // The list shrank under a page the player had turned to. Step back rather
+                // than showing an empty screen that looks like every Kolony vanished.
+                _page = column.Pages - 1;
+                Refresh();
+                return;
             }
+
+            if (column.Pages > 1)
+            {
+                Row pager = new Row(_content.transform, Panel.PagerY);
+                Widgets.Caption(pager, string.Empty, 260f);
+                Widgets.Button(pager, "<", 60f, () =>
+                {
+                    _page = Mathf.Max(0, _page - 1);
+                    Refresh();
+                });
+                Widgets.Caption(pager, $"{_page + 1} / {column.Pages}", 90f);
+                Widgets.Button(pager, ">", 60f, () =>
+                {
+                    _page = Mathf.Min(column.Pages - 1, _page + 1);
+                    Refresh();
+                });
+            }
+
+            // The footer, not a column row: a row has to fit on the current page, and a
+            // world with more Kolonies than fit one page silently never rendered Close,
+            // leaving Escape as the only way out.
+            Row footer = new Row(_content.transform, Panel.FooterY);
+            Widgets.Caption(footer, string.Empty, 260f);
+            Widgets.Button(footer, "Close", 160f, Close);
         }
 
         private void Block(bool value)
@@ -177,15 +244,6 @@ namespace Kukolony.Gui
 
             _blocked = value;
             GUIManager.BlockInput(value);
-        }
-
-        private static string OwnerName(ZDOID owner)
-        {
-            ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(owner) : null;
-            if (zdo == null || !zdo.IsValid()) return "a Kolony that is gone";
-
-            string name = new ColonyState(zdo).Name;
-            return string.IsNullOrEmpty(name) ? "an unnamed Kolony" : name;
         }
 
         private static List<Transform> Children(Transform parent)
