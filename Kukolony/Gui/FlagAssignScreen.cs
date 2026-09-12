@@ -33,7 +33,7 @@ namespace Kukolony.Gui
         private GameObject _content;
         private WorkFlag _flag;
         private bool _blocked;
-        private bool _awaitingSweep;
+        private int _seenRevision;
         private int _page;
 
         internal static void Register() => GUIManager.OnCustomGUIAvailable += Rebuild;
@@ -63,7 +63,7 @@ namespace Kukolony.Gui
             // runs while the screen shows the definitive "No Kolony exists yet" instead
             // of saying it is looking.
             ColonyRegistry.EnsureFresh(_instance);
-            _instance._awaitingSweep = ColonyRegistry.Sweeping;
+            _instance._seenRevision = ColonyRegistry.Revision;
 
             _instance._flag = flag;
             _instance._page = 0;
@@ -97,20 +97,24 @@ namespace Kukolony.Gui
                 return;
             }
 
-            // The sweep the open kicked off has landed; show what it found.
-            if (_awaitingSweep && !ColonyRegistry.Sweeping)
-            {
-                _awaitingSweep = false;
-                Refresh();
-            }
-
             // The flag being destroyed under the open screen - broken by an enemy, or
             // hammered away by the player - leaves every row describing a thing that is
-            // gone. Same rule as the Kolony screen: close, and say why.
+            // gone. Same rule as the Kolony screen: close, and say why. Checked before
+            // the rebuild below, which would otherwise dereference the destroyed flag.
             if (_flag == null)
             {
                 Report.Say("The flag is gone.");
                 Close();
+                return;
+            }
+
+            // Any sweep landing with news redraws the open screen - whoever ran it. A
+            // latch armed only at open missed the driver's scans on a host and the pins'
+            // sweeps on a client, so rows only ever appeared after close-and-reopen.
+            if (_seenRevision != ColonyRegistry.Revision)
+            {
+                _seenRevision = ColonyRegistry.Revision;
+                Refresh();
             }
         }
 
@@ -152,25 +156,13 @@ namespace Kukolony.Gui
             // Counted over the hearths that still resolve, not the raw list: a destroyed
             // hearth's stale entry used to suppress this row while the per-row filter
             // below rendered nothing, which read as an unexplained empty screen.
-            IReadOnlyList<ZDO> known = ColonyRegistry.GetKnownColonies();
-            bool anyValid = false;
-            foreach (ZDO hearth in known)
-            {
-                if (hearth != null && hearth.IsValid())
-                {
-                    anyValid = true;
-                    break;
-                }
-            }
-
-            if (!anyValid && column.TryRow(out Row none))
+            if (!ColonyRegistry.AnyValid() && column.TryRow(out Row none))
             {
                 Widgets.Label(none, EmptyListExplanation(), Color.gray);
             }
 
-            foreach (ZDO hearth in known)
+            foreach (ZDO hearth in ColonyRegistry.ValidColonies())
             {
-                if (hearth == null || !hearth.IsValid()) continue;
                 if (!column.TryRow(out Row row)) continue;
 
                 string name = new ColonyState(hearth).Name;
@@ -212,9 +204,7 @@ namespace Kukolony.Gui
             // The footer, not a column row: a row has to fit on the current page, and a
             // world with more Kolonies than fit one page silently never rendered Close,
             // leaving Escape as the only way out.
-            Row footer = new Row(_content.transform, Panel.FooterY);
-            Widgets.Caption(footer, string.Empty, 260f);
-            Widgets.Button(footer, "Close", 140f, Close);
+            Widgets.Footer(_content.transform, Close);
         }
 
         private void Block(bool value)

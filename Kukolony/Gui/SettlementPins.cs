@@ -88,10 +88,8 @@ namespace Kukolony.Gui
             // Everything is read from records rather than from loaded instances, so a settlement
             // across the map - with its outposts and its people - is on the map. That is the case
             // a map is for; one that only shows what you are standing next to is a compass.
-            foreach (ZDO known in ColonyRegistry.GetKnownColonies())
+            foreach (ZDO known in ColonyRegistry.ValidColonies())
             {
-                if (known == null || !known.IsValid()) continue;
-
                 ColonyState state = new ColonyState(known);
                 string settlement = string.IsNullOrEmpty(state.Name)
                     ? Colonies.Colony.UnnamedLabel

@@ -367,6 +367,17 @@ namespace Kukolony.Villagers.Navigation
         /// </remarks>
         internal bool CanStand(Character body) => TryFindStanding(body, out _);
 
+        /// <summary>
+        ///     Whether there is somewhere to stand within a stride or two, for the one
+        ///     decision where <see cref="CanStand" />'s sixty-metre generosity is wrong: a
+        ///     watched water crossing must land only where landing reads as stepping
+        ///     ashore, not as snapping to a shore across the bay.
+        /// </summary>
+        internal bool CanStandNear(Character body) =>
+            body != null && Pathfinding.instance != null &&
+            Pathfinding.instance.FindValidPoint(out _, body.transform.position,
+                ResumeSearches[0], _ai.m_pathAgentType);
+
         private bool TryFindStanding(Character body, out Vector3 point)
         {
             point = Vector3.zero;

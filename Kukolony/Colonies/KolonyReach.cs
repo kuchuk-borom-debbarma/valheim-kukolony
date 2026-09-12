@@ -21,10 +21,10 @@ namespace Kukolony.Colonies
     ///         What is cached per Kolony against the structures revision is the expensive
     ///         part: decoding the structure list down to the flags' ids, because reach is
     ///         asked per record inside index rebuilds and decoding per question would make
-    ///         the rebuild quadratic. Positions and radii are read fresh on every ask — a
-    ///         radius change writes only the flag's own ZDO and bumps no revision, and a
-    ///         circle frozen at snapshot time kept answering with the reach the flag used to
-    ///         have.
+    ///         the rebuild quadratic. Positions and radii are re-read at most once per
+    ///         frame — a radius change writes only the flag's own ZDO and bumps no
+    ///         revision, and a circle frozen at snapshot time kept answering with the reach
+    ///         the flag used to have.
     ///     </para>
     /// </remarks>
     internal static class KolonyReach

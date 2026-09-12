@@ -23,7 +23,8 @@ namespace Kukolony.Villagers.Navigation
     internal readonly struct TravelFacts
     {
         internal TravelFacts(bool rescuing, bool travelling, bool burstSpent, bool observed,
-            bool stalled, bool politeRescuesLeft, bool canStand, bool waterAhead = false)
+            bool stalled, bool politeRescuesLeft, bool canStand, bool waterAhead = false,
+            bool nearLand = false)
         {
             Rescuing = rescuing;
             Travelling = travelling;
@@ -33,6 +34,7 @@ namespace Kukolony.Villagers.Navigation
             PoliteRescuesLeft = politeRescuesLeft;
             CanStand = canStand;
             WaterAhead = waterAhead;
+            NearLand = nearLand;
         }
 
         /// <summary>Already covering ground rather than walking.</summary>
@@ -55,6 +57,21 @@ namespace Kukolony.Villagers.Navigation
 
         /// <summary>There is somewhere within reach an agent of this kind can stand.</summary>
         internal bool CanStand { get; }
+
+        /// <summary>
+        ///     There is somewhere to stand within a stride or two - close enough that being
+        ///     put down there reads as stepping ashore rather than teleporting.
+        /// </summary>
+        /// <remarks>
+        ///     <see cref="CanStand" /> searches out to sixty metres, because a rescue on
+        ///     land is better placed far than not placed at all. A watched water crossing
+        ///     is the one case where that generosity is wrong: putting a mid-sea villager
+        ///     down on a shore sixty metres away - possibly the shore it left - is a snap
+        ///     in front of the player, and landing on the departure shore restarts the
+        ///     whole crossing. Near land, landing is believable; far from it, the crossing
+        ///     continues.
+        /// </remarks>
+        internal bool NearLand { get; }
 
         /// <summary>
         ///     The next stretch of the route is under water.
@@ -104,13 +121,14 @@ namespace Kukolony.Villagers.Navigation
                 // Otherwise stop when the rescue is spent, or when somebody can see it and it has
                 // not yet earned the right to be seen doing this - but only where there is ground
                 // to stand on. Otherwise keep going, because the alternative is standing still.
-                // Never back on foot into the sea unseen: while the route ahead is water and
-                // nobody watches, the crossing continues whatever a burst timer would prefer.
-                // The landing is what CanStand is for. But a watched crossing follows the same
-                // rules as every other watched rescue below - a player walking up to a villager
-                // mid-crossing must see it land where landing is possible, not glide onward
-                // because the chord to its waypoint still clips water.
-                if (facts.WaterAhead && !facts.Observed) return Locomotion.CoverGround;
+                // Never back on foot into the sea: while the route ahead is water the crossing
+                // continues, unseen unconditionally, and watched unless there is land within a
+                // stride - because "land where landing is possible" through CanStand's
+                // sixty-metre search meant a mid-sea villager snapping onto the shore it left,
+                // in front of the player, and starting the crossing over. Stepping ashore is
+                // believable; teleporting to a shore is not.
+                if (facts.WaterAhead && !(facts.Observed && facts.NearLand))
+                    return Locomotion.CoverGround;
 
                 bool wantsToWalk = facts.BurstSpent || (facts.Observed && facts.PoliteRescuesLeft);
 

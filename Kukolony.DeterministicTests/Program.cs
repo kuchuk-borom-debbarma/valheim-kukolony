@@ -348,12 +348,12 @@ static class Program
         // never left doing neither. Every combination must produce something that moves it or
         // puts it somewhere it can move from.
         int idle = 0;
-        for (int bits = 0; bits < 256; bits++)
+        for (int bits = 0; bits < 512; bits++)
         {
             TravelFacts facts = new TravelFacts(
                 (bits & 1) != 0, (bits & 2) != 0, (bits & 4) != 0, (bits & 8) != 0,
                 (bits & 16) != 0, (bits & 32) != 0, canStand: (bits & 64) != 0,
-                waterAhead: (bits & 128) != 0);
+                waterAhead: (bits & 128) != 0, nearLand: (bits & 256) != 0);
 
             Locomotion move = Locomotor.Decide(facts);
             if (move != Locomotion.Walk && move != Locomotion.CoverGround &&
@@ -385,10 +385,13 @@ static class Program
         Case("control: the same crossing with land ahead comes back on foot",
             Locomotor.Decide(new TravelFacts(true, true, true, false, true, true, true))
                 == Locomotion.BackOnFoot);
-        Case("a player walking up to a crossing sees it land where landing is possible",
+        Case("a player walking up to a crossing sees it step ashore when the shore is a stride away",
             Locomotor.Decide(new TravelFacts(true, true, false, true, true, true, true,
-                waterAhead: true)) == Locomotion.BackOnFoot);
-        Case("control: watched mid-sea with nowhere to stand still keeps going",
+                waterAhead: true, nearLand: true)) == Locomotion.BackOnFoot);
+        Case("watched mid-sea far from any shore keeps crossing rather than snapping to one",
+            Locomotor.Decide(new TravelFacts(true, true, false, true, true, true, true,
+                waterAhead: true)) == Locomotion.CoverGround);
+        Case("control: watched mid-sea with nowhere to stand at all still keeps going",
             Locomotor.Decide(new TravelFacts(true, true, false, true, true, true, false,
                 waterAhead: true)) == Locomotion.CoverGround);
         Case("water near home is not a journey and is not crossed",

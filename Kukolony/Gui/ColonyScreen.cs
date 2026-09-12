@@ -340,14 +340,7 @@ namespace Kukolony.Gui
                 Refresh();
             });
 
-            Row footer = new Row(_content.transform, Panel.FooterY);
-            Widgets.Caption(footer, string.Empty, 260f);
-            if (_stack.Count > 1)
-            {
-                Widgets.Button(footer, "Back", 140f, Pop);
-            }
-
-            Widgets.Button(footer, "Close", 140f, Close);
+            Widgets.Footer(_content.transform, Close, _stack.Count > 1 ? Pop : (System.Action)null);
         }
 
         private void Update()

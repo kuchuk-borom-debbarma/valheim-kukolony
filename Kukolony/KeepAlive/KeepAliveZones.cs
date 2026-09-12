@@ -14,6 +14,16 @@ namespace Kukolony.KeepAlive
     {
         private static readonly HashSet<Vector2s> Zones = new HashSet<Vector2s>();
 
+        /// <summary>
+        ///     Scratch for the circle phase, reused across rebuilds the way
+        ///     <see cref="Zones" /> itself is: Rebuild runs every second for the whole
+        ///     session, and allocating a list per hearth and flag per second is steady GC
+        ///     churn in a loop whose point is running quietly.
+        /// </summary>
+        private static readonly List<List<Vector2s>> CircleBuffers = new List<List<Vector2s>>();
+
+        private static readonly List<Vector3> CircleAnchors = new List<Vector3>();
+
         /// <summary>Latched so the cap is reported on change rather than every second.</summary>
         private static bool _reportedCapped;
 
@@ -97,8 +107,8 @@ namespace Kukolony.KeepAlive
             // to enumeration order - the first big outpost packed the set solid and the
             // second Kolony's hearth held nothing open at all, silently, while reach went
             // on reporting its ground Ready.
-            List<List<Vector2s>> circles = new List<List<Vector2s>>();
-            List<Vector3> anchors = new List<Vector3>();
+            CircleAnchors.Clear();
+            int circleCount = 0;
             int wanted = 0;
             foreach (Vector4 area in areas)
             {
@@ -108,7 +118,9 @@ namespace Kukolony.KeepAlive
                 Vector2s low = ZoneSystem.GetZone(at - new Vector3(reach, 0f, reach));
                 Vector2s high = ZoneSystem.GetZone(at + new Vector3(reach, 0f, reach));
 
-                List<Vector2s> circle = new List<Vector2s>();
+                if (circleCount == CircleBuffers.Count) CircleBuffers.Add(new List<Vector2s>());
+                List<Vector2s> circle = CircleBuffers[circleCount];
+                circle.Clear();
                 for (short y = low.y; y <= high.y; y++)
                 {
                     for (short x = low.x; x <= high.x; x++)
@@ -126,8 +138,8 @@ namespace Kukolony.KeepAlive
                     }
                 }
 
-                circles.Add(circle);
-                anchors.Add(at);
+                CircleAnchors.Add(at);
+                circleCount++;
             }
 
             if (Zones.Count + wanted <= cap)
@@ -136,25 +148,26 @@ namespace Kukolony.KeepAlive
                 // sort. `wanted` may double-count a zone two circles share, which can only
                 // send fitting work down the fair path below - never admit overflowing work
                 // up here.
-                foreach (List<Vector2s> circle in circles)
+                for (int i = 0; i < circleCount; i++)
                 {
-                    foreach (Vector2s zone in circle) Zones.Add(zone);
+                    foreach (Vector2s zone in CircleBuffers[i]) Zones.Add(zone);
                 }
             }
             else
             {
-                for (int i = 0; i < circles.Count; i++)
+                for (int i = 0; i < circleCount; i++)
                 {
-                    Vector3 at = anchors[i];
-                    circles[i].Sort((a, b) =>
+                    Vector3 at = CircleAnchors[i];
+                    CircleBuffers[i].Sort((a, b) =>
                         SquaredZoneDistance(a, at).CompareTo(SquaredZoneDistance(b, at)));
                 }
 
                 for (int turn = 0; Zones.Count < cap; turn++)
                 {
                     bool any = false;
-                    foreach (List<Vector2s> circle in circles)
+                    for (int i = 0; i < circleCount; i++)
                     {
+                        List<Vector2s> circle = CircleBuffers[i];
                         if (turn >= circle.Count) continue;
 
                         any = true;
@@ -169,9 +182,9 @@ namespace Kukolony.KeepAlive
 
                 // What each circle could not get, counted honestly: a circle is truncated
                 // only if it needed ground it does not hold.
-                foreach (List<Vector2s> circle in circles)
+                for (int i = 0; i < circleCount; i++)
                 {
-                    foreach (Vector2s zone in circle)
+                    foreach (Vector2s zone in CircleBuffers[i])
                     {
                         if (Zones.Contains(zone)) continue;
 
@@ -225,6 +238,22 @@ namespace Kukolony.KeepAlive
         private static bool TryHoldHalo(Vector3 position, int rings, int cap)
         {
             Vector2s centre = ZoneSystem.GetZone(position);
+
+            // If even the halo's nominal size fits, it fits whatever overlaps - skip the
+            // counting pass and just add. The count below only matters near the cap.
+            int haloSize = (rings * 2 + 1) * (rings * 2 + 1);
+            if (Zones.Count + haloSize <= cap)
+            {
+                for (int y = -rings; y <= rings; y++)
+                {
+                    for (int x = -rings; x <= rings; x++)
+                    {
+                        Zones.Add(new Vector2s((short)(centre.x + x), (short)(centre.y + y)));
+                    }
+                }
+
+                return true;
+            }
 
             int missing = 0;
             for (int y = -rings; y <= rings; y++)

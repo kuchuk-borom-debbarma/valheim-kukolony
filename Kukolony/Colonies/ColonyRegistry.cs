@@ -17,8 +17,6 @@ namespace Kukolony.Colonies
     {
         private static readonly List<ZDO> ColonyZdos = new List<ZDO>();
 
-        internal static int KnownColonies => ColonyZdos.Count;
-
         /// <summary>
         ///     The circles every known Kolony claims: each hearth with its radius, and each
         ///     claimed flag with its own. Read off ZDOs, so an unloaded outpost still holds
@@ -33,13 +31,8 @@ namespace Kukolony.Colonies
                 return;
             }
 
-            foreach (ZDO colonyZdo in ColonyZdos)
+            foreach (ZDO colonyZdo in ValidColonies())
             {
-                if (colonyZdo == null || !colonyZdo.IsValid())
-                {
-                    continue;
-                }
-
                 // The hearth anchors itself. It never used to: only villagers and registered
                 // structures fed the halo, so a hearth with neither held nothing open and a
                 // fresh Kolony's ground could unload out from under its first villager.
@@ -62,13 +55,8 @@ namespace Kukolony.Colonies
                 return;
             }
 
-            foreach (ZDO colonyZdo in ColonyZdos)
+            foreach (ZDO colonyZdo in ValidColonies())
             {
-                if (colonyZdo == null || !colonyZdo.IsValid())
-                {
-                    continue;
-                }
-
                 ColonyState state = new ColonyState(colonyZdo);
 
                 foreach (StructureRecord structure in state.GetStructures())
@@ -82,23 +70,59 @@ namespace Kukolony.Colonies
             }
         }
 
-        internal static IReadOnlyList<ZDO> GetKnownColonies() => ColonyZdos;
+        /// <summary>
+        ///     The known hearth ZDOs that still resolve. The one reading of "valid" - the
+        ///     null-and-IsValid filter used to be hand-copied at five call sites, which is
+        ///     five places to miss when what "valid" means changes.
+        /// </summary>
+        internal static IEnumerable<ZDO> ValidColonies()
+        {
+            foreach (ZDO zdo in ColonyZdos)
+            {
+                if (zdo != null && zdo.IsValid())
+                {
+                    yield return zdo;
+                }
+            }
+        }
+
+        /// <summary>Whether any known hearth still resolves.</summary>
+        internal static bool AnyValid()
+        {
+            foreach (ZDO _ in ValidColonies())
+            {
+                return true;
+            }
+
+            return false;
+        }
 
         internal static void Clear()
         {
             ColonyZdos.Clear();
 
-            // A fresh world deserves a fresh sweep, not the tail of the last one's timer.
+            // Anything still sweeping is sweeping a world that no longer exists; the
+            // generation bump makes it abort rather than repopulate this list with the
+            // dead world's ZDOs - which ZDOMan recycles, so keeping them is holding
+            // references that will soon report valid as unrelated objects.
+            _generation++;
+            _sweeping = false;
+
+            // And a fresh world deserves a fresh sweep, not the tail of the last one's timer.
             _nextSweep = 0f;
         }
 
         /// <summary>Whether a sweep is in flight, for screens that want to say "looking".</summary>
         internal static bool Sweeping => _sweeping;
 
+        /// <summary>Bumped when a sweep lands with a different list, for screens to watch.</summary>
+        internal static int Revision { get; private set; }
+
         private static bool _sweeping;
         private static float _nextSweep;
+        private static int _generation;
 
-        /// <summary>How stale the registry may go on peers the keep-alive driver ignores.</summary>
+        /// <summary>How stale the registry may go between sweeps.</summary>
         private const float SweepSeconds = 10f;
 
         /// <summary>
@@ -108,34 +132,23 @@ namespace Kukolony.Colonies
         /// </summary>
         /// <remarks>
         ///     This is what fills the list for everyone the keep-alive driver does not: a
-        ///     joined client, and anyone with the feature off. Left to the driver alone, the
-        ///     flag screen and the map pins read an empty registry forever on exactly those
-        ///     peers. Where the driver already sweeps on its own timer this stands down, so
-        ///     the server never runs the scan twice. A one-shot ("only when empty") gate is
-        ///     deliberately not used - it froze the list at its first answer, so a hearth
-        ///     built afterwards never appeared and a destroyed one never left.
+        ///     joined client, and anyone with the feature off. The throttle arms whenever
+        ///     any sweep completes - the driver's scans go through <see cref="Scan" /> too -
+        ///     so where the driver already keeps the list fresh this stands down by itself,
+        ///     with no copy of the driver's own gating to drift out of agreement with it.
+        ///     A one-shot ("only when empty") gate is deliberately not used - it froze the
+        ///     list at its first answer, so a hearth built afterwards never appeared and a
+        ///     destroyed one never left.
         /// </remarks>
         internal static void EnsureFresh(MonoBehaviour host)
         {
             if (host == null || _sweeping || Time.time < _nextSweep) return;
             if (ZNet.instance == null || ZDOMan.instance == null) return;
-            if (ModConfig.KeepAliveEnabled.Value && ZNet.instance.IsServer()) return;
 
-            _sweeping = true;
-            _nextSweep = Time.time + SweepSeconds;
-            host.StartCoroutine(Sweep());
-        }
-
-        private static IEnumerator Sweep()
-        {
-            try
-            {
-                yield return Scan();
-            }
-            finally
-            {
-                _sweeping = false;
-            }
+            // StartCoroutine on an inactive host fails without running a single line, so
+            // the in-flight flag is set inside Scan - which runs synchronously up to its
+            // first yield - never latched out here where a refused start would wedge it.
+            host.StartCoroutine(Scan());
         }
 
         /// <summary>
@@ -144,38 +157,74 @@ namespace Kukolony.Colonies
         /// </summary>
         internal static IEnumerator Scan()
         {
-            List<ZDO> found = new List<ZDO>();
-            int index = 0;
+            _sweeping = true;
+            int generation = _generation;
 
-            while (true)
+            try
             {
-                if (ZDOMan.instance == null)
+                List<ZDO> found = new List<ZDO>();
+                int index = 0;
+
+                while (true)
+                {
+                    // The world can go away - or be replaced - under a multi-frame sweep.
+                    // The generation check is what stops a sweep started in one world from
+                    // writing that world's ZDOs into the next one's registry.
+                    if (ZDOMan.instance == null || generation != _generation)
+                    {
+                        yield break;
+                    }
+
+                    bool done;
+                    try
+                    {
+                        done = ZDOMan.instance.GetAllZDOsWithPrefabIterative(
+                            ColonyPrefab.PrefabName, found, ref index);
+                    }
+                    catch (System.Exception e)
+                    {
+                        Log.Warning($"[colony] hearth scan aborted: {e.Message}");
+                        yield break;
+                    }
+
+                    if (done)
+                    {
+                        break;
+                    }
+
+                    yield return null;
+                }
+
+                if (generation != _generation)
                 {
                     yield break;
                 }
 
-                bool done;
-                try
+                bool changed = Changed(found);
+                ColonyZdos.Clear();
+                ColonyZdos.AddRange(found);
+                if (changed)
                 {
-                    done = ZDOMan.instance.GetAllZDOsWithPrefabIterative(
-                        ColonyPrefab.PrefabName, found, ref index);
+                    Revision++;
                 }
-                catch (System.Exception e)
-                {
-                    Log.Warning($"[colony] hearth scan aborted: {e.Message}");
-                    yield break;
-                }
+            }
+            finally
+            {
+                _sweeping = false;
+                _nextSweep = Time.time + SweepSeconds;
+            }
+        }
 
-                if (done)
-                {
-                    break;
-                }
+        private static bool Changed(List<ZDO> found)
+        {
+            if (found.Count != ColonyZdos.Count) return true;
 
-                yield return null;
+            for (int i = 0; i < found.Count; i++)
+            {
+                if (!ReferenceEquals(found[i], ColonyZdos[i])) return true;
             }
 
-            ColonyZdos.Clear();
-            ColonyZdos.AddRange(found);
+            return false;
         }
     }
 }

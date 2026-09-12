@@ -179,6 +179,19 @@ namespace Kukolony.Gui
             Button(row, ">", 60f, () => turn(Mathf.Min(pages - 1, page + 1)));
         }
 
+        /// <summary>
+        ///     The footer row every panel ends with: Close, and Back where there is a stack
+        ///     to go back through. One builder for the same reason as the pager - the two
+        ///     hand-copied footers had already drifted their Close widths apart.
+        /// </summary>
+        internal static void Footer(Transform parent, Action onClose, Action onBack = null)
+        {
+            Row footer = new Row(parent, Panel.FooterY);
+            Caption(footer, string.Empty, 260f);
+            if (onBack != null) Button(footer, "Back", 140f, onBack);
+            Button(footer, "Close", 140f, onClose);
+        }
+
         internal static Text Title(Transform parent, string text) =>
             Text(parent, text, 0f, Panel.TitleY, TitleSize, Panel.ContentWidth, TextAnchor.MiddleCenter);
 
