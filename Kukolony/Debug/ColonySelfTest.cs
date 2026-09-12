@@ -174,6 +174,7 @@ namespace Kukolony.Debug
             yield return CheckHaulingGoesWrong(report, colony, origin);
             yield return CheckTwoVillagersOneItem(report, colony, origin);
             yield return CheckFillingTheBagFirst(report, colony, origin);
+            yield return CheckAChestMayBeLeftAlone(report, colony, origin);
             yield return CheckTidying(report, colony, origin);
             yield return CheckTidyingKeepsUnidentifiedItems(report, colony, origin);
             yield return CheckWorkAreas(report, colony, origin);
@@ -1553,6 +1554,114 @@ namespace Kukolony.Debug
         }
 
         /// <summary>
+        ///     A chest marked "may not be taken from" is never a source, however wrong its contents.
+        /// </summary>
+        /// <remarks>
+        ///     This is the setting that keeps a player's own chest a player's own chest. The
+        ///     index filters on it, which is easy to check by reading; whether the tidying half
+        ///     of the job ever reaches the index with the right question is not, and that is the
+        ///     half that would empty somebody's armoury into the overflow.
+        /// </remarks>
+        private static IEnumerator CheckAChestMayBeLeftAlone(TestReport report, Colony colony, Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject privateChest = Spawn("piece_chest_wood", origin + new Vector3(5f, 0f, 7f));
+            GameObject shed = Spawn("piece_chest_wood", origin + new Vector3(8f, 0f, 7f));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            StructureRecord locked = Register(colony, privateChest, "Private chest");
+            StructureRecord store = Register(colony, shed, "Wood store");
+            if (locked == null || store == null)
+            {
+                report.Check(false, "left-alone check could register two chests");
+                yield break;
+            }
+
+            // The private chest takes anything, so the wood in it genuinely is misplaced and a
+            // villager genuinely would move it. Only the flag stops it.
+            ColonyOperations.EditSettings(colony, locked.Id, s =>
+            {
+                s.Accepts = new List<string>();
+                s.MayTakeFrom = false;
+            });
+            ColonyOperations.EditSettings(colony, store.Id, s => s.Accepts = new List<string> { "Wood" });
+
+            Container keep = privateChest.GetComponentInChildren<Container>(true);
+            if (keep == null || PutIn(keep, "Wood", 10) != 10)
+            {
+                report.Check(false, "left-alone check could stock the private chest");
+                yield break;
+            }
+
+            // Read back from the colony rather than reusing what Register handed over: a record
+            // is a value, so the copy taken before the settings were edited still says what the
+            // chest accepted then. Both chests read as overflow and the control failed while the
+            // feature underneath it worked.
+            StructureRecord lockedNow = SettlementIndex.Find(colony, locked.Id);
+            StructureRecord storeNow = SettlementIndex.Find(colony, store.Id);
+            int privateScore = lockedNow == null ? -99 : SettlementIndex.ScoreOf(lockedNow, "Wood");
+            int storeScore = storeNow == null ? -99 : SettlementIndex.ScoreOf(storeNow, "Wood");
+
+            report.Check(storeScore > privateScore,
+                "control: the wood really is misplaced, so only the flag can stop the move",
+                $"private={privateScore} store={storeScore}");
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition
+                {
+                    Id = "sort", Name = "Sort", Kind = JobKind.Haul, Repeat = 30, TidyContainers = true
+                }
+            });
+
+            Villager keeper = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (keeper == null || !keeper.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "left-alone check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "sort" });
+
+            for (int sample = 0; sample < 60; sample++) yield return new WaitForSecondsRealtime(.5f);
+
+            int leftAlone = CountIn(keep, "Wood");
+            report.Check(leftAlone == 10,
+                "a chest marked not to be taken from is left alone, however wrong its contents",
+                $"stillThere={leftAlone} doing='{keeper?.Activity}'");
+
+            // Control: the same chest, the same wood, the same villager - flag off.
+            ColonyOperations.EditSettings(colony, locked.Id, s => s.MayTakeFrom = true);
+            SettlementIndex.ResetForTest();
+
+            Container into = shed.GetComponentInChildren<Container>(true);
+            int moved = 0;
+            for (int sample = 0; sample < 120 && moved == 0; sample++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                moved = into == null ? 0 : CountIn(into, "Wood");
+            }
+
+            report.Check(moved > 0,
+                "control: with the flag cleared the same wood moves, so the flag is what stopped it",
+                $"moved={moved} doing='{keeper?.Activity}'");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.RemoveStructure(locked.Id);
+            colony.RemoveStructure(store.Id);
+            Release(privateChest);
+            Release(shed);
+            colony.State.SetJobs(new List<JobDefinition>());
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
         ///     "Fill the bag before delivering", which the job screen has always offered.
         /// </summary>
         /// <remarks>
@@ -1711,7 +1820,7 @@ namespace Kukolony.Debug
             // the same reason an empty settlement does. Said out loud, because the control
             // round did exactly that and read as a pass of the thing it was controlling for.
             report.Check(standing,
-                "control: the chest was a working destination in both rounds",
+                "control: both rounds had a working chest and the wood reached it",
                 $"standing={standing}");
 
             ModConfig.ClaimsEnabled.Value = wasEnabled;
@@ -1739,6 +1848,7 @@ namespace Kukolony.Debug
         {
             ModConfig.ClaimsEnabled.Value = claims;
             TargetClaims.Invalidate();
+            int stocked = StructureInventory.Count(store.Id, "Wood");
 
             // One stack, far enough out that both have to walk for it - a race decided before
             // anyone takes a step measures nothing.
@@ -1776,6 +1886,10 @@ namespace Kukolony.Debug
             int busy = 0;
             var shared = new HashSet<string>();
             var doing = new HashSet<string>();
+            var last = new Dictionary<ZDOID, Vector3>();
+            var walked = new Dictionary<ZDOID, float>();
+            var closest = new Dictionary<ZDOID, float>();
+
             for (int sample = 0; sample < 120; sample++)
             {
                 yield return new WaitForSecondsRealtime(.25f);
@@ -1786,17 +1900,53 @@ namespace Kukolony.Debug
                     if (watched == null || !watched.State.IsValid) continue;
                     if (!watched.State.Target.IsNone()) busy++;
                     doing.Add(watched.Activity ?? "?");
+
+                    // Ground covered and nearest approach, which is what tells "stood still"
+                    // apart from "walked the whole time and never arrived" - two different
+                    // bugs that produce the same word in an activity log.
+                    ZDOID id = watched.Id;
+                    if (id.IsNone()) continue;
+                    Vector3 now = watched.transform.position;
+                    if (last.TryGetValue(id, out Vector3 was))
+                    {
+                        walked.TryGetValue(id, out float sofar);
+                        walked[id] = sofar + Utils.DistanceXZ(was, now);
+                    }
+
+                    last[id] = now;
+
+                    GameObject target = ZNetScene.instance == null
+                        ? null
+                        : ZNetScene.instance.FindInstance(watched.State.Target);
+                    if (target == null) continue;
+
+                    float gap = Utils.DistanceXZ(now, target.transform.position);
+                    if (!closest.TryGetValue(id, out float best) || gap < best) closest[id] = gap;
                 }
+            }
+
+            var trace = new List<string>();
+            foreach (KeyValuePair<ZDOID, float> entry in walked)
+            {
+                if (entry.Value <= 0f) continue;
+
+                closest.TryGetValue(entry.Key, out float near);
+                trace.Add($"walked={entry.Value:0}m closest={near:0}m");
             }
 
             Core.Log.Info($"[race] claims={claims} collisions={collisions} busySamples={busy} " +
                      $"villagers={racers.Count} sharedTargets=[{string.Join(", ", shared)}] " +
-                     $"activities=[{string.Join(", ", doing)}]");
+                     $"activities=[{string.Join(", ", doing)}] {string.Join(" | ", trace)}");
+
+            // Whether anybody actually got there. Two villagers that both fail to reach the
+            // wood also collide zero times, and a run where exactly that happened read as a
+            // clean pass of the claim.
+            int arrived = StructureInventory.Count(store.Id, "Wood") - stocked;
 
             foreach (ZDOID racer in racers) VillagerLifecycle.Remove(colony, racer);
             SweepLooseItems(colony);
             yield return new WaitForSecondsRealtime(.2f);
-            onCounted(collisions, usable);
+            onCounted(collisions, usable && arrived > 0);
         }
 
         /// <summary>Whether a record is still on the colony's books.</summary>
