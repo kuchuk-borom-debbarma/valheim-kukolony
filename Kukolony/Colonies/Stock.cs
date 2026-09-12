@@ -33,6 +33,41 @@ namespace Kukolony.Colonies
         ///     fallen out of reach stops propping up a stopping rule - the same containers the
         ///     index would offer as destinations are the ones that count as holdings.
         /// </remarks>
+        internal static int Held(Colony colony, string itemPrefab)
+        {
+            if (colony == null || string.IsNullOrEmpty(itemPrefab)) return 0;
+
+            // Keyed by colony and then by item, in two levels rather than one composed
+            // string: this is asked every tick by every gathering villager, and building a
+            // key per ask would put a string allocation on the hot path the cache exists to
+            // keep cheap.
+            ZDOID id = colony.Id;
+            if (!Counts.TryGetValue(id, out Dictionary<string, Counted> byItem))
+            {
+                byItem = new Dictionary<string, Counted>();
+                Counts[id] = byItem;
+            }
+
+            if (byItem.TryGetValue(itemPrefab, out Counted cached) &&
+                Time.time - cached.At < FreshnessSeconds)
+            {
+                return cached.Total;
+            }
+
+            int total = 0;
+            foreach (StructureRecord record in colony.State.GetStructures())
+            {
+                if ((record.Capabilities & StructureCapability.Storage) == 0) continue;
+                if (record.StatusIn(colony) != StructureStatus.Ready) continue;
+
+                int held = StructureInventory.Count(record.Id, itemPrefab);
+                if (held > 0) total += held;
+            }
+
+            byItem[itemPrefab] = new Counted { At = Time.time, Total = total };
+            return total;
+        }
+
         /// <summary>
         ///     How long an answer stands before it is recounted.
         /// </summary>
@@ -50,36 +85,20 @@ namespace Kukolony.Colonies
             internal int Total;
         }
 
-        private static readonly Dictionary<string, Counted> Recent = new Dictionary<string, Counted>();
+        private static readonly Dictionary<ZDOID, Dictionary<string, Counted>> Counts =
+            new Dictionary<ZDOID, Dictionary<string, Counted>>();
 
         /// <summary>Dropped when a world unloads; these colonies do not survive one.</summary>
-        internal static void Clear() => Recent.Clear();
+        internal static void Clear() => Counts.Clear();
 
-        internal static int Held(Colony colony, string itemPrefab)
-        {
-            if (colony == null || string.IsNullOrEmpty(itemPrefab)) return 0;
-
-            // Keyed by colony and item, because two jobs gathering different things in the
-            // same settlement are two questions.
-            string key = colony.Id + "/" + itemPrefab;
-            if (Recent.TryGetValue(key, out Counted cached) &&
-                Time.time - cached.At < FreshnessSeconds)
-            {
-                return cached.Total;
-            }
-
-            int total = 0;
-            foreach (StructureRecord record in colony.State.GetStructures())
-            {
-                if ((record.Capabilities & StructureCapability.Storage) == 0) continue;
-                if (record.StatusIn(colony) != StructureStatus.Ready) continue;
-
-                int held = StructureInventory.Count(record.Id, itemPrefab);
-                if (held > 0) total += held;
-            }
-
-            Recent[key] = new Counted { At = Time.time, Total = total };
-            return total;
-        }
+        /// <summary>
+        ///     Forces the next ask to recount.
+        /// </summary>
+        /// <remarks>
+        ///     For checks that change what a settlement holds and then ask about it in the
+        ///     same frame. The freshness window is invisible in a running game and is the
+        ///     difference between measuring the rule and measuring the cache in a check.
+        /// </remarks>
+        internal static void ResetForTest() => Counts.Clear();
     }
 }

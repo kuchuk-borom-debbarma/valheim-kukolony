@@ -148,6 +148,7 @@ namespace Kukolony.Jobs.Chop
             Fruitless.Clear();
             NextBlow.Clear();
             Settled.Clear();
+            Equipped.Clear();
         }
 
         /// <summary>
@@ -166,20 +167,47 @@ namespace Kukolony.Jobs.Chop
             Fruitless.Remove(villager);
             NextBlow.Remove(villager);
             Settled.Remove(villager);
+            Equipped.Remove(villager);
         }
+
+        /// <summary>
+        ///     What this job put in each villager's hand, so it can take back only that.
+        /// </summary>
+        private static readonly Dictionary<ZDOID, int> Equipped = new Dictionary<ZDOID, int>();
 
         /// <summary>
         ///     Puts the axe away, for a villager that is no longer chopping.
         /// </summary>
         /// <remarks>
-        ///     The right hand is written only while a chop job is the current queue entry, so
-        ///     without this a villager carries a visible axe through every haul that follows -
-        ///     and for ever if its chop job is deleted, because nothing would write the slot
-        ///     again and the slot is ZDO-backed. A tool is held while the work is being done.
+        ///     <para>
+        ///         The right hand is written only while a chop job is the current queue entry,
+        ///         so without this a villager carries a visible axe through every haul that
+        ///         follows - and for ever if its chop job is deleted, because nothing would
+        ///         write the slot again and the slot is ZDO-backed. A tool is held while the
+        ///         work is being done.
+        ///     </para>
+        ///     <para>
+        ///         <b>Only what this job put there.</b> The hand is also a slot a player can
+        ///         dress from the villager screen - a sword, a torch, a shield - so baring it
+        ///         because no chop job is current would silently strip the player's choice on
+        ///         the next work tick, permanently and with no way to keep it. So the hash
+        ///         written is remembered, and only that hash is taken back.
+        ///     </para>
         /// </remarks>
-        internal static void PutAxeAway(VisEquipment equipment)
+        internal static void PutAxeAway(VisEquipment equipment, ZDOID villager, ZDO zdo)
         {
-            if (equipment != null) VillagerWardrobe.Set(equipment, WearSlot.RightHand, null);
+            if (equipment == null || villager.IsNone()) return;
+            if (!Equipped.TryGetValue(villager, out int ours) || ours == 0) return;
+
+            // Still what we put there? A player who has since changed it keeps their change.
+            if (zdo != null && VillagerWardrobe.Worn(zdo, WearSlot.RightHand) != ours)
+            {
+                Equipped.Remove(villager);
+                return;
+            }
+
+            VillagerWardrobe.Set(equipment, WearSlot.RightHand, null);
+            Equipped.Remove(villager);
         }
 
         internal static JobResult Tick(ChopContext context, out string activity)
@@ -346,7 +374,11 @@ namespace Kukolony.Jobs.Chop
                 return JobOutcomes.Skipped(context.State, "waiting for the world", out activity);
             }
 
-            switch (context.Walk.MoveTowards(target.transform.position, Approach.DistanceTo(target)))
+            // The tick's own interval, not a frame's. Left at the default the walk falls
+            // back to Time.deltaTime, and a rescued villager covers ground at frame rate
+            // instead of the AI rate - the trap that parameter's own doc warns about.
+            switch (context.Walk.MoveTowards(target.transform.position, Approach.DistanceTo(target),
+                deltaTime: context.DeltaTime))
             {
                 case MoveResult.Arrived:
                     // The walk has done its best for this target, which is what licenses the
@@ -702,6 +734,16 @@ namespace Kukolony.Jobs.Chop
             if (context.Equipment != null)
             {
                 VillagerWardrobe.Set(context.Equipment, WearSlot.RightHand, best);
+
+                // Remembered so putting it away later takes back only this, and not a sword
+                // or a torch the player dressed the villager in.
+                ZDOID villager = context.Villager.Id;
+                if (!villager.IsNone())
+                {
+                    Equipped[villager] = best?.m_dropPrefab == null
+                        ? 0
+                        : Utils.GetPrefabName(best.m_dropPrefab).GetStableHashCode();
+                }
             }
 
             return best;

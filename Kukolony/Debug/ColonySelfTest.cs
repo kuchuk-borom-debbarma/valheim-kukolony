@@ -5410,6 +5410,11 @@ namespace Kukolony.Debug
                 box.GetInventory().AddItem(stack);
             }
 
+            // The count is cached for a moment, and the read above already cached zero for
+            // this settlement in this same frame. Without this the rule below is measured
+            // against a stale nothing and fails for a reason that is not the rule.
+            Stock.ResetForTest();
+
             int held = Stock.Held(colony, "Wood");
             report.Check(held >= 12,
                 "the settlement can say how much of a thing it is holding",

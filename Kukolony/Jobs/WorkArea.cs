@@ -68,12 +68,20 @@ namespace Kukolony.Jobs
 
                 // A flag brings its own reach - its screen says how far, and a job pointed
                 // at it working a default-sized patch of a larger outpost contradicted the
-                // number the player set. The job's own radius still wins when given, because
+                // number the player set. The job's own radius still narrows it, because
                 // "work the near half of the quarry" is a legitimate instruction.
-                float radius = job.WorkRadius > 0f ? job.WorkRadius
-                    : (record.Capabilities & StructureCapability.WorkArea) != 0
-                        ? WorkFlag.RadiusOf(zdo)
-                        : DefaultRadius;
+                //
+                // But it cannot widen it past the flag. The flag's radius is what makes the
+                // ground the Kolony's at all: it is what holds those zones loaded, what
+                // decides whether a chest out there can be registered, and what bounds the
+                // search for work. A job told to reach further than its flag would promise
+                // ground nothing else agrees is the Kolony's, and report "nothing to chop"
+                // for trees its own screen said were in range.
+                bool isFlag = (record.Capabilities & StructureCapability.WorkArea) != 0;
+                float reach = isFlag ? WorkFlag.RadiusOf(zdo) : DefaultRadius;
+                float radius = job.WorkRadius > 0f
+                    ? (isFlag ? Mathf.Min(job.WorkRadius, reach) : job.WorkRadius)
+                    : reach;
                 return new WorkArea(zdo.GetPosition(), radius, record.Name);
             }
 

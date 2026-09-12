@@ -223,6 +223,14 @@ namespace Kukolony.Villagers
         /// <summary>What the pathfinder thinks about a target, for a failure worth explaining.</summary>
         internal string Explain(Vector3 target) => VillagerMovement.Explain(_ai, target);
 
+        /// <summary>
+        ///     Puts away an axe this villager's chopping put in its hand, wherever it has
+        ///     stopped chopping - including the paths that never reach the queue again.
+        /// </summary>
+        private void PutAxeAway() =>
+            Jobs.Chop.ChopJob.PutAxeAway(_visEquipment, Id,
+                _nview != null && _nview.IsValid() ? _nview.GetZDO() : null);
+
         /// <summary>Turns to face something, for work done standing still.</summary>
         internal void FaceTowards(Vector3 target, float deltaTime) =>
             VillagerMovement.FaceTowards(_ai, target, deltaTime);
@@ -610,7 +618,15 @@ namespace Kukolony.Villagers
         private bool TryWork(float deltaTime)
         {
             Colonies.Colony colony = Colonies.Colony.FindFor(_nview.GetZDO());
-            if (colony == null) return false;
+            if (colony == null)
+            {
+                // Before the early return, not after. A villager whose hearth was destroyed
+                // never reaches the queue again, so an axe left in its hand here would stay
+                // there for the rest of the session - which is the exact failure putting it
+                // away was added to prevent.
+                PutAxeAway();
+                return false;
+            }
 
             if (Time.time < _nextWorkTick) return _working;
 
@@ -633,10 +649,7 @@ namespace Kukolony.Villagers
             // visible right hand, so anything else being current - a haul entry, or a chop
             // job the player deleted - has to put the axe away, or the villager carries one
             // for the rest of the session with nothing left to write the slot again.
-            if (job == null || job.Kind != Jobs.JobKind.Chop)
-            {
-                Jobs.Chop.ChopJob.PutAxeAway(_visEquipment);
-            }
+            if (job == null || job.Kind != Jobs.JobKind.Chop) PutAxeAway();
 
             if (job == null)
             {
@@ -777,7 +790,7 @@ namespace Kukolony.Villagers
             // tracking that work does. Calling the bare move wrapper here meant the one piece
             // of movement every villager performs constantly was also the only one that could
             // not benefit from any of it.
-            switch (_walk.MoveTowards(home, HomeStopDistance))
+            switch (_walk.MoveTowards(home, HomeStopDistance, deltaTime: deltaTime))
             {
                 case MoveResult.Moving:
                     SetActivity("walking home", $"{distance:F0}m away");
