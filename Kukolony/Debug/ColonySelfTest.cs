@@ -178,6 +178,7 @@ namespace Kukolony.Debug
             yield return CheckAChestMayBeLeftAlone(report, colony, origin);
             yield return CheckAPartlyFullChestTakesWhatFits(report, colony, origin);
             yield return CheckTheItemVanishingMidWalk(report, colony, origin);
+            yield return CheckABagThatFillsMidTrip(report, colony, origin);
             yield return CheckTidying(report, colony, origin);
             yield return CheckTidyingKeepsUnidentifiedItems(report, colony, origin);
             yield return CheckWorkAreas(report, colony, origin);
@@ -1636,6 +1637,98 @@ namespace Kukolony.Debug
             }
 
             return false;
+        }
+
+        /// <summary>
+        ///     A bag that fills partway through a sweep ends the sweep and delivers.
+        /// </summary>
+        /// <remarks>
+        ///     The decision table has always had the branch - a full bag stops collecting even
+        ///     with more to take - and nothing exercised it in a game. It is also the case where
+        ///     a villager's own belongings and its cargo are most likely to be confused, because
+        ///     they share one inventory and the thing that is full is the inventory: a villager
+        ///     packed with its own things must still haul, and must still come back with its own
+        ///     things.
+        /// </remarks>
+        private static IEnumerator CheckABagThatFillsMidTrip(TestReport report, Colony colony, Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(5f, 0f, 7f));
+            yield return new WaitForSecondsRealtime(.3f);
+            StructureRecord store = Register(colony, chest, "Full-bag store");
+            if (store == null)
+            {
+                report.Check(false, "full-bag check could register a chest");
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, store.Id, s => s.Accepts = new List<string> { "Wood" });
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "cram", Name = "Cram", Kind = JobKind.Haul, Repeat = 30 }
+            });
+
+            // Several separate drops, so the sweep has more to take than it can hold.
+            for (int i = 0; i < 4; i++) DropItem("Wood", origin + new Vector3(2f + i, 0f, 4f), 1);
+
+            Villager hauler = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (hauler == null || !hauler.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "full-bag check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+
+            // Its own belongings in every slot but one. Placed by grid position rather than
+            // added, because adding stacks them into a single slot and what has to be scarce
+            // here is slots, not items.
+            Container bag = VillagerInventory.Attach(hauler.gameObject, view);
+            Inventory carried = bag.GetInventory();
+            Clear(carried);
+
+            int width = Mathf.Max(1, carried.GetWidth());
+            int height = Mathf.Max(1, carried.GetHeight());
+            for (int slot = 0; slot < width * height - 1; slot++)
+            {
+                Split(carried, "Coal", 1, slot % width, slot / width);
+            }
+
+            int belongings = Count(carried, "Coal");
+            report.Check(carried.GetEmptySlots() == 1 && belongings > 0,
+                "control: the villager has one free slot and belongings of its own",
+                $"free={carried.GetEmptySlots()} coal={belongings}");
+
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "cram" });
+
+            int delivered = 0;
+            for (int sample = 0; sample < 120 && delivered == 0; sample++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                delivered = StructureInventory.Count(store.Id, "Wood");
+            }
+
+            report.Check(delivered > 0,
+                "a villager whose bag fills mid-sweep delivers rather than stalling",
+                $"delivered={delivered} doing='{hauler?.Activity}'");
+
+            Container after = hauler == null ? null : hauler.GetComponentInChildren<Container>(true);
+            int kept = after == null ? -1 : Count(after.GetInventory(), "Coal");
+
+            report.Check(kept == belongings,
+                "control: and it comes back with its own things, which were never cargo",
+                $"kept={kept} of {belongings}, inChest={StructureInventory.Count(store.Id, "Coal")}");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.RemoveStructure(store.Id);
+            Release(chest);
+            colony.State.SetJobs(new List<JobDefinition>());
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
         }
 
         /// <summary>
