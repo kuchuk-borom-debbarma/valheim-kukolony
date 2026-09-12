@@ -171,20 +171,35 @@ namespace Kukolony.Debug
             yield return CheckVillagerLiving(report, colony, origin);
             yield return CheckJobQueue(report, colony);
             yield return CheckHauling(report, colony, origin);
+            yield return ClearTheGround(colony, "CheckHauling");
             yield return CheckHaulingThoroughly(report, colony, origin);
+            yield return ClearTheGround(colony, "CheckHaulingThoroughly");
             yield return CheckHaulingGoesWrong(report, colony, origin);
+            yield return ClearTheGround(colony, "CheckHaulingGoesWrong");
             yield return CheckTwoVillagersOneItem(report, colony, origin);
+            yield return ClearTheGround(colony, "CheckTwoVillagersOneItem");
             yield return CheckFillingTheBagFirst(report, colony, origin);
+            yield return ClearTheGround(colony, "CheckFillingTheBagFirst");
             yield return CheckAChestMayBeLeftAlone(report, colony, origin);
+            yield return ClearTheGround(colony, "CheckAChestMayBeLeftAlone");
             yield return CheckAPartlyFullChestTakesWhatFits(report, colony, origin);
+            yield return ClearTheGround(colony, "CheckAPartlyFullChestTakesWhatFits");
             yield return CheckTheItemVanishingMidWalk(report, colony, origin);
+            yield return ClearTheGround(colony, "CheckTheItemVanishingMidWalk");
             yield return CheckABagThatFillsMidTrip(report, colony, origin);
+            yield return ClearTheGround(colony, "CheckABagThatFillsMidTrip");
+            yield return CheckBeingOrphanedMidHaul(report, colony, origin);
+            yield return ClearTheGround(colony, "CheckBeingOrphanedMidHaul");
             yield return CheckTidying(report, colony, origin);
+            yield return ClearTheGround(colony, "CheckTidying");
             yield return CheckTidyingKeepsUnidentifiedItems(report, colony, origin);
+            yield return ClearTheGround(colony, "CheckTidyingKeepsUnidentifiedItems");
             yield return CheckWorkAreas(report, colony, origin);
             yield return CheckResting(report, colony, origin);
             CheckSayingThingsOnce(report);
             yield return CheckMapPins(report, colony);
+            yield return CheckWalkingUpToAVillager(report, colony);
+            yield return ClearTheGround(colony, "CheckWalkingUpToAVillager");
             yield return CheckBulkAssignment(report, colony);
             yield return CheckDistantTravel(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
@@ -1640,6 +1655,110 @@ namespace Kukolony.Debug
         }
 
         /// <summary>
+        ///     Losing the settlement while carrying its goods.
+        /// </summary>
+        /// <remarks>
+        ///     The existing orphan check takes an idle villager, which is the easy half. A
+        ///     villager orphaned mid-trip is holding the settlement's goods and a job that has
+        ///     a reference to a colony it can no longer see, and the two failures worth ruling
+        ///     out are losing the load and carrying on regardless. Rejoining is checked too,
+        ///     because an orphan that can never work again is a villager the player has to
+        ///     replace rather than rescue.
+        /// </remarks>
+        private static IEnumerator CheckBeingOrphanedMidHaul(TestReport report, Colony colony, Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(5f, 0f, 7f));
+            yield return new WaitForSecondsRealtime(.3f);
+            StructureRecord store = Register(colony, chest, "Orphan store");
+            if (store == null)
+            {
+                report.Check(false, "orphaned-mid-haul check could register a chest");
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, store.Id, s => s.Accepts = new List<string> { "Wood" });
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "lost", Name = "Lost", Kind = JobKind.Haul, Repeat = 30 }
+            });
+
+            Villager stray = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (stray == null || !stray.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "orphaned-mid-haul check could spawn a villager");
+                yield break;
+            }
+
+            ZDO zdo = view.GetZDO();
+            ZDOID who = zdo.m_uid;
+            ZDOID home = ColonyMembership.GetColony(zdo);
+            VillagerState state = new VillagerState(zdo);
+            SendRested(view);
+
+            // Put it mid-trip rather than waiting for it to get there on its own. Watching for
+            // a natural pickup means racing the delivery that follows it - the window where the
+            // bag holds something is a few seconds wide, and a sampler that misses it reports a
+            // villager that never worked. What is being tested is the state, not how it was
+            // reached.
+            Container bag = VillagerInventory.Attach(stray.gameObject, view);
+            Clear(bag.GetInventory());
+            for (int i = 0; i < 4; i++) Add(bag.GetInventory(), "Wood");
+
+            int carrying = Count(bag.GetInventory(), "Wood");
+            state.SetCargo("Wood");
+            state.SetDestination(store.Id);
+            state.SetWorkState((int)Jobs.Haul.HaulState.Delivering);
+            state.SetQueue(new List<string> { "lost" });
+
+            report.Check(carrying == 4,
+                "control: the villager is carrying the settlement's goods before it loses it",
+                $"carrying={carrying}");
+
+            ColonyMembership.SetColony(zdo, ZDOID.None);
+            yield return new WaitForSecondsRealtime(1.5f);
+
+            report.Check(stray != null && stray.Activity == "no colony",
+                "a villager orphaned mid-trip stops rather than finishing a delivery to nobody",
+                $"doing='{stray?.Activity}'");
+
+            Container held = stray == null ? null : stray.GetComponentInChildren<Container>(true);
+            int kept = held == null ? -1 : Count(held.GetInventory(), "Wood");
+            report.Check(kept == carrying,
+                "and it is still holding what it had picked up, rather than dropping it",
+                $"kept={kept} of {carrying}");
+
+            report.Check(StructureInventory.Count(store.Id, "Wood") == 0,
+                "control: nothing reached the chest while it had no settlement to work for",
+                $"inChest={StructureInventory.Count(store.Id, "Wood")}");
+
+            // Taken back in. An orphan that can never work again is one to replace, not rescue.
+            ColonyMembership.SetColony(zdo, home);
+            SettlementIndex.ResetForTest();
+
+            int delivered = 0;
+            for (int sample = 0; sample < 120 && delivered == 0; sample++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                delivered = StructureInventory.Count(store.Id, "Wood");
+            }
+
+            report.Check(delivered > 0,
+                "and it delivers once the settlement is its own again",
+                $"delivered={delivered} doing='{stray?.Activity}'");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.RemoveStructure(store.Id);
+            Release(chest);
+            colony.State.SetJobs(new List<JobDefinition>());
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
         ///     A bag that fills partway through a sweep ends the sweep and delivers.
         /// </summary>
         /// <remarks>
@@ -2331,6 +2450,71 @@ namespace Kukolony.Debug
             onCounted(collisions, usable && arrived > 0);
         }
 
+        /// <summary>
+        ///     Walking up to somebody and pressing use opens their screen.
+        /// </summary>
+        /// <remarks>
+        ///     A settlement is a place full of people, and the way you deal with a person is to
+        ///     go and talk to them. Finding their row in a list opened from a hearth works and
+        ///     stops being reasonable the moment you can see the villager you mean.
+        /// </remarks>
+        private static IEnumerator CheckWalkingUpToAVillager(TestReport report, Colony colony)
+        {
+            Villager subject = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (subject == null || !subject.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "hover check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            yield return new WaitForSecondsRealtime(.4f);
+
+            // Asked of DescribeForHover, which is what the Character patch returns to the
+            // game. An earlier version of this asserted a GetHoverText on the villager itself
+            // and passed while the text never reached a player: Character already implements
+            // Hoverable and wins the lookup, so the method under test was one nothing called.
+            string hover = subject.DescribeForHover() ?? string.Empty;
+            report.Check(hover.Contains(subject.DisplayName()) && hover.Contains(subject.Activity),
+                "looking at a villager says who they are and what they are doing",
+                $"hover='{hover.Replace("\n", " | ")}'");
+
+            report.Check(hover.Contains("$KEY_Use") || hover.ToLowerInvariant().Contains("manage"),
+                "and offers the key that opens their screen",
+                $"hover='{hover.Replace("\n", " | ")}'");
+
+            ColonyScreen screen = ColonyScreen.Instance;
+            if (screen == null)
+            {
+                report.Check(false, "hover check had a colony screen to open");
+                yield break;
+            }
+
+            if (screen.IsOpen) screen.Close();
+            yield return null;
+
+            report.Check(!screen.IsOpen, "control: the screen is shut before anyone is spoken to",
+                $"open={screen.IsOpen}");
+
+            bool took = subject.Interact(null, false, false);
+            yield return null;
+
+            report.Check(took && screen.IsOpen && screen.Current is VillagerDetailScreen,
+                "using a villager opens the colony screen on that villager",
+                $"handled={took} open={screen.IsOpen} top={screen.Current?.GetType().Name}");
+
+            // Held keys repeat. A screen that reopens twenty times a second cannot be used.
+            bool whileHeld = subject.Interact(null, true, false);
+            report.Check(!whileHeld,
+                "control: holding the key does not reopen it over and over",
+                $"heldHandled={whileHeld}");
+
+            screen.Close();
+            VillagerLifecycle.Remove(colony, who);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
         /// <summary>Whether a record is still on the colony's books.</summary>
         private static bool Registered(Colony colony, ZDOID structure)
         {
@@ -2377,6 +2561,87 @@ namespace Kukolony.Debug
             }
 
             return shared;
+        }
+
+        /// <summary>The chests the hauling checks place, and nobody else's.</summary>
+        private static readonly HashSet<string> HaulFixtures = new HashSet<string>
+        {
+            // Every name the hauling and tidying checks register, including the ones belonging
+            // to checks this sweep merely follows. The first version listed only the chests I
+            // had just added, so a "Stone store" or a "Wood shed" abandoned by an early return
+            // survived to poison the next check - which is the exact failure this exists to
+            // stop, left in place for half the fixtures.
+            "The only chest", "Contested store", "Load store", "Private chest", "Wood store",
+            "Stone store", "Nearly full store", "Vanishing store", "Full-bag store",
+            "Orphan store", "Overflow", "Wood shed"
+        };
+
+        /// <summary>
+        ///     Puts the settlement back the way the next check expects to find it.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Every check tidies up after itself, and that is not enough: a check that gives
+        ///         up partway - a fixture that would not place, a villager that never picked
+        ///         anything up - leaves through an early return and never reaches its own
+        ///         cleanup. One chest left registered then poisons everything after it, and the
+        ///         failures land on checks that have nothing to do with the fault. That is
+        ///         exactly what happened: an abandoned "Orphan store" still holding fourteen
+        ///         wood made the tidying check report that wood no longer migrates to the chest
+        ///         that asked for it, because the wood had gone somewhere perfectly reasonable
+        ///         that the check knew nothing about.
+        ///     </para>
+        ///     <para>
+        ///         So the sequence clears the ground between checks rather than trusting each
+        ///         one to. It deliberately spares the persistence fixtures, which exist to
+        ///         survive to the save, and says what it removed - a check leaking a fixture is
+        ///         worth knowing about even when the run goes green.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator ClearTheGround(Colony colony, string after)
+        {
+            if (colony == null) yield break;
+
+            // By name, and only the ones the haul checks place. Clearing everything not
+            // needed for persistence looked tidier and was wrong: several checks leave a
+            // fixture on purpose for a later one to find - a renamed chest, a bed, a kiln, a
+            // structure that is deliberately unfindable - and sweeping those away failed the
+            // screens that go looking for them. A fixture nobody registered is not leaked, it
+            // is somebody else's.
+            var leaked = new List<string>();
+            foreach (StructureRecord record in colony.State.GetStructures())
+            {
+                if (!HaulFixtures.Contains(record.Name)) continue;
+
+                GameObject instance = ZNetScene.instance?.FindInstance(record.Id);
+                leaked.Add(record.Name);
+                colony.RemoveStructure(record.Id);
+                if (instance != null) Release(instance);
+            }
+
+            // Villagers too. Several checks return early after spawning one, and a villager
+            // left behind is counted by the next check's claim and collision measurements.
+            // The persisted pair are spared: they exist to survive to the save.
+            foreach (ZDOID member in colony.State.GetMembers(ColonyMemberKind.Villager))
+            {
+                ZDO record = ZDOMan.instance?.GetZDO(member);
+                string name = record == null ? string.Empty : new VillagerState(record).Name;
+                if (name == PersistedVillagerName || name == PersistedHaulerName) continue;
+
+                VillagerLifecycle.Remove(colony, member);
+            }
+
+            colony.State.SetJobs(new List<JobDefinition>());
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+            TargetClaims.Invalidate();
+
+            if (leaked.Count > 0)
+            {
+                Core.Log.Info($"[Benchmark] cleared after {after}: {string.Join(", ", leaked)}");
+            }
+
+            yield return new WaitForSecondsRealtime(.3f);
         }
 
         /// <summary>
@@ -2559,6 +2824,12 @@ namespace Kukolony.Debug
             int inStone = 0;
             List<string> story = new List<string>();
 
+            // Photographed as it goes, not only totted up afterwards. A chest that gained five
+            // wood proves the arithmetic; it does not show a villager walking to it, and a
+            // villager that arrives by sliding there backwards passes every assertion here.
+            bool caughtFetching = false;
+            bool caughtCarrying = false;
+
             for (int attempt = 0; attempt < 160 && (inWood < 5 || inStone < 5); attempt++)
             {
                 yield return new WaitForSecondsRealtime(.5f);
@@ -2572,6 +2843,39 @@ namespace Kukolony.Debug
                 inStone = StructureInventory.Count(stoneStore.Id, "Stone");
 
                 if (story.Count == 0 || story[story.Count - 1] != hand.Activity) story.Add(hand.Activity);
+
+                if (!caughtFetching && hand.Activity == "fetching")
+                {
+                    caughtFetching = true;
+                    GameObject bound = ZNetScene.instance?.FindInstance(new VillagerState(view.GetZDO()).Target);
+                    yield return BenchmarkUiScenario.PhotographAtWork("haul-fetching.png",
+                        hand.transform.position,
+                        $"'{hand.DisplayName()}' on its way to something to pick up",
+                        bound != null ? bound.transform.position : (Vector3?)null);
+                }
+                else if (!caughtCarrying && new VillagerState(view.GetZDO()).Cargo.Length > 0)
+                {
+                    // Keyed on the villager actually holding cargo, not on a word in the
+                    // activity line. The chests here are close enough that the delivery walk
+                    // can finish inside a single tick, so the trip reads "fetching > putting it
+                    // away" and sometimes neither word is ever sampled - and a required
+                    // screenshot keyed to a state that may not occur fails a run that did
+                    // everything right. Twice.
+                    caughtCarrying = true;
+                    yield return BenchmarkUiScenario.PhotographAtWork("haul-delivering.png",
+                        hand.transform.position,
+                        $"'{hand.DisplayName()}' is '{hand.Activity}' at the chest that asked for it",
+                        woodChest.transform.position);
+                }
+            }
+
+            if (hand != null && ZNetScene.instance?.FindInstance(who) != null)
+            {
+                yield return BenchmarkUiScenario.PhotographAtWork("haul-settled.png",
+                    hand.transform.position,
+                    $"'{hand.DisplayName()}' after the hauling, doing '{hand.Activity}'; " +
+                    $"wood chest holds {inWood}, stone chest holds {inStone}",
+                    woodChest.transform.position);
             }
 
             string did = string.Join(" > ", story.ToArray());

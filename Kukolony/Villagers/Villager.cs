@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Kukolony.Colonies;
 using Kukolony.Core;
+using Kukolony.Gui;
 using UnityEngine;
 
 namespace Kukolony.Villagers
@@ -15,7 +16,7 @@ namespace Kukolony.Villagers
     ///     game's own timestep is why the mod needs no coroutines and no async - the
     ///     predecessor's async AI loop is what used to crash the game.
     /// </summary>
-    internal sealed class Villager : MonoBehaviour
+    internal sealed class Villager : MonoBehaviour, Interactable
     {
         /// <summary>How close to home counts as home. Avoids jittering on the boundary.</summary>
         private const float HomeStopDistance = 2f;
@@ -820,10 +821,56 @@ namespace Kukolony.Villagers
                 return string.Empty;
             }
 
-            // There is no work to report yet - jobs return at roadmap milestone 6 - so the
-            // hover says who this is and what they are doing, which is currently idling.
-            return $"{state.Name}\n<color=grey>{Activity}</color>";
+            // The prompt belongs here rather than on a Hoverable of our own. Character
+            // already implements Hoverable and the game resolves it with
+            // GetComponentInParent<Hoverable>(), first match wins, and component order is not
+            // guaranteed - so a second one is a coin flip. Adding the interface to this class
+            // lost that flip every time, because the component is added after Humanoid: the
+            // method was never called, the prompt never appeared, and the check that asserted
+            // it passed by calling the method itself.
+            string prompt = "[<color=yellow><b>$KEY_Use</b></color>] manage";
+            return $"{state.Name}\n<color=grey>{Activity}</color>\n" +
+                   (Localization.instance != null ? Localization.instance.Localize(prompt) : prompt);
         }
+
+        /// <summary>
+        ///     Opens the colony screen on this villager.
+        /// </summary>
+        /// <remarks>
+        ///     <paramref name="hold" /> is refused rather than obeyed: the key repeats while it
+        ///     is held, and a screen that reopens twenty times a second is a screen that cannot
+        ///     be navigated. The same two calls the map pin makes, so walking up to somebody and
+        ///     clicking their pin land on exactly the same screen.
+        /// </remarks>
+        public bool Interact(Humanoid user, bool hold, bool alt)
+        {
+            if (hold || _nview == null || !_nview.IsValid()) return false;
+
+            ZDO zdo = _nview.GetZDO();
+            Colony colony = Colony.FindFor(zdo);
+            if (colony == null)
+            {
+                Report.Say($"{DisplayName()} has no settlement to manage them from.");
+                return true;
+            }
+
+            ColonyScreen screen = ColonyScreen.Instance;
+            if (screen == null) return false;
+
+            screen.Open(colony, null);
+            screen.Push(new VillagerDetailScreen(zdo.m_uid));
+            return true;
+        }
+
+        /// <summary>
+        ///     Handing an item over is done from the villager's screen, not by shoving it at them.
+        /// </summary>
+        /// <remarks>
+        ///     Refused explicitly rather than left unimplemented: returning true here consumes
+        ///     the player's item, and a villager that silently eats whatever you are holding
+        ///     when you press use is worse than one that does nothing.
+        /// </remarks>
+        public bool UseItem(Humanoid user, ItemDrop.ItemData item) => false;
 
         internal string DisplayName()
         {

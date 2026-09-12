@@ -35,8 +35,12 @@ namespace Kukolony.Debug
         internal static IEnumerator Run(Colony colony)
         {
             LastPassed = false;
-            _captureFailed = false;
-            Captures.Clear();
+
+            // Deliberately not cleared. The in-world captures happen in the functional phase,
+            // which runs first, so resetting the list here dropped three photographs out of the
+            // manifest and a failure among them out of the verdict - the run reported every
+            // picture it took while quietly not counting the ones taken earliest. One benchmark
+            // runs per process, so there is nothing stale to clear.
             yield return new WaitForSecondsRealtime(1f);
 
             if (colony == null)
@@ -361,6 +365,125 @@ namespace Kukolony.Debug
             }
 
             yield return Capture("colony-villager.png");
+        }
+
+        /// <summary>
+        ///     Photographs the settlement at work, from where the player is standing.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The checks can prove a chest gained five wood. They cannot show a villager
+        ///         walking to it, and "it works" and "it looks like it works" are not the same
+        ///         claim - a villager that reaches its chest by sliding there backwards passes
+        ///         every assertion in the suite.
+        ///     </para>
+        ///     <para>
+        ///         The player is turned to face the subject rather than moved to it. The camera
+        ///         follows the player every frame and overwrites anything set on it directly, so
+        ///         aiming means aiming the player; and moving the player is what decides which
+        ///         zones stay loaded, which is the one thing a hauling test must not disturb.
+        ///     </para>
+        /// </remarks>
+        internal static IEnumerator PhotographAtWork(string fileName, Vector3 subject, string note,
+            Vector3? alsoShow = null)
+        {
+            // Checked here, because this is called from the functional phase rather than the UI
+            // one and so sits outside that phase's gate. Without it, turning screenshots off
+            // still detached the camera and froze the sky at noon in the middle of a hauling
+            // measurement.
+            if (!ModConfig.BenchmarkScreenshots.Value) yield break;
+
+            GameCamera rig = GameCamera.instance;
+            if (rig == null)
+            {
+                Log.Warning($"[Screenshot] no camera to photograph {fileName} with");
+                yield break;
+            }
+
+            Transform lens = rig.transform;
+            bool wasEnabled = rig.enabled;
+            Vector3 wasAt = lens.position;
+            Quaternion wasFacing = lens.rotation;
+
+            // The camera is flown to the subject rather than the player being turned towards it.
+            // Turning the player worked and was the wrong tool: where the player stands decides
+            // which zones stay loaded and which villagers keep being simulated, and a hauling
+            // test must not have its world moved underneath it to take a photograph. Detaching
+            // the camera moves nothing in the world at all.
+            //
+            // Disabling the component is the whole trick. GameCamera rewrites its own transform
+            // every LateUpdate from the player's position, so a transform set on it is gone
+            // before anything renders.
+            // Photographed in daylight. The benchmark runs at whatever hour the world happens
+            // to be at, and the first in-world captures came back as a dark smear in which a
+            // villager could not be told from a rock - a picture nobody can read is the same as
+            // no picture. Restored afterwards, because recovery from rest is counted in the
+            // world's own hours and a benchmark that silently froze noon would be measuring
+            // something else.
+            EnvMan sky = EnvMan.instance;
+            bool wasDebugTime = sky != null && sky.m_debugTimeOfDay;
+            float wasTime = sky == null ? 0f : sky.m_debugTime;
+            if (sky != null)
+            {
+                sky.m_debugTimeOfDay = true;
+                sky.m_debugTime = .5f;
+            }
+
+            rig.enabled = false;
+            try
+            {
+                // Both the villager and whatever it is walking to, when the caller knows. A
+                // villager on its own answers "does it look like a person"; a villager and the
+                // chest it is heading for answers "is it doing the right thing", which is the
+                // question actually being asked of a hauling run.
+                Vector3 other = alsoShow ?? subject;
+                Vector3 middle = (subject + other) * .5f;
+                float spread = Vector3.Distance(subject, other);
+                float back = Mathf.Clamp(spread * .9f + 5f, 6f, 22f);
+
+                // Set off to one side rather than straight behind, so the hearth dome and the
+                // chests are not between the camera and the subject - the first shots framed a
+                // villager neatly and put a stone dome in front of it.
+                Vector3 along = other - subject;
+                along.y = 0f;
+                Vector3 aside = Vector3.Cross(
+                    along.sqrMagnitude > .01f ? along.normalized : Vector3.forward, Vector3.up);
+
+                // Flattened and re-normalised first: the cross product is only unit length when
+                // the two points are level, so on a slope the camera quietly crept in, and two
+                // points stacked vertically collapsed it to nothing and left LookRotation with a
+                // forward pointing straight at its own up.
+                aside = aside.sqrMagnitude > .01f ? aside.normalized : Vector3.right;
+
+                Vector3 eye = middle + aside * back + Vector3.up * (back * .45f);
+                if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(eye, out float ground))
+                {
+                    eye.y = Mathf.Max(eye.y, ground + 2f);
+                }
+
+                lens.position = eye;
+                lens.rotation = Quaternion.LookRotation((middle + Vector3.up * 1f) - eye);
+
+                Log.Info($"[Screenshot] {fileName}: {note}; " +
+                         $"subject at {subject}, camera {Vector3.Distance(subject, eye):0.0}m away");
+
+                // Two frames: one for the move to take effect, one to be rendered.
+                yield return null;
+                yield return null;
+                yield return Capture(fileName);
+            }
+            finally
+            {
+                lens.position = wasAt;
+                lens.rotation = wasFacing;
+                rig.enabled = wasEnabled;
+
+                if (sky != null)
+                {
+                    sky.m_debugTimeOfDay = wasDebugTime;
+                    sky.m_debugTime = wasTime;
+                }
+            }
         }
 
         private static IEnumerator Capture(string fileName)

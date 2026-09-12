@@ -28,6 +28,29 @@ set_value() {
 wait_for_run() {
   expected_stage="$1"
   report="$OUTPUT/benchmark-$expected_stage.log"
+
+  # Nothing launches while the last one is still leaving.
+  #
+  # Steam accepts a launch request for a game it already considers running and quietly does
+  # nothing with it; the wait below then finds the *dying* process, decides the game started,
+  # and times out waiting for a report that was never coming - which reads as a hang.
+  #
+  # It belongs here rather than once at the top of the script, because the race is the
+  # create-to-reload handover: the previous stage gives the game ninety seconds to exit, then
+  # sends it a TERM and returns without confirming it is gone.
+  leaving=0
+  while pgrep -f "$PROCESS_PATTERN" >/dev/null; do
+    [ "$leaving" -ne 0 ] || echo "waiting for the previous run to exit"
+    leaving=$((leaving+1))
+    if [ "$leaving" -gt 120 ]; then
+      echo "previous run would not exit; stopping it"
+      pkill -KILL -f "$PROCESS_PATTERN" 2>/dev/null || true
+      sleep 5
+      break
+    fi
+    sleep 1
+  done
+
   [ ! -f "$GAME_LOG" ] || mv "$GAME_LOG" "$OUTPUT/$expected_stage.previous.log"
   open 'steam://rungameid/892970'
   waited=0
@@ -144,7 +167,7 @@ run_stage create
 run_stage reload
 
 if [ "${BENCHMARK_SCREENSHOTS:-true}" = "true" ]; then
-  expected='colony-villager.png colony-screen-home.png colony-screen-gallery.png colony-screen-paged.png colony-screen-picker.png colony-screen-structures.png colony-screen-structure.png colony-screen-register-nearby.png colony-screen-settings.png colony-screen-villagers.png colony-screen-villager.png'
+  expected='haul-fetching.png haul-delivering.png haul-settled.png colony-villager.png colony-screen-home.png colony-screen-gallery.png colony-screen-paged.png colony-screen-picker.png colony-screen-structures.png colony-screen-structure.png colony-screen-register-nearby.png colony-screen-settings.png colony-screen-villagers.png colony-screen-villager.png'
   for image in $expected; do [ -s "$OUTPUT/$image" ] || { echo "missing screenshot: $image"; exit 1; }; done
 fi
 mkdir -p /Users/kuku/Desktop/kukolony

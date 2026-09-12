@@ -107,11 +107,53 @@ namespace Kukolony.Villagers
             nview.m_type = ZDO.ObjectType.Default;
             nview.m_distant = false;
 
+            WalkLikeAPlayer(humanoid);
+
             ai.m_character = humanoid;
             ai.m_huntPlayer = false;
             ai.m_avoidFire = true;
             ai.m_afraidOfFire = false;
             return ClearEventDespawn(ai);
+        }
+
+        /// <summary>
+        ///     Gives the villager the player's pace instead of the warrior's trudge.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The rig is a <c>FallenWarrior</c>, which is authored to advance on you
+        ///         menacingly — and a settlement of people moving at menacing-advance speed reads
+        ///         as a settlement of people wading through treacle. A villager crossing its own
+        ///         hearth radius should take about as long as the player would.
+        ///     </para>
+        ///     <para>
+        ///         Copied from the Player prefab rather than typed in as numbers, so the pace
+        ///         stays the player's if a game update changes it, and so the three speeds keep
+        ///         their relationship to each other. Only the speeds are taken: turn rate and
+        ///         acceleration belong to the body the animation was authored for, and a rig that
+        ///         moves faster than its legs can carry it is the skating that this project has
+        ///         already photographed once.
+        ///     </para>
+        /// </remarks>
+        private static void WalkLikeAPlayer(Humanoid villager)
+        {
+            GameObject player = ZNetScene.instance != null
+                ? ZNetScene.instance.GetPrefab("Player")
+                : PrefabManager.Instance.GetPrefab("Player");
+
+            if (player == null || !player.TryGetComponent(out Player reference))
+            {
+                Log.Warning("[villager] no Player prefab to take a walking pace from; keeping the rig's own");
+                return;
+            }
+
+            Log.Info($"[villager] pace: was walk={villager.m_walkSpeed:0.##} jog={villager.m_speed:0.##} " +
+                     $"run={villager.m_runSpeed:0.##}, now walk={reference.m_walkSpeed:0.##} " +
+                     $"jog={reference.m_speed:0.##} run={reference.m_runSpeed:0.##}");
+
+            villager.m_walkSpeed = reference.m_walkSpeed;
+            villager.m_speed = reference.m_speed;
+            villager.m_runSpeed = reference.m_runSpeed;
         }
 
         private static bool ClearEventDespawn(MonsterAI ai)
