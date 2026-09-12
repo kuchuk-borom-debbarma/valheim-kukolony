@@ -123,6 +123,23 @@ run_stage() {
   wait_for_run "$1"
 }
 
+# Every run starts from an empty world.
+#
+# The world was being reused, so eight runs of colonies, chests and villagers piled up in it
+# and later runs began failing at things the earlier ones had passed - pieces that would not
+# place because something from a previous run was already standing there, and a second colony
+# claiming the structures of the first. The symptom is the worst kind: failures scattered
+# across unrelated checks, none of them caused by the change being tested.
+#
+# The .fwl2 file carries the world's name and seed and is deliberately kept, so the terrain is
+# identical from one run to the next. Everything else is the object database, which is what has
+# to go. A world with a seed and no database is exactly a freshly created one.
+WORLDS="$HOME/Library/Application Support/IronGate/Valheim/worlds_local"
+if [ -d "$WORLDS/KukolonyHaulTest" ]; then
+  find "$WORLDS/KukolonyHaulTest" -type f ! -name '*.fwl2' -delete
+  echo "benchmark world emptied, seed kept"
+fi
+
 run_stage create
 run_stage reload
 

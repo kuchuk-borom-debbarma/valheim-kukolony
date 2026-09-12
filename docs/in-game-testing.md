@@ -93,6 +93,41 @@ images and by checking element bounds against the panel content column described
 7. Yield between real character spawns and keep work within the configured deadline.
 8. Update this guide and `automated-testing.md` with the new coverage.
 
+### The world is emptied before every run
+
+The benchmark world was reused. Eight runs of colonies, chests and villagers accumulated in it,
+and later runs began failing at checks the earlier ones had passed — pieces that would not place
+because something from a previous run already stood there, a second colony claiming the first
+one's structures, records that resolved on one run and were gone on the next.
+
+The symptom is the worst kind to debug: a dozen failures scattered across unrelated checks, none
+of them caused by the change being tested. A run that went 194 passed / 0 failed became 126 / 16
+with no change to any of the code those checks cover.
+
+So the gate deletes the world's object database before the create stage. The `.fwl2` file, which
+carries the name and the seed, is deliberately kept — the terrain must be identical from one run
+to the next or a fixture that reached its chest yesterday may not today. A world with a seed and
+no database is exactly a freshly created one. The reload stage of course does not wipe anything;
+reading back what create wrote is the whole point of it.
+
+### A control that found nothing to do is not a control
+
+A negative control measures the *absence* of something, so anything that stops the scenario
+running at all produces the same reading as a pass. The claims control ran two villagers with
+reservations switched off and reported zero collisions — not because they did not collide, but
+because its chest had stopped being a valid destination and neither villager ever found work.
+The number was right and meant nothing.
+
+So **a control asserts its own fixture**. The claims rounds now check that the chest is still
+registered and still the answer to *where does wood go* at the start of each round, and report
+that as its own named check. Diagnostics alone were not enough: the first version logged one
+line per structure into the same variable and showed only the last one, which pointed at an
+unrelated kiln for two runs.
+
+**Place fixtures where a fixture has already been proven to work.** The contested chest was put
+on untested ground behind the hearth, and was gone by the second round. Every check that passes
+places this side of it. That is now the fourth run placement has cost.
+
 ## Troubleshooting
 
 - No loader marker: verify Steam launch options and the pinned Doorstop library.

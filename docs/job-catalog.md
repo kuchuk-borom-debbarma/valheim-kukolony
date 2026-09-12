@@ -63,6 +63,17 @@ left alone.
 | **What it tidies** | The ground only, or the ground and containers. Lets you run a pure sweeper. |
 | **Load before delivering** | Fill the bag, or set out as soon as it has something. Full loads are efficient; eager delivery looks more alive. |
 
+**"Load before delivering" was offered and ignored.** The setting was persisted, shown on the job
+screen as a toggle, and read by nothing, so every villager delivered after a single item whichever
+way it was set. *A job must not offer a setting it ignores* was written down as a trap to design
+around and then walked into anyway — which is worth recording, because the setting looked like it
+worked: the villager hauled, the chest filled, and only counting what it held at once said
+otherwise (4 with the setting on, never more than 1 with it off).
+
+Topping up is bound to **the trip's existing destination**, not to whatever is nearest. Picking up
+the nearest thing would quietly turn one destination per trip into several, and one destination
+per trip is what gives every claim an obvious owner.
+
 ### On a container — new settings this job needs
 
 | Setting | Meaning |
@@ -92,6 +103,18 @@ Choosing ──► Claiming ──► Fetching ──► Collecting ──► De
 - **Choosing** — pick a destination, then the best-scoring items nearby bound for it. Nothing to
   do is a *Skipped*, not a failure.
 - **Claiming** — reserve the items and the space, so two villagers cannot target one stack.
+
+  **A claim has to be visible the instant it is taken.** The claim index is a cache of the
+  villagers' own recorded targets, and it was trusted for half a second on the reasoning that a
+  claim taken this instant is not something another villager could have known anyway. That
+  reasoning is wrong in the one case the whole mechanism exists for: villagers decide in the
+  same frame, so two of them reaching for one log both read an index in which neither holds
+  anything, and both walk to it. Measured at **eleven collisions in twenty-three samples**; the
+  index is now invalidated by every target write, which took it to **zero**. The timer survives
+  only as a backstop for a villager that stops existing without clearing its target.
+
+  The invalidation lives inside `VillagerState.SetTarget` rather than in its callers, so no
+  route to a target can forget it — and every clearing path runs through that one method.
 - **Fetching** — walk to the first source.
 - **Collecting** — take items, up to bag capacity, with the pickup animation. Several per trip,
   not one.
@@ -110,7 +133,13 @@ Choosing ──► Claiming ──► Fetching ──► Collecting ──► De
 - **Settling** — release claims and report.
 
 **A chest a villager finishes with is left in order**: split stacks packed together and
-contents laid out in a stable order. Moving the wrong things out is only half of organising,
+contents laid out in a stable order. **Packing groups on the item's name, and an item with no
+name is never grouped at all.** Anything without a drop prefab answers the empty string, so
+grouping on a composed `name#quality` key put every one of them in the same group — two
+unrelated items merged into one stack and the surplus deleted, silently. The guard meant to
+catch this tested the composed key for length one, which it can never be: an empty name still
+composes to `"#0"`. Items reach that state in ordinary play, because the field is set when an
+item passes through an inventory and anything that arrived another way arrives without it. Moving the wrong things out is only half of organising,
 and it costs nothing — the villager is already standing at a chest it has already claimed.
 Skipped when there is nothing to gain, because rewriting a container makes it save itself and
 tells every watcher it changed; a settlement that rewrote every chest it looked at would pay

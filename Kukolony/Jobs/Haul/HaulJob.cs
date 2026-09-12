@@ -55,7 +55,8 @@ namespace Kukolony.Jobs.Haul
                 atDestination: Within(context, destination),
                 carrying: carried.Count > 0,
                 bagFull: !context.Bag.GetInventory().HaveEmptySlot(),
-                tired: false);
+                tired: false,
+                fillBagFirst: context.Job != null && context.Job.FillBagFirst);
 
             HaulStep step = HaulTransitions.Next((HaulState)state.WorkState, facts);
 
@@ -112,6 +113,26 @@ namespace Kukolony.Jobs.Haul
             // Carrying something already: it needs a home, not a new errand.
             if (carried.Count > 0)
             {
+                // Unless the job wants a full load, in which case another item bound for the
+                // same chest is part of this trip rather than a new errand. Bound for the same
+                // chest specifically: picking up whatever is nearest would quietly turn one
+                // destination per trip into several, and that rule is what makes a claim have
+                // an obvious owner.
+                if (context.Job != null && context.Job.FillBagFirst &&
+                    !state.Destination.IsNone() &&
+                    context.Bag.GetInventory().HaveEmptySlot())
+                {
+                    StructureRecord bound = SettlementIndex.Find(context.Colony, state.Destination);
+                    if (bound != null && Selection.TryFindGroundWork(context.Colony, context.Job,
+                            context.Villager, out ItemDrop more, out StructureRecord _, bound) &&
+                        more.TryGetComponent(out ZNetView reaching) && reaching.IsValid())
+                    {
+                        state.SetTarget(reaching.GetZDO().m_uid);
+                        activity = "fetching";
+                        return JobResult.Running;
+                    }
+                }
+
                 // The first deliverable thing in the load decides where this trip goes.
                 // Everything else is delivered on a later pass, which keeps one destination per
                 // trip, and an oddment nothing claims does not hold the rest of the load hostage.

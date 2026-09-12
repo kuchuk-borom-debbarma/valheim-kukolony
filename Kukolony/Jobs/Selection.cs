@@ -32,7 +32,7 @@ namespace Kukolony.Jobs
         ///     </para>
         /// </remarks>
         internal static bool TryFindGroundWork(Colony colony, JobDefinition job, Villager asker,
-            out ItemDrop item, out StructureRecord destination)
+            out ItemDrop item, out StructureRecord destination, StructureRecord boundFor = null)
         {
             item = null;
             destination = null;
@@ -66,6 +66,10 @@ namespace Kukolony.Jobs
 
                 List<StructureRecord> homes = SettlementIndex.WhereDoesItGo(colony, prefab, from);
                 if (homes.Count == 0) continue;
+
+                // Topping up a load already bound somewhere: only things going to that same
+                // chest count, so one trip keeps one destination.
+                if (boundFor != null && homes[0].Id != boundFor.Id) continue;
 
                 best = distance;
                 item = drop;

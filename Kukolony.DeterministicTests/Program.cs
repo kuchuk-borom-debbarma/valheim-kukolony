@@ -130,6 +130,21 @@ static class Program
         Step("a source emptied mid-sweep while carrying moves to delivery",
             HaulState.Collecting, Facts(carrying: true, hasDestination: true),
             HaulAction.MoveToDestination);
+
+        // Filling the bag before setting out. The setting was persisted and shown on the job
+        // screen from the day it was written and read by nothing, so every villager delivered
+        // after a single item whichever way it was set.
+        Step("wanting a full load looks for more before setting out",
+            HaulState.Collecting, Facts(carrying: true, hasDestination: true, fillBagFirst: true),
+            HaulAction.ChooseWork);
+        Step("control: without it the same villager sets straight off",
+            HaulState.Collecting, Facts(carrying: true, hasDestination: true),
+            HaulAction.MoveToDestination);
+        Step("a full bag beats wanting a fuller one",
+            HaulState.Collecting, Facts(carrying: true, hasDestination: true, bagFull: true,
+                fillBagFirst: true), HaulAction.MoveToDestination);
+        Step("wanting a full load carries nothing back to choosing when the bag is empty",
+            HaulState.Collecting, Facts(fillBagFirst: true), HaulAction.ChooseWork);
         Step("a source emptied mid-sweep with nothing carried goes back to choosing",
             HaulState.Collecting, Facts(), HaulAction.ChooseWork);
 
@@ -520,8 +535,10 @@ static class Program
     }
 
     static HaulFacts Facts(bool hasSource = false, bool hasDestination = false, bool atSource = false,
-        bool atDestination = false, bool carrying = false, bool bagFull = false, bool tired = false) =>
-        new HaulFacts(hasSource, hasDestination, atSource, atDestination, carrying, bagFull, tired);
+        bool atDestination = false, bool carrying = false, bool bagFull = false, bool tired = false,
+        bool fillBagFirst = false) =>
+        new HaulFacts(hasSource, hasDestination, atSource, atDestination, carrying, bagFull, tired,
+            fillBagFirst);
 
     static void Step(string what, HaulState state, HaulFacts facts, HaulAction expected)
     {

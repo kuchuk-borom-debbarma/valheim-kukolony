@@ -54,7 +54,7 @@ namespace Kukolony.Jobs.Haul
     internal readonly struct HaulFacts
     {
         internal HaulFacts(bool hasSource, bool hasDestination, bool atSource,
-            bool atDestination, bool carrying, bool bagFull, bool tired)
+            bool atDestination, bool carrying, bool bagFull, bool tired, bool fillBagFirst = false)
         {
             HasSource = hasSource;
             HasDestination = hasDestination;
@@ -63,6 +63,7 @@ namespace Kukolony.Jobs.Haul
             Carrying = carrying;
             BagFull = bagFull;
             Tired = tired;
+            FillBagFirst = fillBagFirst;
         }
 
         internal bool HasSource { get; }
@@ -72,6 +73,16 @@ namespace Kukolony.Jobs.Haul
         internal bool Carrying { get; }
         internal bool BagFull { get; }
         internal bool Tired { get; }
+
+        /// <summary>
+        ///     Whether the job wants a full load before setting out.
+        /// </summary>
+        /// <remarks>
+        ///     The job has offered this on its screen since it was written and nothing read it,
+        ///     so every villager delivered after a single item however it was set. A job must
+        ///     not offer a setting it ignores.
+        /// </remarks>
+        internal bool FillBagFirst { get; }
     }
 
     /// <summary>One decision: what to do, and where to record having done it.</summary>
@@ -141,7 +152,21 @@ namespace Kukolony.Jobs.Haul
                         // A full bag ends the collecting half even mid-sweep; what is carried
                         // must be delivered before anything else is picked up.
                         if (facts.BagFull) { state = HaulState.Delivering; continue; }
-                        if (!facts.HasSource) { state = facts.Carrying ? HaulState.Delivering : HaulState.Choosing; continue; }
+
+                        if (!facts.HasSource)
+                        {
+                            // Taking one thing clears the source, which is what ends a sweep.
+                            // With a full load wanted, look for another item bound for the same
+                            // chest before walking; the engine answers by finding one or not,
+                            // and finding none simply falls through to delivering on the next
+                            // pass. The bag filling is the other way out, so this cannot spin.
+                            if (facts.Carrying && facts.FillBagFirst)
+                                return new HaulStep(HaulAction.ChooseWork, HaulState.Fetching);
+
+                            state = facts.Carrying ? HaulState.Delivering : HaulState.Choosing;
+                            continue;
+                        }
+
                         return new HaulStep(HaulAction.Collect, HaulState.Collecting);
 
                     case HaulState.Delivering:

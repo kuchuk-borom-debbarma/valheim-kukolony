@@ -226,7 +226,19 @@ namespace Kukolony.Villagers
         ///     The timestamp is written here rather than at call sites, so a future step cannot
         ///     set a target and silently create a claim that never expires.
         /// </remarks>
-        internal void SetTarget(ZDOID target) => Remember(TargetKey, TargetTokenKey, target, stamp: true);
+        /// <summary>
+        ///     Records what this villager is working on, which is also its claim on the thing.
+        /// </summary>
+        /// <remarks>
+        ///     The claim index is invalidated here rather than by callers, so no route to a
+        ///     target can forget to do it - and every clearing path (<see cref="ClearTarget" />,
+        ///     <see cref="ResetJob" />) runs through this one method.
+        /// </remarks>
+        internal void SetTarget(ZDOID target)
+        {
+            Remember(TargetKey, TargetTokenKey, target, stamp: true);
+            Jobs.TargetClaims.Invalidate();
+        }
 
         internal void SetDestination(ZDOID destination) =>
             Remember(DestinationKey, DestinationTokenKey, destination, stamp: false);

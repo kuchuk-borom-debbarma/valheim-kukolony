@@ -115,10 +115,18 @@ namespace Kukolony.Jobs
             {
                 if (item?.m_shared == null) continue;
 
+                // An item that cannot say what it is must never be grouped. Anything without a
+                // drop prefab answers the empty string, so every one of them would land in the
+                // same group and be packed together - two unrelated items merged into one
+                // stack and the surplus deleted. The guard that was meant to catch this tested
+                // the composed key for length one, which it can never be: an empty name still
+                // composes to "#0".
+                string name = Carrying.NameOf(item);
+                if (name.Length == 0) continue;
+
                 // Quality is part of the identity: a stack of worn armour and a stack of new
                 // armour are not the same thing, and merging them would upgrade or destroy one.
-                string key = Carrying.NameOf(item) + "#" + item.m_quality;
-                if (key.Length == 1) continue;
+                string key = name + "#" + item.m_quality;
 
                 if (!groups.TryGetValue(key, out List<ItemDrop.ItemData> items))
                 {

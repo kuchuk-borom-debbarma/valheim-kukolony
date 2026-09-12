@@ -171,7 +171,11 @@ namespace Kukolony.Debug
             yield return CheckJobQueue(report, colony);
             yield return CheckHauling(report, colony, origin);
             yield return CheckHaulingThoroughly(report, colony, origin);
+            yield return CheckHaulingGoesWrong(report, colony, origin);
+            yield return CheckTwoVillagersOneItem(report, colony, origin);
+            yield return CheckFillingTheBagFirst(report, colony, origin);
             yield return CheckTidying(report, colony, origin);
+            yield return CheckTidyingKeepsUnidentifiedItems(report, colony, origin);
             yield return CheckWorkAreas(report, colony, origin);
             yield return CheckResting(report, colony, origin);
             CheckSayingThingsOnce(report);
@@ -1021,8 +1025,17 @@ namespace Kukolony.Debug
             }
 
             // And it goes away with them, rather than pointing at somebody who is gone.
+            //
+            // Waited for rather than slept through. The map redraws on its own once-a-second
+            // timer, so a fixed pause only ever has whatever margin is left over, and this one
+            // had half a second - enough to pass for weeks and then report a pin that lived a
+            // tick too long as a broken feature. Polling fails only if the pin really stays.
             VillagerLifecycle.Remove(colony, who);
-            yield return new WaitForSecondsRealtime(1.5f);
+
+            for (int attempt = 0; attempt < 30 && FindPin(name) != null; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.25f);
+            }
 
             report.Check(FindPin(name) == null,
                 "a villager's pin goes when the villager does",
@@ -1540,6 +1553,415 @@ namespace Kukolony.Debug
         }
 
         /// <summary>
+        ///     "Fill the bag before delivering", which the job screen has always offered.
+        /// </summary>
+        /// <remarks>
+        ///     Measured as the most the villager ever held at once, with the setting on and off.
+        ///     The deterministic table proves the branch is reachable; only a run proves the
+        ///     engine answers it by finding another item rather than falling straight through
+        ///     to delivering, which is what it did for as long as nothing read the setting.
+        /// </remarks>
+        private static IEnumerator CheckFillingTheBagFirst(TestReport report, Colony colony, Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(5f, 0f, 7f));
+            yield return new WaitForSecondsRealtime(.3f);
+            StructureRecord store = Register(colony, chest, "Load store");
+            if (store == null)
+            {
+                report.Check(false, "full-load check could register a chest");
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, store.Id, s => s.Accepts = new List<string> { "Wood" });
+
+            int loaded = -1, loadedDelivered = 0, eager = -1, eagerDelivered = 0;
+            yield return CarryAsMuchAsItCan(colony, origin, store, true,
+                (most, moved) => { loaded = most; loadedDelivered = moved; });
+            yield return CarryAsMuchAsItCan(colony, origin, store, false,
+                (most, moved) => { eager = most; eagerDelivered = moved; });
+
+            report.Check(loaded > 1 && loadedDelivered > 0,
+                "a villager told to fill its bag first carries more than one thing at a time",
+                $"mostHeld={loaded} delivered={loadedDelivered}");
+
+            // Delivery is asserted as well as the load, because "never held more than one" is
+            // also what a villager that did no work at all looks like - and the first version
+            // of this control read exactly that way. Held is sampled rather than counted, so
+            // the claim is that it never carried a load, not that it carried precisely one.
+            report.Check(eagerDelivered > 0 && eager <= 1,
+                "control: told to set out eagerly, the same villager never builds up a load",
+                $"mostHeld={eager} delivered={eagerDelivered}");
+
+            colony.RemoveStructure(store.Id);
+            Release(chest);
+            colony.State.SetJobs(new List<JobDefinition>());
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>Runs one load and reports the most wood the villager held at once.</summary>
+        private static IEnumerator CarryAsMuchAsItCan(Colony colony, Vector3 origin, StructureRecord store,
+            bool fillFirst, Action<int, int> onMeasured)
+        {
+            int before = StructureInventory.Count(store.Id, "Wood");
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition
+                {
+                    Id = "load", Name = "Load haul", Kind = JobKind.Haul,
+                    Repeat = 30, FillBagFirst = fillFirst
+                }
+            });
+
+            // Separate drops rather than one stack: a single stack would be picked up whole and
+            // would say nothing about whether the villager went back for more.
+            for (int i = 0; i < 4; i++)
+            {
+                DropItem("Wood", origin + new Vector3(-4f - i, 0f, 12f), 1);
+            }
+
+            Villager hauler = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (hauler == null || !hauler.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                onMeasured(-1, 0);
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "load" });
+
+            int most = 0;
+            var doing = new HashSet<string>();
+            for (int sample = 0; sample < 160; sample++)
+            {
+                doing.Add(hauler == null ? "?" : hauler.Activity ?? "?");
+                yield return new WaitForSecondsRealtime(.25f);
+                if (hauler == null || ZNetScene.instance.FindInstance(who) == null) break;
+
+                Container bag = hauler.GetComponentInChildren<Container>(true);
+                Inventory inventory = bag == null ? null : bag.GetInventory();
+                if (inventory == null) continue;
+
+                int wood = 0;
+                foreach (ItemDrop.ItemData held in inventory.GetAllItems())
+                {
+                    if (Carrying.NameOf(held) == "Wood") wood += held.m_stack;
+                }
+
+                if (wood > most) most = wood;
+            }
+
+            int delivered = Mathf.Max(0, StructureInventory.Count(store.Id, "Wood") - before);
+            Core.Log.Info($"[load] fillFirst={fillFirst} mostHeld={most} delivered={delivered} " +
+                          $"activities=[{string.Join(", ", doing)}]");
+
+            VillagerLifecycle.Remove(colony, who);
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+            onMeasured(most, delivered);
+        }
+
+        /// <summary>
+        ///     Two villagers, one log: the claim, measured end to end and with the switch off.
+        /// </summary>
+        /// <remarks>
+        ///     The unit checks elsewhere prove the claim registry answers correctly. They cannot
+        ///     prove the job <em>asks</em> it, which is the part that actually stops two
+        ///     villagers walking to one stack. So this counts collisions — moments where two
+        ///     villagers hold the same target at once — through a real haul, and then runs the
+        ///     same haul with <c>ClaimsEnabled</c> off. An assertion that has never failed
+        ///     proves nothing; the control is what makes the zero mean something.
+        /// </remarks>
+        private static IEnumerator CheckTwoVillagersOneItem(TestReport report, Colony colony, Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(5f, 0f, 7f));
+            yield return new WaitForSecondsRealtime(.3f);
+            StructureRecord store = Register(colony, chest, "Contested store");
+            if (store == null)
+            {
+                report.Check(false, "contention check could register a chest");
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, store.Id, s => s.Accepts = new List<string> { "Wood" });
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "race", Name = "Race haul", Kind = JobKind.Haul, Repeat = 30 }
+            });
+
+            bool wasEnabled = ModConfig.ClaimsEnabled.Value;
+            int withClaims = -1, withoutClaims = -1;
+            bool standing = true;
+
+            yield return RaceForOneItem(colony, origin, store, true,
+                (r, ok) => { withClaims = r; standing &= ok; });
+            yield return RaceForOneItem(colony, origin, store, false,
+                (r, ok) => { withoutClaims = r; standing &= ok; });
+
+            // A round whose chest quietly stopped being a destination reports no collisions for
+            // the same reason an empty settlement does. Said out loud, because the control
+            // round did exactly that and read as a pass of the thing it was controlling for.
+            report.Check(standing,
+                "control: the chest was a working destination in both rounds",
+                $"standing={standing}");
+
+            ModConfig.ClaimsEnabled.Value = wasEnabled;
+
+            report.Check(withClaims == 0,
+                "two villagers never reach for the same item at once",
+                $"collisions={withClaims}");
+
+            report.Check(withoutClaims > 0,
+                "control: with claims switched off they do collide, so the zero above is real",
+                $"collisions={withoutClaims}");
+
+            colony.RemoveStructure(store.Id);
+            Release(chest);
+            colony.State.SetJobs(new List<JobDefinition>());
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Runs one two-villager race and reports how often they held the same target.
+        /// </summary>
+        private static IEnumerator RaceForOneItem(Colony colony, Vector3 origin, StructureRecord store,
+            bool claims, Action<int, bool> onCounted)
+        {
+            ModConfig.ClaimsEnabled.Value = claims;
+            TargetClaims.Invalidate();
+
+            // One stack, far enough out that both have to walk for it - a race decided before
+            // anyone takes a step measures nothing.
+            DropItem("Wood", origin + new Vector3(0f, 0f, 18f), 5);
+
+            var racers = new List<ZDOID>();
+            for (int i = 0; i < 2; i++)
+            {
+                Villager racer = VillagerLifecycle.Spawn(colony);
+                yield return null;
+                if (racer == null || !racer.TryGetComponent(out ZNetView view) || !view.IsValid()) continue;
+
+                SendRested(view);
+                new VillagerState(view.GetZDO()).SetQueue(new List<string> { "race" });
+                racers.Add(view.GetZDO().m_uid);
+            }
+
+            // Why the villagers did or did not find the wood, asked of the same functions the
+            // job asks. A control round that quietly found no work reads as "no collisions".
+            int loose = 0;
+            foreach (ItemDrop drop in ItemDrop.s_instances)
+            {
+                if (drop == null || drop.m_itemData?.m_dropPrefab == null) continue;
+                if (Utils.GetPrefabName(drop.m_itemData.m_dropPrefab) == "Wood") loose++;
+            }
+
+            StructureRecord home = Selection.WhereFor(colony, "Wood", origin);
+            bool usable = home != null && home.Id == store.Id;
+
+            Core.Log.Info($"[race] claims={claims} looseWood={loose} racers={racers.Count} " +
+                          $"home={(home == null ? "none" : home.Name)} usable={usable} " +
+                          $"registered={Registered(colony, store.Id)}");
+
+            int collisions = 0;
+            int busy = 0;
+            var shared = new HashSet<string>();
+            var doing = new HashSet<string>();
+            for (int sample = 0; sample < 120; sample++)
+            {
+                yield return new WaitForSecondsRealtime(.25f);
+                collisions += SharedTargets(shared);
+
+                foreach (Villager watched in Villager.Instances)
+                {
+                    if (watched == null || !watched.State.IsValid) continue;
+                    if (!watched.State.Target.IsNone()) busy++;
+                    doing.Add(watched.Activity ?? "?");
+                }
+            }
+
+            Core.Log.Info($"[race] claims={claims} collisions={collisions} busySamples={busy} " +
+                     $"villagers={racers.Count} sharedTargets=[{string.Join(", ", shared)}] " +
+                     $"activities=[{string.Join(", ", doing)}]");
+
+            foreach (ZDOID racer in racers) VillagerLifecycle.Remove(colony, racer);
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+            onCounted(collisions, usable);
+        }
+
+        /// <summary>Whether a record is still on the colony's books.</summary>
+        private static bool Registered(Colony colony, ZDOID structure)
+        {
+            foreach (StructureRecord record in colony.State.GetStructures())
+            {
+                if (record.Id == structure) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        ///     How many villagers are working on something another villager is also working on.
+        /// </summary>
+        /// <remarks>
+        ///     Counted off <see cref="Villager.Instances" /> rather than through
+        ///     <see cref="TargetClaims" />: that index is keyed by target, so it collapses
+        ///     exactly the duplicates this is trying to find and would report zero always.
+        /// </remarks>
+        private static int SharedTargets(HashSet<string> saw = null)
+        {
+            var seen = new Dictionary<ZDOID, int>();
+            foreach (Villager villager in Villager.Instances)
+            {
+                if (villager == null || !villager.State.IsValid) continue;
+
+                ZDOID target = villager.State.Target;
+                if (target.IsNone()) continue;
+
+                seen.TryGetValue(target, out int count);
+                seen[target] = count + 1;
+            }
+
+            int shared = 0;
+            foreach (KeyValuePair<ZDOID, int> entry in seen)
+            {
+                if (entry.Value <= 1) continue;
+
+                shared += entry.Value - 1;
+                if (saw == null) continue;
+
+                GameObject what = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(entry.Key) : null;
+                saw.Add(what == null ? "gone" : Utils.GetPrefabName(what));
+            }
+
+            return shared;
+        }
+
+        /// <summary>
+        ///     Hauling when the world does not cooperate.
+        /// </summary>
+        /// <remarks>
+        ///     Everything here is a thing that happens in a real settlement and nowhere in a
+        ///     tidy test: a chest that fills, a chest destroyed while somebody is walking to it,
+        ///     two villagers reaching for one log, and things lying outside the settlement
+        ///     entirely. A job that only works when nothing changes is not a job.
+        /// </remarks>
+        private static IEnumerator CheckHaulingGoesWrong(TestReport report, Colony colony, Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(5f, 0f, 7f));
+            yield return new WaitForSecondsRealtime(.3f);
+            StructureRecord store = Register(colony, chest, "The only chest");
+            if (store == null)
+            {
+                report.Check(false, "adversarial haul check could register a chest");
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, store.Id, s => s.Accepts = new List<string> { "Wood" });
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "rough", Name = "Rough haul", Kind = JobKind.Haul, Repeat = 30 }
+            });
+
+            // 1. Something lying outside the settlement is not the settlement's business.
+            Vector3 beyond = origin + new Vector3(colony.EffectiveRadius + 25f, 0f, 0f);
+            ItemDrop far = DropItem("Wood", beyond, 3);
+            ZDOID farId = far == null ? ZDOID.None : far.GetComponent<ZNetView>().GetZDO().m_uid;
+
+            // 2. A full chest cannot be the answer to anything.
+            if (chest.TryGetComponent(out Container full)) Fill(full.GetInventory(), "Stone");
+
+            ItemDrop nearby = DropItem("Wood", origin + new Vector3(3f, 0f, 3f), 3);
+            report.Check(nearby != null && far != null,
+                "control: wood inside the settlement and wood beyond it",
+                $"near={(nearby != null)} far={(far != null)}");
+            if (nearby == null || far == null) yield break;
+
+            Villager hand = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (hand == null || !hand.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "adversarial haul check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "rough" });
+
+            // With the only chest full, it must not spin: give it time to prove it settles.
+            float strayed = 0f;
+            for (int attempt = 0; attempt < 40; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                if (hand == null || ZNetScene.instance.FindInstance(who) == null) break;
+
+                float away = Utils.DistanceXZ(hand.transform.position, colony.transform.position);
+                if (away > strayed) strayed = away;
+            }
+
+            report.Check(ZNetScene.instance.FindInstance(who) != null,
+                "a villager with nowhere to put anything is still alive and still here",
+                $"doing='{hand?.Activity}'");
+
+            report.Check(strayed <= colony.EffectiveRadius,
+                "control: and it did not go looking beyond the settlement for somewhere to put it",
+                $"strayed {strayed:0}m");
+
+            // 3. Now make room, and it should get on with it.
+            if (chest.TryGetComponent(out Container emptied)) emptied.GetInventory().RemoveAll();
+            SettlementIndex.ResetForTest();
+
+            int delivered = 0;
+            for (int attempt = 0; attempt < 80 && delivered == 0; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                delivered = StructureInventory.Count(store.Id, "Wood");
+            }
+
+            report.Check(delivered > 0,
+                "a villager that had nowhere to put things starts again once there is room",
+                $"delivered={delivered} doing='{hand?.Activity}'");
+
+            // Only worth asserting now: while the chest was full this villager was hauling
+            // nothing at all, so "it left the far wood alone" said nothing about reach. It
+            // has now provably hauled, and still did not go outside for the rest.
+            report.Check(delivered > 0 && ZNetScene.instance.FindInstance(farId) != null,
+                "wood outside the settlement is left where it lies, by a villager that is hauling",
+                $"stillThere={ZNetScene.instance.FindInstance(farId) != null} delivered={delivered}");
+
+            // 4. Destroy the chest out from under it and make sure it recovers rather than
+            //    spinning on a destination that no longer exists.
+            colony.RemoveStructure(store.Id);
+            Release(chest);
+            DropItem("Wood", origin + new Vector3(-3f, 0f, 3f), 3);
+            yield return new WaitForSecondsRealtime(6f);
+
+            report.Check(ZNetScene.instance.FindInstance(who) != null,
+                "a villager survives its destination being destroyed under it",
+                $"doing='{hand?.Activity}'");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.State.SetJobs(new List<JobDefinition>());
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
         ///     A full haul: two kinds of thing, two chests, and a villager that stays put.
         /// </summary>
         /// <remarks>
@@ -1688,6 +2110,61 @@ namespace Kukolony.Debug
         ///         nothing to do with tidying.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     Packing a chest must never merge two things that cannot say what they are.
+        /// </summary>
+        /// <remarks>
+        ///     An item with no drop prefab answers the empty string when asked its name, so
+        ///     every one of them grouped under the same key and was packed into a single stack
+        ///     with the surplus deleted. Items reach that state in ordinary play - the field is
+        ///     set when an item passes through an inventory, so anything that arrived another
+        ///     way arrives without it - and the loss is silent, which is the worst kind.
+        /// </remarks>
+        private static IEnumerator CheckTidyingKeepsUnidentifiedItems(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(-7f, 0f, 5f));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            Container container = chest == null ? null : chest.GetComponentInChildren<Container>(true);
+            if (container == null)
+            {
+                report.Check(false, "unidentified-item check could place a chest");
+                yield break;
+            }
+
+            Inventory inventory = container.GetInventory();
+            inventory.RemoveAll();
+
+            // Two genuinely different items, both stripped of the field that names them.
+            foreach (string prefabName in new[] { "Wood", "Stone" })
+            {
+                GameObject prefab = ObjectDB.instance?.GetItemPrefab(prefabName);
+                if (prefab == null || !prefab.TryGetComponent(out ItemDrop drop)) continue;
+
+                ItemDrop.ItemData nameless = drop.m_itemData.Clone();
+                nameless.m_dropPrefab = null;
+                nameless.m_stack = 3;
+                inventory.m_inventory.Add(nameless);
+            }
+
+            int before = inventory.m_inventory.Count;
+            report.Check(before == 2,
+                "control: two unidentified items are in the chest to begin with",
+                $"items={before}");
+
+            Tidying.Organise(container);
+            int after = inventory.m_inventory.Count;
+
+            report.Check(after == before,
+                "packing a chest never merges two things that cannot say what they are",
+                $"before={before} after={after}");
+
+            inventory.RemoveAll();
+            Release(chest);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
         private static IEnumerator CheckTidying(TestReport report, Colony colony, Vector3 origin)
         {
             SettlementIndex.ResetForTest();
