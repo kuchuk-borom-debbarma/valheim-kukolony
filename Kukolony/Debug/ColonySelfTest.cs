@@ -2621,9 +2621,17 @@ namespace Kukolony.Debug
 
             // Villagers too. Several checks return early after spawning one, and a villager
             // left behind is counted by the next check's claim and collision measurements.
-            // The persisted pair are spared: they exist to survive to the save.
+            //
+            // The run's own primary villager is spared, and sparing it by name would not have
+            // worked: it is not renamed until the persistence snapshot, which runs after every
+            // phase, so a sweep keyed on the persisted names would have destroyed it on the
+            // very first call. What depended on it - the screen audit, two photographs and the
+            // whole reload stage - would then have failed somewhere else entirely.
+            ZDOID primary = GetPrimaryMember(colony);
             foreach (ZDOID member in colony.State.GetMembers(ColonyMemberKind.Villager))
             {
+                if (member == primary) continue;
+
                 ZDO record = ZDOMan.instance?.GetZDO(member);
                 string name = record == null ? string.Empty : new VillagerState(record).Name;
                 if (name == PersistedVillagerName || name == PersistedHaulerName) continue;
@@ -2844,13 +2852,18 @@ namespace Kukolony.Debug
 
                 if (story.Count == 0 || story[story.Count - 1] != hand.Activity) story.Add(hand.Activity);
 
-                if (!caughtFetching && hand.Activity == "fetching")
+                if (!caughtFetching)
                 {
+                    // Taken on the first look, not when a particular word is sampled. The shell
+                    // requires this file, and keying it to "fetching" meant a villager that
+                    // picked up and delivered inside one half-second window - likelier now that
+                    // villagers move at a player's pace - failed the run for a missing
+                    // photograph while every assertion passed.
                     caughtFetching = true;
                     GameObject bound = ZNetScene.instance?.FindInstance(new VillagerState(view.GetZDO()).Target);
                     yield return BenchmarkUiScenario.PhotographAtWork("haul-fetching.png",
                         hand.transform.position,
-                        $"'{hand.DisplayName()}' on its way to something to pick up",
+                        $"'{hand.DisplayName()}' setting out, doing '{hand.Activity}'",
                         bound != null ? bound.transform.position : (Vector3?)null);
                 }
                 else if (!caughtCarrying && new VillagerState(view.GetZDO()).Cargo.Length > 0)
@@ -2869,14 +2882,20 @@ namespace Kukolony.Debug
                 }
             }
 
-            if (hand != null && ZNetScene.instance?.FindInstance(who) != null)
-            {
-                yield return BenchmarkUiScenario.PhotographAtWork("haul-settled.png",
-                    hand.transform.position,
-                    $"'{hand.DisplayName()}' after the hauling, doing '{hand.Activity}'; " +
-                    $"wood chest holds {inWood}, stone chest holds {inStone}",
-                    woodChest.transform.position);
-            }
+            // Always written, even if the villager went away. The loop can break on the
+            // villager being unloaded while both chests are already full, which passes every
+            // assertion here and then fails the run several minutes later with "missing
+            // screenshot" - a message pointing nowhere near the cause. With nobody to
+            // photograph, the chests are the subject, and the note says so.
+            bool stillHere = hand != null && ZNetScene.instance?.FindInstance(who) != null;
+            yield return BenchmarkUiScenario.PhotographAtWork("haul-settled.png",
+                stillHere ? hand.transform.position : woodChest.transform.position,
+                stillHere
+                    ? $"'{hand.DisplayName()}' after the hauling, doing '{hand.Activity}'; " +
+                      $"wood chest holds {inWood}, stone chest holds {inStone}"
+                    : $"the villager is no longer loaded; wood chest holds {inWood}, " +
+                      $"stone chest holds {inStone}",
+                stoneChest.transform.position);
 
             string did = string.Join(" > ", story.ToArray());
 

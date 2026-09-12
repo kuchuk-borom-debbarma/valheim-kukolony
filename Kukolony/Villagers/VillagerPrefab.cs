@@ -137,9 +137,12 @@ namespace Kukolony.Villagers
         /// </remarks>
         private static void WalkLikeAPlayer(Humanoid villager)
         {
-            GameObject player = ZNetScene.instance != null
-                ? ZNetScene.instance.GetPrefab("Player")
-                : PrefabManager.Instance.GetPrefab("Player");
+            // Both asked, and the second asked when the first answers nothing rather than when
+            // the scene is missing entirely. This runs around ZNetScene.Awake, so the instance
+            // can exist with its prefab table not yet filled - in which case the fallback was
+            // unreachable and the villager silently kept the warrior's pace.
+            GameObject player = (ZNetScene.instance != null ? ZNetScene.instance.GetPrefab("Player") : null)
+                                ?? PrefabManager.Instance?.GetPrefab("Player");
 
             if (player == null || !player.TryGetComponent(out Player reference))
             {
