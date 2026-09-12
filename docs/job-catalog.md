@@ -284,3 +284,201 @@ This job cannot be built alone. In dependency order:
 
 Each is separately verifiable, and each is worth landing on its own rather than as part of one
 large change.
+
+---
+
+# Chop — the first job that produces
+
+The second job, and the first that *makes* something. Hauling moves what already exists, so a
+settlement that only hauls is a filing system rather than an economy. Chopping is the right
+second job because it shares almost nothing with the first: a target that is not a registered
+structure, sustained effort instead of atomic actions, a tool that has to be held, and a target
+that turns into a different object halfway through.
+
+**This job is chopping and only chopping.** Not mining, not foraging. That narrowing is what
+buys precision — every target takes an axe, every one of them keeps its health in the same ZDO
+field, and the settings can talk about trees instead of about "resources". Mining would not
+share the health field: a `MineRock` keeps a float per hit area under a runtime-hashed key and
+a `MineRock5` keeps a base64 package of them, so a give-up test that works for trees would read
+nothing at all from a rock.
+
+## What it does
+
+A villager with an axe walks to the nearest choppable thing inside its work area and hits it
+until it stops existing. Then it looks again.
+
+That is the whole loop, and most of the job's rules fall out of it rather than being written:
+
+- **A tree becomes a log, and the log is then the nearest choppable thing** — so "finish what
+  you started" needs no rule. Nearest-wins produces it.
+- **Sub-logs and stumps are handled by the same accident.** They appear where the villager is
+  already standing.
+- **The target vanishing is success, not failure.** A job built on hauling's fetch-and-deliver
+  shape would report every felled tree as an error.
+
+## What it does not do
+
+**It never learns to carry.** Wood ends on the ground where it falls, and hauling collects it.
+This keeps the job to one thing and reuses everything, with one consequence worth stating
+rather than discovering: **the forest is usually outside the haulers' work area**, so the player
+has to connect the two. The moment chopping "just carries it back", it is two jobs.
+
+Nor does it replant — that needs seeds and a cultivator, which is a different job with a
+different tool.
+
+## The rule that makes it honest
+
+Hauling's hazard was the shuffle loop. Chopping's is **invisible failure**: every way this job
+breaks looks, from outside, like a villager standing still — and all of them work perfectly
+whenever somebody is watching.
+
+`IDestructible` is the whole shared foundation and it is two methods. Neither says anything
+about tools, `Damage` returns `void`, and tool suitability is decided privately inside the
+concrete class after the RPC. **A blow too weak, a blow on the wrong channel, and a blow that
+landed are indistinguishable to the caller.**
+
+So the job does not predict. It swings, and reads the health back:
+
+| Failure | What it looks like | What makes it visible |
+|---|---|---|
+| Target never owned | Villager swings forever, health never moves | Ownership claimed first, blow waits a tick |
+| Axe cannot bite | Swings forever, contentedly | The give-up test: said once, target released |
+| Off-screen, trees unloaded | Works under observation, idles when nobody looks | Trees on the keep-alive allowlist |
+| Claim expired mid-tree | Two villagers on one trunk, both correct | The claim refreshed on every landed blow |
+| Target became a log | Claim released, second villager arrives | The claim handed to the log |
+
+**Ownership first is the single worst trap.** A world-generated tree has no owner at all, so
+every peer decides the blow is somebody else's business and drops it.
+
+**The give-up test is one health read used only as a give-up test, never as a progress model.**
+A stone axe does literally zero damage to birch, forever. If a target has taken several blows
+and its health has not moved at all, the axe cannot bite it: say so once, release it, and do not
+choose it again this session. Several blows rather than one, because the first blow at a fresh
+log is *legitimately* discarded — a `TreeLog` has 0.2 s of invulnerability after it spawns and a
+`Destructible` has one frame.
+
+The health is read defaulting to the prefab's full health. **Defaulting to zero would make a
+felled tree and an untouched one report the same number**, because an undamaged object has never
+written the field.
+
+## Classifying — by component, never by name
+
+A name list would miss every modded tree and every vanilla one nobody thought to write down,
+and there are dozens. So the classifier is built from `ZNetScene.m_prefabs` by component into a
+prefab-hash set, which makes finding work an integer compare per candidate rather than a
+`GetComponent`. It is **cleared on world unload**, because hashes are per-session once mods can
+register their own.
+
+Three kinds, and `TreeLog` is classified **before** `TreeBase`:
+
+- **`TreeBase`** — a standing tree.
+- **`TreeLog`** — a fallen trunk or a sub-log.
+- **`Destructible`** — stumps and bushes.
+
+## Settings
+
+Every setting here reaches the engine and gets a check proving it changes behaviour. That is not
+a nicety: `FillBagFirst` was persisted, shown on the job screen as a toggle, and read by
+nothing — *a job must not offer a setting it ignores* was written down as a trap to design
+around and then walked into anyway.
+
+| Setting | Meaning |
+|---|---|
+| **What to chop** — trees / logs / undergrowth, multi-select | A crew that only clears fallen logs is a genuinely different villager from one that fells. It is also how a player says *leave my stumps alone*. |
+| **Which trees** — species allow-list, empty means all | Mirrors hauling's item list exactly, including that empty means everything. *Leave the birches* is a real thing people want. |
+| **Leave standing** — a count, default 0 | The anti-clear-cut rule. The scan already counts what it found, so below the threshold there is simply no work. This is what makes a woodcutter a forester. |
+| **Stop when we have** — an item and a count, 0 meaning never | The terminus the job otherwise lacks. Above the line the job returns **Skipped**, consuming no repetition and yielding to the next queue entry. |
+| **Where it works** | Not new — `WorkArea` and `WorkRadius` on `JobDefinition`, reused unchanged. |
+| **Repeat** | Not new — the queue already counts targets before yielding. |
+
+**Two stopping rules, deliberately, because they answer different questions.** *Leave standing*
+is about the forest: do not strip this place. *Stop when we have* is about the settlement: we do
+not need more. Neither substitutes for the other — a full woodshed beside a bare hillside is the
+failure the first one prevents.
+
+### What is deliberately not offered
+
+- **A tool-tier cap.** The give-up test already handles a tree the axe cannot bite, and a
+  setting that duplicates an automatic behaviour is a setting that will disagree with it.
+- **Fall direction, or whether to protect buildings.** Safety is not a preference. The log is
+  always pushed away from whoever felled it, and there is no switch.
+- **Carrying the wood home.** That is hauling.
+
+## The state machine
+
+```
+Choosing ──► Approaching ──► Chopping ──┐
+    ▲                                    │
+    └────────────────────────────────────┘
+```
+
+`Choosing = 0`, because an unwritten ZDO int reads as zero and so does the state left behind by
+a villager that was doing another job yesterday. Landing either in "decide what to do" is always
+safe.
+
+The table is pure and lives in the Unity-free project, so all thirty-two fact combinations are
+checked in about a second rather than only inside a four-minute game run. **Facts outrank the
+recorded state**: a villager that reloads mid-tree re-reads the world and carries on, and one
+whose tree the player felled goes back to choosing rather than obeying a target that is gone.
+
+Having enough is checked when *choosing*, not mid-trunk — a villager that abandoned a
+half-chopped tree the moment the store filled would leave it standing at half health for the
+next one to start again from.
+
+## Finding work
+
+**There is no registry for scenery** — the game keeps instance lists for items and creatures,
+not trees. Finding one means walking `ZNetScene.instance.m_instances`, which is affordable once
+every few seconds *for a colony* and never once per villager per tick. The predecessor of this
+whole mod died partly of `Physics.OverlapSphere(500f)` per villager per second. Never that.
+
+The scan is cached per colony on a short refresh — long enough to be cheap, short enough that a
+tree felled by hand stops being offered before a villager has walked to it. It is bounded by
+`ModConfig.ResourceScanRadius` as the outer ceiling, which a job's own `WorkRadius` narrows and
+cannot reach past.
+
+Chosen **nearest to the villager**, which is what makes the fallen log the next target.
+
+## Claims — reused, not rebuilt
+
+`TargetClaims` already works and is proven by a paired control: zero collisions with claims on,
+eleven with them off. Chop calls the same `IsClaimedByOther` and takes a target with the same
+`SetTarget`. Handing the claim from a felled tree to the log it left behind is one `SetTarget`,
+not a system.
+
+**But reuse surfaces one real gap.** The claim TTL is thirty seconds and is kept alive by the
+*walk* reporting progress. A villager standing still chopping is not walking, so on any tree
+taking longer than the TTL the claim ages out underneath it and a second villager joins in —
+both behaving correctly, the settlement double-handling one tree. So chopping refreshes the
+claim on **every blow that lands**, which is the same signal the give-up test reads: a blow that
+moved the health is progress, and a run of blows that moved nothing is neither progress nor a
+claim worth holding.
+
+## Edge cases, named before building
+
+- **The target changes identity.** Tree → log → sub-logs, and separately a stump. Not every tree
+  leaves a log. One tree is up to four pieces of work.
+- **A felled log damages villagers unconditionally.** `ImpactEffect.m_damagePlayers` only guards
+  `IsPlayer()`; there is no NPC opt-out, and *death by tree* is a real vanilla death cause. The
+  chopper is safe by construction because the log is pushed away from it — but **whatever stands
+  on the far side is not.**
+- **A falling tree has already destroyed a benchmark chest in this repo**, surfacing two phases
+  later as a persistence failure. Destructive fixtures go in their own cleared site.
+- **Every blow makes the nearest player noisy** — `AddNoise(100f)` within 10 m, every hit.
+- **The axe lives in the bag, and the bag is also the wardrobe.** A hauler has already once
+  picked up a villager's own chestpiece and reported that nothing wanted it. The axe must be
+  excluded from haulable cargo or the same bug returns in different clothes.
+- The player fells the tree mid-walk; a second villager claims it first; chopping inside a ward;
+  the 0.2 s log and one-frame `Destructible` invulnerabilities; log drops scattered along the
+  trunk axis rather than clustered, which is a hauling reach question.
+
+## Done when
+
+You queue a Chop job, and a villager with an axe walks into the trees, fells one, cuts the log
+it left into wood, and moves to the next — and a hauler collects the wood if you have connected
+the two work areas. A stone axe against a tree it cannot cut says so once and moves on instead
+of swinging forever. Two villagers never end up on the same trunk. *Leave standing* stops with
+exactly that many left, and *stop when we have* stops when the woodshed is full.
+
+And it does all of that **with nobody watching** — which is the one claim worth proving by
+walking away and coming back, because every failure in the table above passes inspection.

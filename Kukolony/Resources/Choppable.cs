@@ -126,6 +126,30 @@ namespace Kukolony.Resources
             return best;
         }
 
+        /// <summary>
+        ///     The standing trees this world actually contains, by prefab name, for a player
+        ///     choosing which of them to leave alone.
+        /// </summary>
+        /// <remarks>
+        ///     Asked of the index rather than written down, for the reason every other list
+        ///     here is: the mod does not ship the assets, cannot see them from the managed
+        ///     assembly, and has already been wrong about one prefab name. A hardcoded species
+        ///     list would also silently omit every modded tree - and a player who cannot find
+        ///     their modded tree in the list has no way to exclude it.
+        /// </remarks>
+        internal static void TreeNames(System.Collections.Generic.List<string> into)
+        {
+            if (into == null) return;
+            if (!IsReady) Rebuild();
+
+            foreach (GameObject prefab in Prefabs)
+            {
+                if (prefab != null && prefab.GetComponent<TreeBase>() != null) into.Add(prefab.name);
+            }
+
+            into.Sort(System.StringComparer.OrdinalIgnoreCase);
+        }
+
         /// <summary>Whether felling this tree leaves a log to cut up, or drops what it has where it stood.</summary>
         internal static bool LeavesALog(string prefabName)
         {
@@ -140,8 +164,20 @@ namespace Kukolony.Resources
             return false;
         }
 
-        private static ChopKind Classify(GameObject prefab)
+        /// <summary>
+        ///     What an axe would make of this prefab, asked straight rather than through the
+        ///     hash index.
+        /// </summary>
+        /// <remarks>
+        ///     Shared with the keep-alive allowlist, which is built from prefabs in its own
+        ///     pass and cannot wait for this index to be ready. Two component checks that had
+        ///     to agree about what a tree is, written twice, would be two answers to the one
+        ///     question that decides whether an off-screen villager can find work at all.
+        /// </remarks>
+        internal static ChopKind Classify(GameObject prefab)
         {
+            if (prefab == null) return ChopKind.None;
+
             // Order matters. A felled trunk is its own object with its own component, and
             // asking about the log first keeps the two from being confused.
             if (prefab.GetComponent<TreeLog>() != null) return ChopKind.Log;

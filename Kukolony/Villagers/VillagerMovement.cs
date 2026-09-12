@@ -66,6 +66,38 @@ namespace Kukolony.Villagers
         internal static void Stop(MonsterAI ai) => ai.StopMoving();
 
         /// <summary>
+        ///     Turns a standing villager to face something, without walking anywhere.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Work done standing still has no other reason to face its target: walking
+        ///         turns a villager as a side effect of moving, so a villager that arrived and
+        ///         then stood chopping would swing at whatever bearing it happened to stop on -
+        ///         which reads as chopping the air beside the tree.
+        ///     </para>
+        ///     <para>
+        ///         Yaw only, and eased rather than snapped. Pitching a humanoid at a log by its
+        ///         feet lies it on its side, and a character that changes facing between one
+        ///         frame and the next reads as a glitch even when the new facing is right.
+        ///     </para>
+        /// </remarks>
+        internal static void FaceTowards(MonsterAI ai, Vector3 target)
+        {
+            if (ai == null) return;
+
+            Vector3 bearing = target - ai.transform.position;
+            bearing.y = 0f;
+            if (bearing.sqrMagnitude < .01f) return;
+
+            ai.transform.rotation = Quaternion.RotateTowards(
+                ai.transform.rotation, Quaternion.LookRotation(bearing.normalized),
+                TurnDegreesPerSecond * Time.deltaTime);
+        }
+
+        /// <summary>How fast a standing villager turns. Brisk, but visibly a turn.</summary>
+        private const float TurnDegreesPerSecond = 360f;
+
+        /// <summary>
         ///     Whether the pathfinder can offer any route at all to this point.
         /// </summary>
         /// <remarks>

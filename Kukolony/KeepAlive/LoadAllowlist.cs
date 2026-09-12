@@ -89,6 +89,21 @@ namespace Kukolony.KeepAlive
                 return true;
             }
 
+            // What an axe can cut, because a chopping villager cannot find work in a zone
+            // whose trees were filtered out of it - and would idle off-screen while working
+            // perfectly every time anybody came to look, which is the hardest class of fault
+            // this mod has to guard against.
+            //
+            // This is the one entry that costs something real: trees are the most numerous
+            // thing in the world, so a kept zone now instantiates its forest as well as its
+            // buildings. It is bounded by the zone cap rather than by the world, and the
+            // alternative is a job that silently does not work, so it is the right trade -
+            // but it is a trade, and the zone budget is where it will be felt.
+            if (Resources.Choppable.Classify(prefab) != Resources.ChopKind.None)
+            {
+                return true;
+            }
+
             // And the colony itself.
             // The flag is a Piece already, but name it anyway: a marker that got filtered
             // out of its own kept zone would be an outpost nobody can interact with.

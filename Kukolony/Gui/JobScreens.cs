@@ -60,14 +60,33 @@ namespace Kukolony.Gui
 
             if (!column.TryRow(out Row adding)) return;
 
-            Widgets.Button(adding, "New job", 200f, () =>
+            // One button per kind, because the kind cannot be changed afterwards - a job's
+            // settings only mean anything for the work it does, and letting a configured haul
+            // job become a chop job would silently reinterpret every one of them. Naming them
+            // here is also the only way a new kind becomes reachable at all: a single "New
+            // job" button that hardcoded Haul is exactly how the previous kind stayed
+            // unreachable after being added to the enum.
+            Widgets.Caption(adding, "Add a job", 190f);
+            Add(host, adding, JobKind.Haul);
+            Add(host, adding, JobKind.Chop);
+        }
+
+        private static void Add(ColonyScreen host, Row row, JobKind kind)
+        {
+            string label = JobDefinition.Describe(kind);
+            if (string.IsNullOrEmpty(label)) return;
+
+            Widgets.Button(row, label, 170f, () =>
             {
+                Colony colony = host.Colony;
+                if (colony == null) return;
+
                 List<JobDefinition> next = colony.State.GetJobs();
                 JobDefinition fresh = new JobDefinition
                 {
                     Id = System.Guid.NewGuid().ToString("N"),
-                    Name = "Haul",
-                    Kind = JobKind.Haul,
+                    Name = label,
+                    Kind = kind,
                     Repeat = 4
                 };
 
@@ -131,25 +150,12 @@ namespace Kukolony.Gui
                     value => Edit(host, j => j.Repeat = (int)value));
             }
 
-            if (column.TryRow(out Row items))
-            {
-                Widgets.Choice(items, "Which items",
-                    job.Items.Count == 0 ? "anything" : Summarise(job.Items),
-                    () => host.Push(new PickerScreen("Which items", SearchItems, job.Items, true,
-                        chosen => { Edit(host, j => j.Items = chosen); host.Refresh(); })));
-            }
-
-            if (column.TryRow(out Row tidy))
-            {
-                Widgets.Flag(tidy, "Tidy containers too", job.TidyContainers,
-                    value => Edit(host, j => j.TidyContainers = value));
-            }
-
-            if (column.TryRow(out Row load))
-            {
-                Widgets.Flag(load, "Fill the bag before delivering", job.FillBagFirst,
-                    value => Edit(host, j => j.FillBagFirst = value));
-            }
+            // Each kind shows only the settings it reads. A job must not offer a setting it
+            // ignores: FillBagFirst was persisted, shown here as a toggle, and read by nothing
+            // for long enough that the trap got written down and then walked into anyway - so
+            // the gate is here, at the one place a setting becomes visible.
+            if (job.Kind == JobKind.Haul) BuildHaul(host, column, job);
+            if (job.Kind == JobKind.Chop) BuildChop(host, column, job);
 
             // Where it works. Anything registered can be the centre of a work area, and the
             // empty choice is the settlement itself - which is a real answer rather than an
@@ -190,6 +196,117 @@ namespace Kukolony.Gui
                     host.Pop();
                 });
             }
+        }
+
+        private void BuildHaul(ColonyScreen host, Column column, JobDefinition job)
+        {
+            if (column.TryRow(out Row items))
+            {
+                Widgets.Choice(items, "Which items",
+                    job.Items.Count == 0 ? "anything" : Summarise(job.Items),
+                    () => host.Push(new PickerScreen("Which items", SearchItems, job.Items, true,
+                        chosen => { Edit(host, j => j.Items = chosen); host.Refresh(); })));
+            }
+
+            if (column.TryRow(out Row tidy))
+            {
+                Widgets.Flag(tidy, "Tidy containers too", job.TidyContainers,
+                    value => Edit(host, j => j.TidyContainers = value));
+            }
+
+            if (column.TryRow(out Row load))
+            {
+                Widgets.Flag(load, "Fill the bag before delivering", job.FillBagFirst,
+                    value => Edit(host, j => j.FillBagFirst = value));
+            }
+        }
+
+        /// <summary>
+        ///     What a chopping job takes, which of it to leave, and when to stop.
+        /// </summary>
+        /// <remarks>
+        ///     Two stopping rules, deliberately, because they answer different questions.
+        ///     "Leave standing" is about the forest - do not strip this place. "Stop when we
+        ///     have" is about the settlement - we do not need more. A player wants one, the
+        ///     other, or both, and a full woodshed beside a bare hillside is the failure the
+        ///     first one prevents.
+        /// </remarks>
+        private void BuildChop(ColonyScreen host, Column column, JobDefinition job)
+        {
+            if (column.TryRow(out Row what))
+            {
+                Widgets.Caption(what, "What to chop", 220f);
+                Toggle(host, what, "Trees", job.ChopTrees, (j, on) => j.ChopTrees = on);
+                Toggle(host, what, "Logs", job.ChopLogs, (j, on) => j.ChopLogs = on);
+                Toggle(host, what, "Undergrowth", job.ChopUndergrowth,
+                    (j, on) => j.ChopUndergrowth = on, 190f);
+            }
+
+            if (column.TryRow(out Row species))
+            {
+                Widgets.Choice(species, "Which trees",
+                    job.Species.Count == 0 ? "any of them" : SummariseSpecies(job.Species),
+                    () => host.Push(new PickerScreen("Which trees", SearchTrees, job.Species, true,
+                        chosen => { Edit(host, j => j.Species = chosen); host.Refresh(); })));
+            }
+
+            if (column.TryRow(out Row leave))
+            {
+                Widgets.Number(leave, "Leave standing", job.LeaveStanding, 0f, 50f, 1f,
+                    value => value <= 0f ? "none" : $"{value:F0} trees",
+                    value => Edit(host, j => j.LeaveStanding = (int)value));
+            }
+
+            if (column.TryRow(out Row stock))
+            {
+                Widgets.Choice(stock, "Stop when we have",
+                    string.IsNullOrEmpty(job.StockItem) ? "never stop" : ItemCatalogue.Label(job.StockItem),
+                    () => host.Push(new PickerScreen("Stop when we have", SearchItems,
+                        new List<string> { job.StockItem }, false,
+                        chosen =>
+                        {
+                            Edit(host, j =>
+                            {
+                                j.StockItem = chosen.Count == 0 ? string.Empty : chosen[0];
+
+                                // A target of zero means never stop, so choosing an item and
+                                // being left at zero would read as a setting that does
+                                // nothing. Giving it a number is what makes the choice take.
+                                if (!string.IsNullOrEmpty(j.StockItem) && j.StockTarget <= 0)
+                                {
+                                    j.StockTarget = 50;
+                                }
+                            });
+                            host.Refresh();
+                        })));
+            }
+
+            // Only once there is something to count. A threshold with no item is a number
+            // that cannot mean anything, and showing it invites setting it and expecting it
+            // to work.
+            if (!string.IsNullOrEmpty(job.StockItem) && column.TryRow(out Row target))
+            {
+                Widgets.Number(target, "How much is enough", job.StockTarget, 0f, 999f, 10f,
+                    value => value <= 0f ? "never stop" : $"{value:F0}",
+                    value => Edit(host, j => j.StockTarget = (int)value));
+            }
+        }
+
+        /// <summary>
+        ///     One of several on-or-off choices sharing a row.
+        /// </summary>
+        /// <remarks>
+        ///     Narrower than <see cref="Widgets.Flag" />, which takes a full-width label and a
+        ///     control - three of those would be three rows for one question.
+        /// </remarks>
+        private void Toggle(ColonyScreen host, Row row, string label, bool value,
+            System.Action<JobDefinition, bool> set, float width = 150f)
+        {
+            Widgets.Button(row, $"{label}: {(value ? "yes" : "no")}", width, () =>
+            {
+                Edit(host, j => set(j, !value));
+                host.Refresh();
+            });
         }
 
         private JobDefinition Find(Colony colony) => colony.State.GetJobs().Find(j => j.Id == _id);
@@ -245,7 +362,38 @@ namespace Kukolony.Gui
             return options;
         }
 
+        /// <summary>
+        ///     The trees this world contains, asked of the classifier rather than named here.
+        /// </summary>
+        /// <remarks>
+        ///     Shown by prefab name, unlike items, which have a localised label. A tree has no
+        ///     item name to look up - and a player excluding a species is picking from what
+        ///     their own world actually grows, modded trees included.
+        /// </remarks>
+        private static List<PickerScreen.Option> SearchTrees(string filter)
+        {
+            List<string> names = new List<string>();
+            Resources.Choppable.TreeNames(names);
+
+            List<PickerScreen.Option> options = new List<PickerScreen.Option>();
+            foreach (string name in names)
+            {
+                if (!string.IsNullOrEmpty(filter) &&
+                    name.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                options.Add(new PickerScreen.Option(name, name));
+            }
+
+            return options;
+        }
+
         private static string Summarise(List<string> items) =>
             items.Count == 1 ? ItemCatalogue.Label(items[0]) : $"{items.Count} kinds";
+
+        private static string SummariseSpecies(List<string> species) =>
+            species.Count == 1 ? species[0] : $"{species.Count} kinds";
     }
 }

@@ -1,0 +1,543 @@
+using System.Collections.Generic;
+using Kukolony.Colonies;
+using Kukolony.Core;
+using Kukolony.Resources;
+using Kukolony.Villagers;
+using Kukolony.Villagers.Navigation;
+using UnityEngine;
+
+namespace Kukolony.Jobs.Chop
+{
+    /// <summary>Everything one tick of chopping needs, gathered once.</summary>
+    internal sealed class ChopContext
+    {
+        internal Villager Villager;
+        internal Colony Colony;
+        internal Container Bag;
+        internal VillagerWalk Walk;
+        internal VillagerAnimation Animation;
+        internal JobDefinition Job;
+        internal VillagerState State;
+
+        /// <summary>
+        ///     The visible equipment mirror, so the axe the villager is holding is the axe the
+        ///     player can see it holding.
+        /// </summary>
+        internal VisEquipment Equipment;
+    }
+
+    /// <summary>
+    ///     The doing half of chopping. The deciding half is <see cref="ChopTransitions" />,
+    ///     which has no Unity in it and is tested exhaustively on its own.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         <b>Almost everything here exists to make an invisible failure loud.</b> Every way
+    ///         this job breaks looks from outside like a villager standing still, and every one
+    ///         of them works perfectly whenever somebody is watching. So the blow reads health
+    ///         before and after, a run of blows that moves nothing gives up out loud, and the
+    ///         one target a villager holds is refreshed by landed blows rather than by walking.
+    ///     </para>
+    ///     <para>
+    ///         Nothing here orders logs before standing trees. A felled tree leaves its log
+    ///         where the villager is already standing, so nearest-wins picks it up next by
+    ///         itself — and the same accident handles sub-logs and stumps.
+    ///     </para>
+    /// </remarks>
+    internal static class ChopJob
+    {
+        /// <summary>
+        ///     How many blows may land without moving the health before the axe is judged
+        ///     unable to bite.
+        /// </summary>
+        /// <remarks>
+        ///     More than one, because the first blow at a fresh target is legitimately
+        ///     discarded: a <c>TreeLog</c> is invulnerable for 0.2 s after it spawns and a
+        ///     <c>Destructible</c> for its first frame. Giving up on one wasted swing would
+        ///     abandon every log the moment it was felled.
+        /// </remarks>
+        private const int FruitlessBlowsAllowed = 4;
+
+        /// <summary>
+        ///     Targets this villager has given up on, per villager, for this session.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Per session and in memory rather than on the ZDO, deliberately. The fact
+        ///         being remembered is "my axe cannot cut this", which stops being true the
+        ///         moment the player hands over a better axe — and a reload is exactly when
+        ///         that is worth re-testing. Persisting it would make one stone-axe afternoon
+        ///         permanent.
+        ///     </para>
+        ///     <para>
+        ///         Keyed by villager as well as target, because the axe is the villager's: one
+        ///         villager failing on a birch says nothing about the next one.
+        ///     </para>
+        /// </remarks>
+        private static readonly Dictionary<ZDOID, HashSet<ZDOID>> GivenUp =
+            new Dictionary<ZDOID, HashSet<ZDOID>>();
+
+        /// <summary>How many blows in a row have landed on nothing, per villager.</summary>
+        private static readonly Dictionary<ZDOID, int> Fruitless = new Dictionary<ZDOID, int>();
+
+        /// <summary>Dropped when a world unloads; none of these identities survive one.</summary>
+        internal static void Clear()
+        {
+            GivenUp.Clear();
+            Fruitless.Clear();
+        }
+
+        internal static JobResult Tick(ChopContext context, out string activity)
+        {
+            VillagerState state = context.State;
+
+            GameObject target = Resolve(state.Target, out bool lost);
+
+            // Gone is not a fault here - it is what finishing looks like. A tree the villager
+            // felled and a tree the player felled are the same news, and both mean the recorded
+            // target is stale rather than the job broken.
+            if (lost) state.ClearTarget();
+
+            ItemDrop.ItemData axe = Axe(context);
+
+            ChopFacts facts = new ChopFacts(
+                hasTool: axe != null,
+                hasTarget: !state.Target.IsNone(),
+                atTarget: Within(context, target),
+                enough: Enough(context),
+                tired: false);
+
+            ChopStep step = ChopTransitions.Next((ChopState)state.WorkState, facts);
+
+            switch (step.Action)
+            {
+                case ChopAction.Yield:
+                    return JobOutcomes.Skipped(state, WhyNothing(context, axe), out activity);
+
+                case ChopAction.ChooseWork:
+                    return Record(state, step, Choose(context, out activity));
+
+                case ChopAction.MoveToTarget:
+                    return Record(state, step, Walk(context, target, out activity));
+
+                case ChopAction.Chop:
+                    return Record(state, step, Strike(context, target, axe, out activity));
+
+                case ChopAction.Complete:
+                    Forget(context);
+                    return JobOutcomes.Completed(state, "that one is down", out activity);
+
+                default:
+                    // An action this engine does not handle is a programming error rather than
+                    // a world state. Say so rather than silently idling.
+                    return JobOutcomes.Failed(state, "unhandled chop action", out activity);
+            }
+        }
+
+        /// <summary>
+        ///     Records the next state when a step made progress.
+        /// </summary>
+        /// <remarks>
+        ///     A step reporting Completed means <em>that step</em> finished, which is not the
+        ///     job being done — so it becomes Running, and only the transition table's own
+        ///     Complete ends a trip. Getting this backwards ends the cycle wherever the last
+        ///     action happened to sit, and everything after it never runs.
+        /// </remarks>
+        private static JobResult Record(VillagerState state, ChopStep step, JobResult result)
+        {
+            if (result != JobResult.Running && result != JobResult.Completed) return result;
+            state.SetWorkState((int)step.Next);
+            return JobResult.Running;
+        }
+
+        /// <summary>
+        ///     Takes the nearest choppable thing this job is allowed to take.
+        /// </summary>
+        /// <remarks>
+        ///     Nearest to the <em>villager</em>, not to the hearth, which is the whole reason a
+        ///     felled tree's log becomes the next target without a rule saying so.
+        /// </remarks>
+        private static JobResult Choose(ChopContext context, out string activity)
+        {
+            WorkArea area = WorkArea.For(context.Colony, context.Job);
+            List<ZDOID> candidates = ChoppingGround.Near(context.Colony);
+
+            Vector3 here = context.Villager.transform.position;
+            HashSet<ZDOID> refused = Refused(context);
+
+            ZDOID best = ZDOID.None;
+            float nearest = float.MaxValue;
+            int standing = 0;
+
+            foreach (ZDOID id in candidates)
+            {
+                ZDO zdo = ZDOMan.instance?.GetZDO(id);
+                if (zdo == null || !zdo.IsValid()) continue;
+
+                ChopKind kind = Choppable.Of(zdo.GetPrefab());
+                if (kind == ChopKind.None) continue;
+
+                Vector3 at = zdo.GetPosition();
+
+                // The job's work area narrows the colony-wide scan; it can never widen it,
+                // because the scan was already bounded by the config ceiling.
+                if (!area.Contains(at)) continue;
+
+                // Counted before the per-villager filters, because "how much forest is left
+                // here" is a fact about the place rather than about who is asking. Counting
+                // after them would let two villagers each see a thin wood as untouched.
+                if (kind == ChopKind.Tree) standing++;
+
+                if (!Wanted(context.Job, kind, zdo)) continue;
+                if (refused.Contains(id)) continue;
+                if (TargetClaims.IsClaimedByOther(id, context.Villager)) continue;
+
+                float distance = Utils.DistanceXZ(at, here);
+                if (distance >= nearest) continue;
+
+                nearest = distance;
+                best = id;
+            }
+
+            // The anti-clear-cut rule, and it costs nothing because the scan already counted.
+            // Applies to standing trees only: logs and undergrowth are not the forest, and
+            // leaving felled trunks lying about is not conservation.
+            if (context.Job != null && context.Job.LeaveStanding > 0 &&
+                standing <= context.Job.LeaveStanding &&
+                !best.IsNone() && IsTree(best))
+            {
+                return JobOutcomes.Skipped(context.State,
+                    "that is enough felled here", out activity);
+            }
+
+            if (best.IsNone())
+            {
+                return JobOutcomes.Skipped(context.State, "nothing to chop", out activity);
+            }
+
+            // Taking the target is also taking the claim, so no other villager walks here.
+            context.State.SetTarget(best);
+            activity = "off to chop";
+            return JobResult.Running;
+        }
+
+        private static JobResult Walk(ChopContext context, GameObject target, out string activity)
+        {
+            if (target == null)
+            {
+                // Recorded but not instantiated. Its zone may still be streaming in, but
+                // waiting forever is how the previous system hung a villager, so this yields.
+                return JobOutcomes.Skipped(context.State, "waiting for the world", out activity);
+            }
+
+            switch (context.Walk.MoveTowards(target.transform.position, Approach.DistanceTo(target)))
+            {
+                case MoveResult.Moving:
+                case MoveResult.Arrived:
+                    context.State.TouchClaim();
+                    activity = "off to chop";
+                    return JobResult.Running;
+
+                default:
+                    // Says how far short it stopped and what it was asked for, because "cannot
+                    // get there" is the same sentence for an unreachable target, a stop
+                    // distance smaller than the thing itself, and a villager that never moved.
+                    float gap = Utils.DistanceXZ(target.transform.position,
+                        context.Villager.transform.position);
+                    return JobOutcomes.Failed(context.State,
+                        $"cannot get to it (stopped {gap:0.0}m away, needed " +
+                        $"{Approach.DistanceTo(target):0.0}m, " +
+                        $"{context.Villager.Explain(target.transform.position)})", out activity);
+            }
+        }
+
+        /// <summary>
+        ///     Lands one blow and reads what it achieved.
+        /// </summary>
+        /// <remarks>
+        ///     The blow is struck from where the villager stands, which is also the direction a
+        ///     felled trunk is pushed — so the log goes away from the chopper rather than
+        ///     through it.
+        /// </remarks>
+        private static JobResult Strike(ChopContext context, GameObject target,
+            ItemDrop.ItemData axe, out string activity)
+        {
+            if (target == null)
+            {
+                context.State.ClearTarget();
+                return JobOutcomes.Running("it was gone", out activity);
+            }
+
+            // Turned to face it, because work done standing still has nothing else to turn it:
+            // a villager that arrived and then stood chopping would swing at whatever bearing
+            // it happened to stop on.
+            context.Villager.FaceTowards(target.transform.position);
+
+            BlowResult blow = Felling.Strike(target, axe,
+                context.Villager.transform.position, out string what);
+
+            switch (blow)
+            {
+                case BlowResult.Claiming:
+                    // Ownership is being taken; the blow lands on a later tick. Not a swing,
+                    // so not animated - a villager miming a chop that did nothing is exactly
+                    // the lie this job is built to avoid.
+                    return JobOutcomes.Running(what, out activity);
+
+                case BlowResult.Struck:
+                    context.Animation.Swing();
+
+                    // A landed blow is progress, and it is the only progress this job makes
+                    // while standing still. Without this the claim ages against the length of
+                    // the tree rather than against being stuck, and any trunk outlasting the
+                    // TTL loses its claim halfway - which is two villagers on one trunk,
+                    // arrived at by both of them behaving correctly.
+                    context.State.TouchClaim();
+                    Landed(context);
+                    return JobOutcomes.Running(what, out activity);
+
+                case BlowResult.Felled:
+                    context.Animation.Swing();
+                    Forget(context);
+
+                    // The target is gone, so the recorded one is stale. Releasing it here lets
+                    // the next choose take the log it just left - which is nearest, because
+                    // the villager is standing in it.
+                    context.State.ClearTarget();
+                    return JobOutcomes.Running(what, out activity);
+
+                case BlowResult.TooHard:
+                    return GiveUp(context, what, out activity);
+
+                default:
+                    // Not something this knows how to hit. The classifier said otherwise when
+                    // the target was chosen, so the world changed underneath - release it and
+                    // choose again rather than swinging at it.
+                    Forget(context);
+                    context.State.ClearTarget();
+                    return JobOutcomes.Running(what, out activity);
+            }
+        }
+
+        /// <summary>
+        ///     Counts a landed blow, which clears the fruitless run.
+        /// </summary>
+        private static void Landed(ChopContext context)
+        {
+            ZDOID villager = context.Villager.Id;
+            if (!villager.IsNone()) Fruitless[villager] = 0;
+        }
+
+        /// <summary>
+        ///     A blow that changed nothing. Said once and given up on, not swung at forever.
+        /// </summary>
+        /// <remarks>
+        ///     Tolerating a few first, because a fresh log is briefly invulnerable and a
+        ///     <c>Destructible</c> discards its first frame - giving up on one wasted swing
+        ///     would abandon every log at the moment it was felled. Past that the axe
+        ///     demonstrably cannot bite, and swinging at it for the rest of the session is the
+        ///     failure that looks most like working.
+        /// </remarks>
+        private static JobResult GiveUp(ChopContext context, string what, out string activity)
+        {
+            ZDOID villager = context.Villager.Id;
+            ZDOID target = context.State.Target;
+
+            int run = villager.IsNone() ? FruitlessBlowsAllowed
+                : (Fruitless.TryGetValue(villager, out int had) ? had : 0) + 1;
+            if (!villager.IsNone()) Fruitless[villager] = run;
+
+            if (run < FruitlessBlowsAllowed)
+            {
+                // Still inside the tolerance. Swing again rather than announcing a problem the
+                // next blow may disprove.
+                context.Animation.Swing();
+                return JobOutcomes.Running("chopping", out activity);
+            }
+
+            if (!target.IsNone()) Refused(context).Add(target);
+            Forget(context);
+
+            // Keyed by the villager, so two villagers with two bad axes are two complaints
+            // rather than one confusing tally.
+            Chatter.Say($"cannot chop {villager}",
+                $"{context.Villager.State.Name} cannot cut that - it needs a better axe.");
+
+            context.State.ClearTarget();
+            return JobOutcomes.Skipped(context.State, what, out activity);
+        }
+
+        private static void Forget(ChopContext context)
+        {
+            ZDOID villager = context.Villager.Id;
+            if (!villager.IsNone()) Fruitless[villager] = 0;
+        }
+
+        private static HashSet<ZDOID> Refused(ChopContext context)
+        {
+            ZDOID villager = context.Villager.Id;
+            if (villager.IsNone()) return new HashSet<ZDOID>();
+
+            if (!GivenUp.TryGetValue(villager, out HashSet<ZDOID> refused))
+            {
+                refused = new HashSet<ZDOID>();
+                GivenUp[villager] = refused;
+            }
+
+            return refused;
+        }
+
+        /// <summary>
+        ///     Whether this job takes a thing of this kind and this species.
+        /// </summary>
+        /// <remarks>
+        ///     The species list mirrors hauling's item list exactly, including that an empty
+        ///     list means everything. It is matched against the prefab name because that is
+        ///     what a player picks from a list of what the world actually contains - the mod
+        ///     does not ship the assets and cannot name a tree it has not been shown.
+        /// </remarks>
+        private static bool Wanted(JobDefinition job, ChopKind kind, ZDO zdo)
+        {
+            if (job == null) return kind == ChopKind.Tree || kind == ChopKind.Log;
+
+            switch (kind)
+            {
+                case ChopKind.Tree: if (!job.ChopTrees) return false; break;
+                case ChopKind.Log: if (!job.ChopLogs) return false; break;
+                case ChopKind.Undergrowth: if (!job.ChopUndergrowth) return false; break;
+                default: return false;
+            }
+
+            if (job.Species == null || job.Species.Count == 0) return true;
+
+            // Species names a tree, so it bounds standing trees. A log is what a felled tree
+            // left behind and is already the consequence of an allowed choice - filtering it
+            // by species again would strand the trunk of every tree the villager just felled,
+            // because a log's prefab is not its tree's.
+            if (kind != ChopKind.Tree) return true;
+
+            string prefab = PrefabName(zdo);
+            return prefab.Length > 0 && job.Species.Contains(prefab);
+        }
+
+        private static bool IsTree(ZDOID id)
+        {
+            ZDO zdo = ZDOMan.instance?.GetZDO(id);
+            return zdo != null && zdo.IsValid() && Choppable.Of(zdo.GetPrefab()) == ChopKind.Tree;
+        }
+
+        private static string PrefabName(ZDO zdo)
+        {
+            GameObject prefab = ZNetScene.instance?.GetPrefab(zdo.GetPrefab());
+            return prefab == null ? string.Empty : prefab.name;
+        }
+
+        /// <summary>
+        ///     Whether the settlement already holds as much as this job was asked to gather.
+        /// </summary>
+        /// <remarks>
+        ///     The terminus the job otherwise lacks. Hauling stops when nothing is misplaced,
+        ///     which is visible and self-limiting; a forest has no such point, and a woodcutter
+        ///     without a stopping rule strips the map while looking correct the whole time.
+        /// </remarks>
+        private static bool Enough(ChopContext context)
+        {
+            JobDefinition job = context.Job;
+            if (job == null || job.StockTarget <= 0 || string.IsNullOrEmpty(job.StockItem))
+            {
+                return false;
+            }
+
+            return Stock.Held(context.Colony, job.StockItem) >= job.StockTarget;
+        }
+
+        /// <summary>
+        ///     Why there is nothing to do, said in the villager's own terms.
+        /// </summary>
+        /// <remarks>
+        ///     Three different reasons reach one Yield, and "nothing to chop" for all of them
+        ///     is how a player comes to believe the job is broken when it is waiting on an axe.
+        /// </remarks>
+        private static string WhyNothing(ChopContext context, ItemDrop.ItemData axe)
+        {
+            if (axe == null) return "I have no axe";
+            if (Enough(context)) return "we have enough of that";
+            return "nothing to chop";
+        }
+
+        /// <summary>
+        ///     The axe this villager is working with, and the one it is shown holding.
+        /// </summary>
+        /// <remarks>
+        ///     Found in the bag rather than in the creature's own inventory, which is where
+        ///     everything a villager owns lives - the routine that equips a creature's best
+        ///     weapon on load would strip anything placed there. The visible right hand is
+        ///     written to match, so a chopping villager is seen to be holding an axe.
+        /// </remarks>
+        private static ItemDrop.ItemData Axe(ChopContext context)
+        {
+            if (context.Bag == null) return null;
+
+            Inventory inventory = context.Bag.GetInventory();
+            if (inventory == null) return null;
+
+            ItemDrop.ItemData best = null;
+            foreach (ItemDrop.ItemData held in inventory.GetAllItems())
+            {
+                if (held?.m_shared == null) continue;
+                if (held.m_shared.m_damages.m_chop <= 0f) continue;
+
+                // The best axe it owns, so handing a villager a better one is enough to make it
+                // able to cut what it could not.
+                if (best == null || held.m_shared.m_toolTier > best.m_shared.m_toolTier)
+                {
+                    best = held;
+                }
+            }
+
+            if (best != null && context.Equipment != null)
+            {
+                VillagerWardrobe.Set(context.Equipment, WearSlot.RightHand, best);
+            }
+
+            return best;
+        }
+
+        /// <summary>
+        ///     Whether the villager is close enough to work on this.
+        /// </summary>
+        /// <remarks>
+        ///     The same measure the walking used, from the same place. When arriving and having
+        ///     arrived are two different numbers, a villager walks as far as it can, is told it
+        ///     is not there yet, and tries again forever.
+        /// </remarks>
+        private static bool Within(ChopContext context, GameObject thing)
+        {
+            if (thing == null) return false;
+
+            float reach = context.Walk.StalledFor >= Arrival.SettledSeconds
+                ? Arrival.WorkingReach
+                : Approach.DistanceTo(thing);
+
+            return Utils.DistanceXZ(thing.transform.position, context.Villager.transform.position) <= reach;
+        }
+
+        /// <summary>
+        ///     Finds what an id refers to, distinguishing destroyed from merely not loaded.
+        /// </summary>
+        private static GameObject Resolve(ZDOID id, out bool lost)
+        {
+            lost = false;
+            if (id.IsNone()) return null;
+
+            ZDO zdo = ZDOMan.instance?.GetZDO(id);
+            if (zdo == null || !zdo.IsValid())
+            {
+                lost = true;
+                return null;
+            }
+
+            return ZNetScene.instance?.FindInstance(id);
+        }
+    }
+}

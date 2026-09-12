@@ -223,6 +223,9 @@ namespace Kukolony.Villagers
         /// <summary>What the pathfinder thinks about a target, for a failure worth explaining.</summary>
         internal string Explain(Vector3 target) => VillagerMovement.Explain(_ai, target);
 
+        /// <summary>Turns to face something, for work done standing still.</summary>
+        internal void FaceTowards(Vector3 target) => VillagerMovement.FaceTowards(_ai, target);
+
         internal bool TryTakeOver(float deltaTime)
         {
             if (!Bind())
@@ -665,6 +668,24 @@ namespace Kukolony.Villagers
                         Animation = _animation,
                         Job = job,
                         State = state
+                    }, out doing);
+
+                case Jobs.JobKind.Chop:
+                    return Jobs.Chop.ChopJob.Tick(new Jobs.Chop.ChopContext
+                    {
+                        Villager = this,
+                        Colony = colony,
+                        Bag = _bag,
+                        Walk = _walk,
+                        Animation = _animation,
+                        Job = job,
+                        State = state,
+
+                        // The visible mirror, so the axe it works with is the axe a player can
+                        // see it holding. Nothing is placed in the creature's own inventory:
+                        // the routine that equips a creature's best weapon on load would strip
+                        // it, so the bag is the truth and this is the reflection.
+                        Equipment = _visEquipment
                     }, out doing);
 
                 default:

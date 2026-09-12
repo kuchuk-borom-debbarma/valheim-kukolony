@@ -73,7 +73,15 @@ namespace Kukolony.Resources
 
             cache.Refreshed = Time.time;
             cache.Found.Clear();
-            if (ZNetScene.instance == null || !Choppable.IsReady) return cache.Found;
+            if (ZNetScene.instance == null) return cache.Found;
+
+            // Built here, at the point of use, rather than by whichever system happens to
+            // start first. The keep-alive driver looked like the natural home until you
+            // notice it stands down entirely when its feature is switched off or the peer is
+            // a client - which would have left the classifier empty and chopping quietly
+            // finding nothing, with the config toggle for an unrelated feature as the cause.
+            if (!Choppable.IsReady) Choppable.Rebuild();
+            if (!Choppable.IsReady) return cache.Found;
 
             // The widest net, bounded once here rather than once per villager. The config is
             // the outer ceiling and a job's own work area narrows it further; neither can
