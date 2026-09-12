@@ -94,11 +94,14 @@ namespace Kukolony.KeepAlive
             // perfectly every time anybody came to look, which is the hardest class of fault
             // this mod has to guard against.
             //
-            // This is the one entry that costs something real: trees are the most numerous
-            // thing in the world, so a kept zone now instantiates its forest as well as its
-            // buildings. It is bounded by the zone cap rather than by the world, and the
-            // alternative is a job that silently does not work, so it is the right trade -
-            // but it is a trade, and the zone budget is where it will be felt.
+            // This is the one entry that costs something real, and it is wider than "trees":
+            // the classifier admits any Destructible an axe is not outright immune against,
+            // which is most scenery props as well as stumps and bushes. So a kept zone now
+            // instantiates its undergrowth too, whether or not any job is set to cut it -
+            // keep-alive cannot ask, because a zone is kept for whatever might want it.
+            // Bounded by the zone cap rather than by the world, and the alternative is a job
+            // that silently does not work off-screen, so it is the right trade - but it is a
+            // trade, and the zone budget is where it will be felt.
             if (Resources.Choppable.Classify(prefab) != Resources.ChopKind.None)
             {
                 return true;

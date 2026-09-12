@@ -59,6 +59,27 @@ namespace Kukolony.Jobs.Chop
         private const int FruitlessBlowsAllowed = 4;
 
         /// <summary>
+        ///     How long between blows.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The AI is driven at a fixed twenty ticks a second, and a step that returns
+        ///         Running is asked again on the very next one - so without a cadence a
+        ///         villager lands twenty blows a second. A beech falls in a fifth of a second,
+        ///         the swing animation is retriggered before any of it plays, and every blow
+        ///         broadcasts an animation RPC to every peer and makes the nearest player
+        ///         noisy. Ten choppers would be two hundred broadcasts a second.
+        ///     </para>
+        ///     <para>
+        ///         It also has to outlast the invulnerability a fresh target is born with,
+        ///         because the give-up tolerance is counted in blows: four blows at twenty a
+        ///         second is a window shorter than a new log's own 0.2 s of immunity, which
+        ///         would have blacklisted every log at the moment it appeared.
+        ///     </para>
+        /// </remarks>
+        private const float SecondsBetweenBlows = .6f;
+
+        /// <summary>
         ///     Targets this villager has given up on, per villager, for this session.
         /// </summary>
         /// <remarks>
@@ -77,14 +98,64 @@ namespace Kukolony.Jobs.Chop
         private static readonly Dictionary<ZDOID, HashSet<ZDOID>> GivenUp =
             new Dictionary<ZDOID, HashSet<ZDOID>>();
 
-        /// <summary>How many blows in a row have landed on nothing, per villager.</summary>
-        private static readonly Dictionary<ZDOID, int> Fruitless = new Dictionary<ZDOID, int>();
+        /// <summary>
+        ///     How many blows in a row have landed on nothing, and on what.
+        /// </summary>
+        /// <remarks>
+        ///     Counted per target as well as per villager. Keyed by villager alone, a run of
+        ///     fruitless blows on one tree carried onto the next thing chosen - so a villager
+        ///     that had been refused three times by a birch would blacklist a perfectly good
+        ///     log whose first blow happened to land inside its spawn invulnerability, and say
+        ///     "needs a better axe" about it.
+        /// </remarks>
+        private sealed class Run
+        {
+            internal ZDOID Target;
+            internal int Blows;
+        }
+
+        private static readonly Dictionary<ZDOID, Run> Fruitless = new Dictionary<ZDOID, Run>();
+
+        /// <summary>
+        ///     When each villager may swing again, and what the walk has settled on.
+        /// </summary>
+        /// <remarks>
+        ///     <see cref="Settled" /> records the target a villager's walk has done its best
+        ///     to reach. Working reach has to widen once a villager can get no closer - a
+        ///     trunk's centre is inside the trunk - but the widening cannot be read off the
+        ///     walk's stall clock the way hauling reads it, because a villager standing still
+        ///     chopping is permanently "stalled" and would then fell every tree within ten
+        ///     metres without taking a step.
+        /// </remarks>
+        private static readonly Dictionary<ZDOID, float> NextBlow = new Dictionary<ZDOID, float>();
+
+        private static readonly Dictionary<ZDOID, ZDOID> Settled = new Dictionary<ZDOID, ZDOID>();
 
         /// <summary>Dropped when a world unloads; none of these identities survive one.</summary>
         internal static void Clear()
         {
             GivenUp.Clear();
             Fruitless.Clear();
+            NextBlow.Clear();
+            Settled.Clear();
+        }
+
+        /// <summary>
+        ///     Drops what a villager that no longer exists was remembering.
+        /// </summary>
+        /// <remarks>
+        ///     Called when a villager is removed, so a long session that hires and dismisses
+        ///     does not accumulate a refusal set per dead villager plus an entry per tree each
+        ///     of them ever gave up on.
+        /// </remarks>
+        internal static void Forget(ZDOID villager)
+        {
+            if (villager.IsNone()) return;
+
+            GivenUp.Remove(villager);
+            Fruitless.Remove(villager);
+            NextBlow.Remove(villager);
+            Settled.Remove(villager);
         }
 
         internal static JobResult Tick(ChopContext context, out string activity)
@@ -100,11 +171,18 @@ namespace Kukolony.Jobs.Chop
 
             ItemDrop.ItemData axe = Axe(context);
 
+            // Asked only where the table reads it, because answering costs a walk of every
+            // registered container: the stopping rule is consulted when choosing what to do
+            // next, not between blows, and computing it every tick for every chopper is the
+            // per-villager-per-tick cost the scan cache exists to avoid.
+            bool choosing = (ChopState)state.WorkState == ChopState.Choosing;
+            bool enough = choosing && Enough(context);
+
             ChopFacts facts = new ChopFacts(
                 hasTool: axe != null,
                 hasTarget: !state.Target.IsNone(),
                 atTarget: Within(context, target),
-                enough: Enough(context),
+                enough: enough,
                 tired: false);
 
             ChopStep step = ChopTransitions.Next((ChopState)state.WorkState, facts);
@@ -112,7 +190,7 @@ namespace Kukolony.Jobs.Chop
             switch (step.Action)
             {
                 case ChopAction.Yield:
-                    return JobOutcomes.Skipped(state, WhyNothing(context, axe), out activity);
+                    return JobOutcomes.Skipped(state, WhyNothing(axe, enough), out activity);
 
                 case ChopAction.ChooseWork:
                     return Record(state, step, Choose(context, out activity));
@@ -124,7 +202,7 @@ namespace Kukolony.Jobs.Chop
                     return Record(state, step, Strike(context, target, axe, out activity));
 
                 case ChopAction.Complete:
-                    Forget(context);
+                    Reset(context, ZDOID.None);
                     return JobOutcomes.Completed(state, "that one is down", out activity);
 
                 default:
@@ -165,9 +243,22 @@ namespace Kukolony.Jobs.Chop
             Vector3 here = context.Villager.transform.position;
             HashSet<ZDOID> refused = Refused(context);
 
+            // Counted first, over the whole area, before anything is picked. "How much forest
+            // is left here" is a fact about the place rather than about who is asking, so it
+            // cannot be folded into the same pass that applies this villager's claims and
+            // refusals - two villagers would each see a thin wood as untouched.
+            int standing = StandingIn(context.Colony, area);
+
+            // The anti-clear-cut rule removes standing trees from candidacy rather than
+            // ending the search. Vetoing the winner instead meant a protected tree four
+            // metres away masked a felled trunk twenty metres away: the job reported "that is
+            // enough felled here" for ever and never cut up the logs it had already dropped,
+            // so it stopped producing while sounding like conservation.
+            bool sparing = context.Job != null && context.Job.LeaveStanding > 0 &&
+                           standing <= context.Job.LeaveStanding;
+
             ZDOID best = ZDOID.None;
             float nearest = float.MaxValue;
-            int standing = 0;
 
             foreach (ZDOID id in candidates)
             {
@@ -176,17 +267,13 @@ namespace Kukolony.Jobs.Chop
 
                 ChopKind kind = Choppable.Of(zdo.GetPrefab());
                 if (kind == ChopKind.None) continue;
+                if (sparing && kind == ChopKind.Tree) continue;
 
                 Vector3 at = zdo.GetPosition();
 
                 // The job's work area narrows the colony-wide scan; it can never widen it,
                 // because the scan was already bounded by the config ceiling.
                 if (!area.Contains(at)) continue;
-
-                // Counted before the per-villager filters, because "how much forest is left
-                // here" is a fact about the place rather than about who is asking. Counting
-                // after them would let two villagers each see a thin wood as untouched.
-                if (kind == ChopKind.Tree) standing++;
 
                 if (!Wanted(context.Job, kind, zdo)) continue;
                 if (refused.Contains(id)) continue;
@@ -199,21 +286,19 @@ namespace Kukolony.Jobs.Chop
                 best = id;
             }
 
-            // The anti-clear-cut rule, and it costs nothing because the scan already counted.
-            // Applies to standing trees only: logs and undergrowth are not the forest, and
-            // leaving felled trunks lying about is not conservation.
-            if (context.Job != null && context.Job.LeaveStanding > 0 &&
-                standing <= context.Job.LeaveStanding &&
-                !best.IsNone() && IsTree(best))
-            {
-                return JobOutcomes.Skipped(context.State,
-                    "that is enough felled here", out activity);
-            }
-
             if (best.IsNone())
             {
-                return JobOutcomes.Skipped(context.State, "nothing to chop", out activity);
+                return JobOutcomes.Skipped(context.State,
+                    sparing ? "that is enough felled here" : "nothing to chop", out activity);
             }
+
+            // A new target is a new walk and a new tolerance. Without the walk being told,
+            // its stall clock still holds the last target's timings and judges the first step
+            // of this one as already stuck; without the tolerance being reset, a run of
+            // refusals from the last target is spent against this one.
+            context.Walk.Forget();
+            Settled.Remove(context.Villager.Id);
+            Reset(context, best);
 
             // Taking the target is also taking the claim, so no other villager walks here.
             context.State.SetTarget(best);
@@ -232,8 +317,17 @@ namespace Kukolony.Jobs.Chop
 
             switch (context.Walk.MoveTowards(target.transform.position, Approach.DistanceTo(target)))
             {
-                case MoveResult.Moving:
                 case MoveResult.Arrived:
+                    // The walk has done its best for this target, which is what licenses the
+                    // wider working reach below. Recorded per target rather than inferred
+                    // from a stall clock, because a villager standing still chopping stalls
+                    // permanently and would inherit the widening for everything after it.
+                    Settled[context.Villager.Id] = context.State.Target;
+                    context.State.TouchClaim();
+                    activity = "off to chop";
+                    return JobResult.Running;
+
+                case MoveResult.Moving:
                     context.State.TouchClaim();
                     activity = "off to chop";
                     return JobResult.Running;
@@ -270,8 +364,27 @@ namespace Kukolony.Jobs.Chop
 
             // Turned to face it, because work done standing still has nothing else to turn it:
             // a villager that arrived and then stood chopping would swing at whatever bearing
-            // it happened to stop on.
+            // it happened to stop on. Kept up between blows rather than only at the moment of
+            // one, so a trunk that rolls does not leave the villager chopping past it.
             context.Villager.FaceTowards(target.transform.position);
+
+            // The walk is over. Said plainly so its stall clock stops running against a
+            // villager that is standing still on purpose - which is what made the working
+            // reach widen for everything it chose afterwards.
+            context.Walk.Forget();
+
+            ZDOID chopper = context.Villager.Id;
+            if (!chopper.IsNone())
+            {
+                if (NextBlow.TryGetValue(chopper, out float when) && Time.time < when)
+                {
+                    // Between blows. Not a swing, and deliberately not animated: retriggering
+                    // the animation every tick is how the swing never plays at all.
+                    return JobOutcomes.Running("chopping", out activity);
+                }
+
+                NextBlow[chopper] = Time.time + SecondsBetweenBlows;
+            }
 
             BlowResult blow = Felling.Strike(target, axe,
                 context.Villager.transform.position, out string what);
@@ -298,7 +411,7 @@ namespace Kukolony.Jobs.Chop
 
                 case BlowResult.Felled:
                     context.Animation.Swing();
-                    Forget(context);
+                    Reset(context, ZDOID.None);
 
                     // The target is gone, so the recorded one is stale. Releasing it here lets
                     // the next choose take the log it just left - which is nearest, because
@@ -313,7 +426,7 @@ namespace Kukolony.Jobs.Chop
                     // Not something this knows how to hit. The classifier said otherwise when
                     // the target was chosen, so the world changed underneath - release it and
                     // choose again rather than swinging at it.
-                    Forget(context);
+                    Reset(context, ZDOID.None);
                     context.State.ClearTarget();
                     return JobOutcomes.Running(what, out activity);
             }
@@ -322,10 +435,15 @@ namespace Kukolony.Jobs.Chop
         /// <summary>
         ///     Counts a landed blow, which clears the fruitless run.
         /// </summary>
-        private static void Landed(ChopContext context)
+        private static void Landed(ChopContext context) => Reset(context, context.State.Target);
+
+        /// <summary>Starts the tolerance over, against a named target.</summary>
+        private static void Reset(ChopContext context, ZDOID target)
         {
             ZDOID villager = context.Villager.Id;
-            if (!villager.IsNone()) Fruitless[villager] = 0;
+            if (villager.IsNone()) return;
+
+            Fruitless[villager] = new Run { Target = target, Blows = 0 };
         }
 
         /// <summary>
@@ -343,9 +461,21 @@ namespace Kukolony.Jobs.Chop
             ZDOID villager = context.Villager.Id;
             ZDOID target = context.State.Target;
 
-            int run = villager.IsNone() ? FruitlessBlowsAllowed
-                : (Fruitless.TryGetValue(villager, out int had) ? had : 0) + 1;
-            if (!villager.IsNone()) Fruitless[villager] = run;
+            int run = FruitlessBlowsAllowed;
+            if (!villager.IsNone())
+            {
+                // Counted against this target. A run inherited from the last thing this
+                // villager swung at would be spent here, so a log whose first blow fell
+                // inside its spawn invulnerability could be blacklisted on arrival.
+                if (!Fruitless.TryGetValue(villager, out Run had) || had.Target != target)
+                {
+                    had = new Run { Target = target, Blows = 0 };
+                    Fruitless[villager] = had;
+                }
+
+                had.Blows++;
+                run = had.Blows;
+            }
 
             if (run < FruitlessBlowsAllowed)
             {
@@ -356,7 +486,7 @@ namespace Kukolony.Jobs.Chop
             }
 
             if (!target.IsNone()) Refused(context).Add(target);
-            Forget(context);
+            Reset(context, ZDOID.None);
 
             // Keyed by the villager, so two villagers with two bad axes are two complaints
             // rather than one confusing tally.
@@ -365,12 +495,6 @@ namespace Kukolony.Jobs.Chop
 
             context.State.ClearTarget();
             return JobOutcomes.Skipped(context.State, what, out activity);
-        }
-
-        private static void Forget(ChopContext context)
-        {
-            ZDOID villager = context.Villager.Id;
-            if (!villager.IsNone()) Fruitless[villager] = 0;
         }
 
         private static HashSet<ZDOID> Refused(ChopContext context)
@@ -398,6 +522,27 @@ namespace Kukolony.Jobs.Chop
         /// </remarks>
         internal static bool WouldTake(JobDefinition job, ZDO zdo) =>
             zdo != null && zdo.IsValid() && Wanted(job, Choppable.Of(zdo.GetPrefab()), zdo);
+
+        /// <summary>
+        ///     Whether this job's stopping rule says the settlement has enough, asked from
+        ///     outside. The same predicate <see cref="Tick" /> consults when choosing.
+        /// </summary>
+        internal static bool WouldStop(Colony colony, JobDefinition job) => HasEnough(colony, job);
+
+        /// <summary>
+        ///     Whether this job would spare the standing trees in an area, asked from outside.
+        /// </summary>
+        /// <remarks>
+        ///     Counts the same way <see cref="Choose" /> counts - over the place, before any
+        ///     of the asking villager's own filters - so a check cannot agree with a count the
+        ///     job does not make.
+        /// </remarks>
+        internal static bool WouldSpare(Colony colony, JobDefinition job, Vector3 centre, float radius)
+        {
+            if (job == null || job.LeaveStanding <= 0) return false;
+
+            return StandingIn(colony, new WorkArea(centre, radius, "there")) <= job.LeaveStanding;
+        }
 
         /// <summary>
         ///     Whether this job takes a thing of this kind and this species.
@@ -432,10 +577,21 @@ namespace Kukolony.Jobs.Chop
             return prefab.Length > 0 && job.Species.Contains(prefab);
         }
 
-        private static bool IsTree(ZDOID id)
+        /// <summary>How many standing trees an area still has.</summary>
+        private static int StandingIn(Colony colony, WorkArea area)
         {
-            ZDO zdo = ZDOMan.instance?.GetZDO(id);
-            return zdo != null && zdo.IsValid() && Choppable.Of(zdo.GetPrefab()) == ChopKind.Tree;
+            int standing = 0;
+            foreach (ZDOID id in ChoppingGround.Near(colony))
+            {
+                ZDO zdo = ZDOMan.instance?.GetZDO(id);
+                if (zdo == null || !zdo.IsValid()) continue;
+                if (Choppable.Of(zdo.GetPrefab()) != ChopKind.Tree) continue;
+                if (!area.Contains(zdo.GetPosition())) continue;
+
+                standing++;
+            }
+
+            return standing;
         }
 
         private static string PrefabName(ZDO zdo)
@@ -452,15 +608,16 @@ namespace Kukolony.Jobs.Chop
         ///     which is visible and self-limiting; a forest has no such point, and a woodcutter
         ///     without a stopping rule strips the map while looking correct the whole time.
         /// </remarks>
-        private static bool Enough(ChopContext context)
+        private static bool Enough(ChopContext context) => HasEnough(context.Colony, context.Job);
+
+        private static bool HasEnough(Colony colony, JobDefinition job)
         {
-            JobDefinition job = context.Job;
             if (job == null || job.StockTarget <= 0 || string.IsNullOrEmpty(job.StockItem))
             {
                 return false;
             }
 
-            return Stock.Held(context.Colony, job.StockItem) >= job.StockTarget;
+            return Stock.Held(colony, job.StockItem) >= job.StockTarget;
         }
 
         /// <summary>
@@ -470,10 +627,10 @@ namespace Kukolony.Jobs.Chop
         ///     Three different reasons reach one Yield, and "nothing to chop" for all of them
         ///     is how a player comes to believe the job is broken when it is waiting on an axe.
         /// </remarks>
-        private static string WhyNothing(ChopContext context, ItemDrop.ItemData axe)
+        private static string WhyNothing(ItemDrop.ItemData axe, bool enough)
         {
             if (axe == null) return "I have no axe";
-            if (Enough(context)) return "we have enough of that";
+            if (enough) return "we have enough of that";
             return "nothing to chop";
         }
 
@@ -507,7 +664,11 @@ namespace Kukolony.Jobs.Chop
                 }
             }
 
-            if (best != null && context.Equipment != null)
+            // Mirrored both ways. Written only when it has an axe, a villager whose axe was
+            // taken out of its bag went on visibly holding one for ever - the slot is
+            // ZDO-backed and persists - so the hand has to be bared as deliberately as it is
+            // filled. A chopping villager's right hand belongs to the job while it works.
+            if (context.Equipment != null)
             {
                 VillagerWardrobe.Set(context.Equipment, WearSlot.RightHand, best);
             }
@@ -519,17 +680,31 @@ namespace Kukolony.Jobs.Chop
         ///     Whether the villager is close enough to work on this.
         /// </summary>
         /// <remarks>
-        ///     The same measure the walking used, from the same place. When arriving and having
-        ///     arrived are two different numbers, a villager walks as far as it can, is told it
-        ///     is not there yet, and tries again forever.
+        ///     <para>
+        ///         The same measure the walking used, from the same place. When arriving and
+        ///         having arrived are two different numbers, a villager walks as far as it can,
+        ///         is told it is not there yet, and tries again forever.
+        ///     </para>
+        ///     <para>
+        ///         Widened once the walk has reported arriving at <em>this</em> target, because
+        ///         a trunk's centre is inside the trunk and demanding it is demanding a
+        ///         position no villager can stand in. Hauling reads the same widening off the
+        ///         walk's stall clock, which cannot work here: a villager standing still
+        ///         chopping is stalled by definition, so after its first tree every later
+        ///         target within the wider reach would be chopped from wherever it happened to
+        ///         be standing, without a step.
+        ///     </para>
         /// </remarks>
         private static bool Within(ChopContext context, GameObject thing)
         {
             if (thing == null) return false;
 
-            float reach = context.Walk.StalledFor >= Arrival.SettledSeconds
-                ? Arrival.WorkingReach
-                : Approach.DistanceTo(thing);
+            ZDOID villager = context.Villager.Id;
+            bool arrived = !villager.IsNone() &&
+                           Settled.TryGetValue(villager, out ZDOID settled) &&
+                           !settled.IsNone() && settled == context.State.Target;
+
+            float reach = arrived ? Arrival.WorkingReach : Approach.DistanceTo(thing);
 
             return Utils.DistanceXZ(thing.transform.position, context.Villager.transform.position) <= reach;
         }

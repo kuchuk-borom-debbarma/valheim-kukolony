@@ -83,11 +83,25 @@ namespace Kukolony.Resources
             if (!Choppable.IsReady) Choppable.Rebuild();
             if (!Choppable.IsReady) return cache.Found;
 
-            // The widest net, bounded once here rather than once per villager. The config is
-            // the outer ceiling and a job's own work area narrows it further; neither can
-            // reach past this.
+            // The widest net, bounded once here rather than once per villager.
+            //
+            // Bounded from every place the Kolony has, not only its hearth. Measuring from
+            // the hearth alone made the ceiling a ceiling on the whole feature: a flag
+            // planted at a wood further out than the config radius could be claimed, pointed
+            // at by a job, and shown on the map, and every villager sent to it reported
+            // "nothing to chop" forever - the scan had already discarded the trees before the
+            // work area was consulted. An outpost is a place the Kolony works, so it anchors
+            // the search the same way the hearth does.
             float bound = ModConfig.ResourceScanRadius.Value;
-            Vector3 hearth = colony.transform.position;
+
+            Anchors.Clear();
+            Anchors.Add(colony.transform.position);
+            foreach (Vector4 flag in Colonies.KolonyReach.FlagAreas(colony))
+            {
+                // Copied out immediately: that list is a shared scratch buffer, rebuilt on
+                // the next ask by anyone.
+                Anchors.Add(new Vector3(flag.x, flag.y, flag.z));
+            }
 
             foreach (ZNetView view in ZNetScene.instance.m_instances.Values)
             {
@@ -95,12 +109,25 @@ namespace Kukolony.Resources
 
                 ZDO zdo = view.GetZDO();
                 if (Choppable.Of(zdo.GetPrefab()) == ChopKind.None) continue;
-                if (Utils.DistanceXZ(zdo.GetPosition(), hearth) > bound) continue;
+                if (!WithinAnyAnchor(zdo.GetPosition(), bound)) continue;
 
                 cache.Found.Add(zdo.m_uid);
             }
 
             return cache.Found;
+        }
+
+        /// <summary>Reused so the per-colony scan allocates nothing per refresh.</summary>
+        private static readonly List<Vector3> Anchors = new List<Vector3>();
+
+        private static bool WithinAnyAnchor(Vector3 at, float bound)
+        {
+            foreach (Vector3 anchor in Anchors)
+            {
+                if (Utils.DistanceXZ(at, anchor) <= bound) return true;
+            }
+
+            return false;
         }
     }
 }

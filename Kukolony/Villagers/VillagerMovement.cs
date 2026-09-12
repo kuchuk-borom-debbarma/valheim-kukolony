@@ -89,9 +89,13 @@ namespace Kukolony.Villagers
             bearing.y = 0f;
             if (bearing.sqrMagnitude < .01f) return;
 
+            // Stepped by the AI's own fixed interval, not by the render frame. This is called
+            // from inside the AI update, which is driven at a fixed rate, so Time.deltaTime
+            // here is the frame time - and a turn scaled by it is three times faster at 30fps
+            // than at 144. MoveTowards documents the same trap for its own step.
             ai.transform.rotation = Quaternion.RotateTowards(
                 ai.transform.rotation, Quaternion.LookRotation(bearing.normalized),
-                TurnDegreesPerSecond * Time.deltaTime);
+                TurnDegreesPerSecond * Time.fixedDeltaTime);
         }
 
         /// <summary>How fast a standing villager turns. Brisk, but visibly a turn.</summary>

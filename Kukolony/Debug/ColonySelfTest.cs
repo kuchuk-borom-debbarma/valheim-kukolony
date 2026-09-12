@@ -216,6 +216,7 @@ namespace Kukolony.Debug
             yield return CheckUnclaimedDamageDoesNothing(report, origin);
             yield return CheckGivingUpOnAnUncuttableTree(report, origin);
             yield return CheckChopSettings(report, origin);
+            yield return CheckChopStoppingRules(report, colony, origin);
             yield return CheckChoppingFellsATree(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
@@ -1668,9 +1669,19 @@ namespace Kukolony.Debug
 
             RegisterOutcome tookNear = ColonyOperations.AssignFlag(colony.Id, near);
             RegisterOutcome tookFar = ColonyOperations.AssignFlag(colony.Id, far);
-            report.Check(tookNear == RegisterOutcome.Registered && tookFar == RegisterOutcome.Registered,
+            bool claimed = tookNear == RegisterOutcome.Registered && tookFar == RegisterOutcome.Registered;
+            report.Check(claimed,
                 "both ends of the crossing are claimed outposts",
                 $"near={tookNear} far={tookFar} gap={wet:0}m of water");
+
+            if (!claimed)
+            {
+                // Stop here. Without the flags there is no corridor held open, so the journey
+                // below would spend ten minutes of real time failing for a reason already
+                // reported - and report it a second time as though it were a travel fault.
+                Cleanup(colony, near, far, nearFlag, farFlag);
+                yield break;
+            }
 
             Villager walker = VillagerLifecycle.Spawn(colony);
             yield return new WaitForSecondsRealtime(.5f);
@@ -5199,6 +5210,11 @@ namespace Kukolony.Debug
 
             VillagerLifecycle.Remove(colony, who);
             Cleanup(colony, planted, null, flag, null);
+
+            // Put the job list back, as every other check here does. Left behind, a Repeat=30
+            // chop job whose work area points at the flag just unregistered is what the
+            // screen checks and the persistence reload then run against.
+            colony.State.SetJobs(new List<JobDefinition>());
             SweepFelling(site, 30f);
             yield return new WaitForSecondsRealtime(.2f);
         }
@@ -5326,8 +5342,134 @@ namespace Kukolony.Debug
             report.Check(ChopJob.WouldTake(fells, zdo),
                 "control: an empty species list still means every species");
 
+            // Undergrowth, which is opt-in: a settlement should not quietly flatten scenery
+            // because something had a Destructible on it.
+            GameObject bush = SpawnFirst(site + new Vector3(6f, 0f, 0f),
+                "Bush01", "Bush02_en", "shrub_2", "stubbe");
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (bush != null && bush.TryGetComponent(out ZNetView bushView) && bushView.IsValid() &&
+                Choppable.Of(bushView.GetZDO().GetPrefab()) == ChopKind.Undergrowth)
+            {
+                JobDefinition clears = new JobDefinition
+                {
+                    Kind = JobKind.Chop, ChopTrees = false, ChopLogs = false, ChopUndergrowth = true
+                };
+
+                report.Check(ChopJob.WouldTake(clears, bushView.GetZDO()),
+                    "a clearing job takes undergrowth");
+                report.Check(!ChopJob.WouldTake(fells, bushView.GetZDO()),
+                    "control: a felling job leaves undergrowth alone - it is opt-in");
+            }
+
+            Release(bush);
             Release(tree);
             SweepFelling(site, 20f);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     The two stopping rules, which are the settings most able to look like they work.
+        /// </summary>
+        /// <remarks>
+        ///     Both are answered by asking the engine the same question a villager's tick asks,
+        ///     rather than by watching a villager for minutes. "Leave standing" is about the
+        ///     forest and "stop when we have" is about the settlement, and neither substitutes
+        ///     for the other - so each gets its own control.
+        /// </remarks>
+        private static IEnumerator CheckChopStoppingRules(TestReport report, Colony colony, Vector3 origin)
+        {
+            Vector3 site = ChoppingSite(origin) + new Vector3(0f, 0f, -40f);
+            SweepFelling(site, 24f);
+
+            // Stop-when-we-have, measured against what the settlement actually holds.
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(4f, 0f, -6f));
+            yield return new WaitForSecondsRealtime(.3f);
+            StructureRecord store = Register(colony, chest, "Stop-rule shed");
+            if (store == null)
+            {
+                report.Check(false, "stopping-rule check could register a chest");
+                Release(chest);
+                yield break;
+            }
+
+            report.Check(Stock.Held(colony, "Wood") == 0,
+                "control: an empty settlement holds none of it",
+                $"held={Stock.Held(colony, "Wood")}");
+
+            GameObject woodPrefab = ObjectDB.instance?.GetItemPrefab("Wood");
+            Container box = chest.GetComponentInChildren<Container>(true);
+            if (woodPrefab != null && box != null && woodPrefab.TryGetComponent(out ItemDrop woodDrop))
+            {
+                ItemDrop.ItemData stack = woodDrop.m_itemData.Clone();
+                stack.m_dropPrefab = woodPrefab;
+                stack.m_stack = 12;
+                box.GetInventory().AddItem(stack);
+            }
+
+            int held = Stock.Held(colony, "Wood");
+            report.Check(held >= 12,
+                "the settlement can say how much of a thing it is holding",
+                $"held={held}");
+
+            // The rule itself: above the line there is nothing worth cutting, below it there
+            // is. Asked of the job's own facts rather than of a villager, because what is
+            // under test is the threshold and not the walk.
+            report.Check(ChopJob.WouldStop(colony,
+                    new JobDefinition { Kind = JobKind.Chop, StockItem = "Wood", StockTarget = 10 }),
+                "at the threshold the job stops asking for more",
+                $"held={held} target=10");
+
+            report.Check(!ChopJob.WouldStop(colony,
+                    new JobDefinition { Kind = JobKind.Chop, StockItem = "Wood", StockTarget = 500 }),
+                "control: below it the same job carries on",
+                $"held={held} target=500");
+
+            report.Check(!ChopJob.WouldStop(colony,
+                    new JobDefinition { Kind = JobKind.Chop, StockItem = "Wood", StockTarget = 0 }),
+                "control: a target of zero means never stop",
+                $"held={held} target=0");
+
+            colony.RemoveStructure(store.Id);
+            Release(chest);
+
+            // Leave-standing, which is about the place rather than the store. Planted as a
+            // small stand so the threshold has something to count.
+            string species = Choppable.SampleTree(0, 0);
+            List<GameObject> stand = new List<GameObject>();
+            if (!string.IsNullOrEmpty(species))
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    stand.Add(Spawn(species, site + new Vector3(i * 5f, 0f, 0f)));
+                }
+            }
+
+            yield return new WaitForSecondsRealtime(.5f);
+
+            int planted = Nearby<TreeBase>(site, 24f);
+            report.Check(planted >= 3, "control: there is a stand of trees to thin",
+                $"standing={planted}");
+
+            if (planted >= 3)
+            {
+                report.Check(ChopJob.WouldSpare(colony,
+                        new JobDefinition { Kind = JobKind.Chop, LeaveStanding = planted }, site, 24f),
+                    "a job told to leave this many standing takes no more trees",
+                    $"standing={planted} leave={planted}");
+
+                report.Check(!ChopJob.WouldSpare(colony,
+                        new JobDefinition { Kind = JobKind.Chop, LeaveStanding = 1 }, site, 24f),
+                    "control: with a lower threshold the same stand is still work",
+                    $"standing={planted} leave=1");
+
+                report.Check(!ChopJob.WouldSpare(colony,
+                        new JobDefinition { Kind = JobKind.Chop, LeaveStanding = 0 }, site, 24f),
+                    "control: zero means take them all");
+            }
+
+            foreach (GameObject tree in stand) Release(tree);
+            SweepFelling(site, 24f);
             yield return new WaitForSecondsRealtime(.2f);
         }
 
