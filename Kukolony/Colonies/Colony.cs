@@ -13,6 +13,13 @@ namespace Kukolony.Colonies
     {
         internal static List<Colony> Instances { get; } = new List<Colony>();
 
+        /// <summary>
+        ///     What a nameless Kolony is called, everywhere one is shown. The map, the switch
+        ///     list and the hover each had their own wording, and a player with two nameless
+        ///     hearths could not tell which pin matched which row.
+        /// </summary>
+        internal const string UnnamedLabel = "Unnamed Kolony";
+
         private ZNetView _nview;
 
         internal ColonyState State =>
@@ -163,7 +170,7 @@ namespace Kukolony.Colonies
                 return Localization.instance.Localize("$kukolony_colony");
             }
 
-            string name = string.IsNullOrEmpty(state.Name) ? "unnamed" : state.Name;
+            string name = string.IsNullOrEmpty(state.Name) ? UnnamedLabel : state.Name;
 
             return Localization.instance.Localize(
                 $"$kukolony_colony\n<color=orange>{name}</color>\n"

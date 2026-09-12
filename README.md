@@ -1,13 +1,13 @@
 # Kukolony
 
-Kukolony is a pre-release colony-management mod for Valheim. A placed Colony Hearth owns
+Kukolony is a pre-release Kolony-management mod for Valheim. A placed Kolony Hearth owns
 named registered structures, villagers, concrete job configurations, presets, and each
 villager's ordered looping queue. Work posts, bed assignments, and JSON job graphs have
 been removed.
 
 The implemented catalog includes hauling loose items, container transfers, fireplace
 fueling, smelters and charcoal kilns, cooking stations, fermenters, and beehives. Registered
-structures must be placed, network-backed, and inside the colony's live radius to be used.
+structures must be placed, network-backed, and inside the Kolony's live radius to be used.
 Missing or out-of-radius records remain visible for repair or removal.
 
 ## Build

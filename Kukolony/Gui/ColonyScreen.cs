@@ -113,7 +113,11 @@ namespace Kukolony.Gui
             Colony nearest = Nearest(player.transform.position);
             if (nearest == null)
             {
-                Report.Say("No Kolony nearby. Place a Kolony Hearth first.");
+                // Worded for what is actually tested: the nearest LOADED Kolony, at any
+                // range - opening from across the map is deliberate, since the screen works
+                // off a loaded instance wherever the player stands. "Nearby" promised a
+                // proximity check that has never existed.
+                Report.Say("No Kolony is loaded to manage. Place a Kolony Hearth first.");
                 return;
             }
 

@@ -17,6 +17,13 @@ namespace Kukolony.Gui
     /// </remarks>
     internal sealed class JobListScreen : ScreenView
     {
+        /// <summary>
+        ///     The one rendering of "this job works everywhere". The picker offers it and the
+        ///     job row reads it back, and the two being separate literals meant an edit to one
+        ///     made the selection look like it had not taken.
+        /// </summary>
+        internal const string WholeKolony = "the whole Kolony";
+
         internal override string Title => "Jobs";
 
         internal override bool StillValid(ColonyScreen host) => host.Colony != null;
@@ -74,7 +81,7 @@ namespace Kukolony.Gui
         /// <summary>A short answer to "where does this happen", for the list.</summary>
         internal static string Where(Colony colony, JobDefinition job)
         {
-            if (string.IsNullOrEmpty(job.WorkArea)) return "the whole Kolony";
+            if (string.IsNullOrEmpty(job.WorkArea)) return WholeKolony;
 
             foreach (StructureRecord record in colony.State.GetStructures())
             {
@@ -213,7 +220,7 @@ namespace Kukolony.Gui
         {
             List<PickerScreen.Option> options = new List<PickerScreen.Option>
             {
-                new PickerScreen.Option(string.Empty, "the whole Kolony")
+                new PickerScreen.Option(string.Empty, JobListScreen.WholeKolony)
             };
 
             foreach (StructureRecord record in colony.State.GetStructures())

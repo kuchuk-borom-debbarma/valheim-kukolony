@@ -106,7 +106,7 @@ namespace Kukolony
                 "3 - Off-screen simulation",
                 nameof(KeepAliveEnabled),
                 true,
-                "Villagers keep a small area around themselves loaded, so colonies carry on "
+                "Villagers keep a small area around themselves loaded, so Kolonies carry on "
                 + "working when no player is nearby. Disable to compare against vanilla behaviour.");
 
             EnergyPerAction = config.Bind(
@@ -281,8 +281,38 @@ namespace Kukolony
             BenchmarkAutoExit = config.Bind("9 - Development", nameof(BenchmarkAutoExit), true,
                 "Save and close Valheim after the terminal report.");
 
+            // The section rename would otherwise reset these two and leave the old values
+            // in the file as a dead [1 - Colony] block that BepInEx preserves forever - the
+            // first thing a player greps for and edits in vain. Copy a changed value across
+            // once, then remove the old entry so the dead section disappears with it.
+            Migrate(config, "1 - Colony", ColonyRadius);
+            Migrate(config, "1 - Colony", ColonyScreenHotkey);
+
             config.Save();
             config.SaveOnConfigSet = true;
+        }
+
+        /// <summary>
+        ///     Carries one entry's value from a renamed section to its new home, once.
+        /// </summary>
+        /// <remarks>
+        ///     Binding the old definition is what reads any value the player's file still
+        ///     holds; removing it afterwards is what stops the file keeping a dead section. A
+        ///     value the player never changed is not copied, so a fresh install never writes
+        ///     the old section at all - the bind-then-remove leaves no trace.
+        /// </remarks>
+        private static void Migrate<T>(ConfigFile config, string oldSection, ConfigEntry<T> current)
+        {
+            ConfigEntry<T> old = config.Bind(oldSection, current.Definition.Key, (T)current.DefaultValue);
+
+            bool oldChanged = !Equals(old.Value, (T)old.DefaultValue);
+            bool currentUntouched = Equals(current.Value, (T)current.DefaultValue);
+            if (oldChanged && currentUntouched)
+            {
+                current.Value = old.Value;
+            }
+
+            config.Remove(old.Definition);
         }
     }
 }

@@ -33,7 +33,7 @@ namespace Kukolony.Debug
                 args => Send(args.Context), isCheat: false, isNetwork: false, onlyServer: false);
 
             new Terminal.ConsoleCommand("kukolony_chest",
-                "puts a chest on the ground in front of you and registers it to the nearest colony",
+                "puts a chest on the ground in front of you and registers it to the nearest Kolony",
                 args => Chest(args.Context), isCheat: false, isNetwork: false, onlyServer: false);
 
             new Terminal.ConsoleCommand("kukolony_unstick",
@@ -93,7 +93,7 @@ namespace Kukolony.Debug
             Colony colony = NearestColony(player.transform.position);
             if (colony == null)
             {
-                Tell(console, "chest placed, but there is no colony nearby to register it to");
+                Tell(console, "chest placed, but there is no Kolony nearby to register it to");
                 return;
             }
 
@@ -145,7 +145,7 @@ namespace Kukolony.Debug
             // the only way to run this - so it read False every single time and looked like a
             // finding. kukolony_input takes that reading after the console shuts, which is the
             // only moment the answer means anything.
-            Tell(console, $"colony screen open: {screenOpen}");
+            Tell(console, $"Kolony screen open: {screenOpen}");
             Tell(console, $"build menu visible: {Hud.IsPieceSelectionVisible()}");
             Tell(console, $"hammer equipped: {(player != null && player.GetRightItem() != null ? player.GetRightItem().m_shared.m_name : "nothing")}");
 

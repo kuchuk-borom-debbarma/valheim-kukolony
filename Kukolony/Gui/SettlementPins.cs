@@ -87,8 +87,16 @@ namespace Kukolony.Gui
                 if (known == null || !known.IsValid()) continue;
 
                 ColonyState state = new ColonyState(known);
-                string settlement = string.IsNullOrEmpty(state.Name) ? "A Kolony" : state.Name;
-                Color tint = Tint(settlement);
+                string settlement = string.IsNullOrEmpty(state.Name)
+                    ? Colonies.Colony.UnnamedLabel
+                    : state.Name;
+
+                // The tint hashes the ORIGINAL fallback string for a nameless Kolony, not the
+                // displayed one. The hue's whole contract is stability - "a colour that
+                // changed when you reloaded would be worse than none" - and renaming the
+                // label already recoloured every unnamed settlement's pin family once. The
+                // string is an input to a hash here, not something anybody reads.
+                Color tint = Tint(string.IsNullOrEmpty(state.Name) ? "A settlement" : state.Name);
 
                 ZDOID id = known.m_uid;
                 _seen.Add(id);

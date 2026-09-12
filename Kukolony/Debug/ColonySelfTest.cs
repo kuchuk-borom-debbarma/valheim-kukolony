@@ -561,8 +561,8 @@ namespace Kukolony.Debug
         /// </summary>
         /// <remarks>
         ///     The control is the same villager one step earlier: a member of a live colony
-        ///     must report anything but "no colony". Without it this check would pass on a
-        ///     villager that reported "no colony" permanently, which is the more likely defect
+        ///     must report anything but the no-Kolony sentinel. Without it this check would pass on a
+        ///     villager that reported it permanently, which is the more likely defect
         ///     - the reason to be careful here is that idling and being orphaned look identical
         ///     from outside, since both stand still.
         ///
@@ -583,13 +583,13 @@ namespace Kukolony.Debug
             ZDO zdo = view.GetZDO();
             ZDOID id = zdo.m_uid;
             yield return new WaitForSecondsRealtime(.4f);
-            report.Check(villager.Activity != "no Kolony",
+            report.Check(villager.Activity != Villager.NoKolonyActivity,
                 "control: a villager in a live colony does not report being colonyless",
                 $"activity='{villager.Activity}'");
 
             ColonyMembership.SetColony(zdo, ZDOID.None);
             yield return new WaitForSecondsRealtime(.4f);
-            report.Check(villager.Activity == "no Kolony",
+            report.Check(villager.Activity == Villager.NoKolonyActivity,
                 "a villager that cannot see its colony reports it",
                 $"activity='{villager.Activity}'");
 
@@ -1729,7 +1729,7 @@ namespace Kukolony.Debug
             ColonyMembership.SetColony(zdo, ZDOID.None);
             yield return new WaitForSecondsRealtime(1.5f);
 
-            report.Check(stray != null && stray.Activity == "no Kolony",
+            report.Check(stray != null && stray.Activity == Villager.NoKolonyActivity,
                 "a villager orphaned mid-trip stops rather than finishing a delivery to nobody",
                 $"doing='{stray?.Activity}'");
 
@@ -1740,7 +1740,7 @@ namespace Kukolony.Debug
                 $"kept={kept} of {carrying}");
 
             report.Check(StructureInventory.Count(store.Id, "Wood") == 0,
-                "control: nothing reached the chest while it had no settlement to work for",
+                "control: nothing reached the chest while it had no Kolony to work for",
                 $"inChest={StructureInventory.Count(store.Id, "Wood")}");
 
             // Taken back in. An orphan that can never work again is one to replace, not rescue.

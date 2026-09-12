@@ -125,7 +125,7 @@ namespace Kukolony.Gui
                 }
 
                 ColonyState state = colony.State;
-                string label = string.IsNullOrEmpty(state.Name) ? "unnamed" : state.Name;
+                string label = string.IsNullOrEmpty(state.Name) ? Colonies.Colony.UnnamedLabel : state.Name;
                 bool current = colony == host.Colony;
 
                 Widgets.Caption(row, label, 360f);

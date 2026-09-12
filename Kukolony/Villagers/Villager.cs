@@ -41,6 +41,14 @@ namespace Kukolony.Villagers
         /// <summary>Short description of what this villager is doing, for hover text.</summary>
         internal string Activity { get; private set; } = "idle";
 
+        /// <summary>
+        ///     The activity a villager reports with no Kolony to work for. A constant because
+        ///     three self-test assertions compare against it by value, and a wording tweak
+        ///     that missed one would leave a control passing vacuously against a string
+        ///     nothing produces.
+        /// </summary>
+        internal const string NoKolonyActivity = "no Kolony";
+
 
         private void Awake() => Instances.Add(this);
 
@@ -268,7 +276,7 @@ namespace Kukolony.Villagers
             if (!HasColony())
             {
                 VillagerMovement.Stop(_ai);
-                SetActivity("no Kolony");
+                SetActivity(NoKolonyActivity);
                 return true;
             }
 
