@@ -186,10 +186,19 @@ dressed as wearing "something they no longer have".
 every call, so a per-row lookup would cost more the more villagers a settlement had — which is
 the one shape a settlement with no population cap cannot afford.
 
-## Villagers on the map
+## Settlements and villagers on the map
 
-Every villager carries a pin, named and labelled with what they are doing, and clicking one
-opens that villager's screen.
+Every settlement carries a pin with its name and population, and every villager carries one
+labelled with what they are doing. Clicking either opens it.
+
+Settlements are pinned from the **registry** rather than from loaded instances, so a village
+across the map is on the map — finding your own settlement is the thing a map is most obviously
+for, and one that only appears once you are standing in it is no help at all. A settlement too
+far away to be loaded says so when clicked rather than opening a screen built on state it cannot
+read.
+
+Settlements and villagers use different pin icons, and there is a check for that: two kinds of
+thing that look identical on a map are one kind of thing as far as a player is concerned.
 
 The game already does exactly this for other players — a pin whose position is rewritten as they
 move, with `m_pinUpdateRequired` set so the map redraws — so villager pins need no patching, only

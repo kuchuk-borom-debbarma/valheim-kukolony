@@ -955,6 +955,20 @@ namespace Kukolony.Debug
             report.Check(pin != null, "a villager is shown on the map",
                 $"looking for a pin named like '{name}'");
 
+            // The settlement itself, which is the thing a map is most obviously for. Pinned from
+            // the registry rather than from loaded instances, so one across the map still shows.
+            Minimap.PinData home = FindPin(colony.State.Name);
+            report.Check(home != null, "a settlement is shown on the map",
+                $"looking for a pin named like '{colony.State.Name}'");
+
+            report.Check(home == null || !home.m_save,
+                "control: settlement pins are not written into the player's saved map either",
+                $"save={(home == null ? "no pin" : home.m_save.ToString())}");
+
+            report.Check(home == null || pin == null || home.m_type != pin.m_type,
+                "control: a settlement and a villager do not look the same on the map",
+                $"settlement={home?.m_type} villager={pin?.m_type}");
+
             report.Check(pin == null || !pin.m_save,
                 "control: villager pins are never written into the player's saved map",
                 $"save={(pin == null ? "no pin" : pin.m_save.ToString())}");

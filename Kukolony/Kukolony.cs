@@ -43,7 +43,7 @@ namespace Kukolony
             gameObject.AddComponent<KeepAlive.KeepAliveDriver>();
             Gui.ColonyScreenHotkey.Register(gameObject);
             Debug.TravelCommands.Register();
-            Gui.VillagerPins.Register(gameObject);
+            Gui.SettlementPins.Register(gameObject);
             Colonies.StructureReaperDriver.Register(gameObject);
             gameObject.AddComponent<Debug.DebugHotkeys>();
             gameObject.AddComponent<Debug.AutoBoot>();

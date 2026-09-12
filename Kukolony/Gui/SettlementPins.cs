@@ -7,7 +7,7 @@ using UnityEngine;
 namespace Kukolony.Gui
 {
     /// <summary>
-    ///     Every villager, on the map, wherever they are.
+    ///     Every settlement and every villager, on the map, wherever they are.
     /// </summary>
     /// <remarks>
     ///     <para>
@@ -27,7 +27,7 @@ namespace Kukolony.Gui
     ///         would accumulate one per villager per session, in their save file, for ever.
     ///     </para>
     /// </remarks>
-    internal sealed class VillagerPins : MonoBehaviour
+    internal sealed class SettlementPins : MonoBehaviour
     {
         /// <summary>How often to move the pins. Faster than this is redrawing for nobody.</summary>
         private const float RefreshSeconds = .5f;
@@ -36,13 +36,16 @@ namespace Kukolony.Gui
         private const float ClickReach = 24f;
 
         private readonly Dictionary<ZDOID, Minimap.PinData> _pins = new Dictionary<ZDOID, Minimap.PinData>();
+
+        /// <summary>Which of the pins are settlements, so a click knows what it opened.</summary>
+        private readonly HashSet<ZDOID> _settlements = new HashSet<ZDOID>();
         private readonly List<ZDOID> _seen = new List<ZDOID>();
         private readonly List<ZDOID> _gone = new List<ZDOID>();
 
         private float _nextRefresh;
         private bool _clickHeld;
 
-        internal static void Register(GameObject host) => host.AddComponent<VillagerPins>();
+        internal static void Register(GameObject host) => host.AddComponent<SettlementPins>();
 
         private void Update()
         {
@@ -69,6 +72,20 @@ namespace Kukolony.Gui
         {
             _seen.Clear();
 
+            // Settlements first, from the registry rather than from the loaded instances, so a
+            // colony across the map is on the map. Finding your own settlement is the thing a
+            // map is most obviously for, and a village that only appears once you are standing
+            // in it is no help at all.
+            foreach (ZDO known in ColonyRegistry.GetKnownColonies())
+            {
+                if (known == null || !known.IsValid()) continue;
+
+                ZDOID id = known.m_uid;
+                _seen.Add(id);
+                _settlements.Add(id);
+                Place(id, known.GetPosition(), Settlement(known), Minimap.PinType.Icon0);
+            }
+
             foreach (Colony colony in Colony.Instances)
             {
                 if (colony == null) continue;
@@ -82,22 +99,18 @@ namespace Kukolony.Gui
                     if (zdo == null || !zdo.IsValid()) continue;
 
                     _seen.Add(member);
-                    Place(member, zdo);
+                    Place(member, zdo.GetPosition(), Describe(member), Minimap.PinType.Player);
                 }
             }
 
             Forget();
         }
 
-        private void Place(ZDOID id, ZDO zdo)
+        private void Place(ZDOID id, Vector3 where, string label, Minimap.PinType kind)
         {
-            Vector3 where = zdo.GetPosition();
-            string label = Describe(id, zdo);
-
             if (!_pins.TryGetValue(id, out Minimap.PinData pin))
             {
-                pin = Minimap.instance.AddPin(where, Minimap.PinType.Player, label,
-                    save: false, isChecked: false);
+                pin = Minimap.instance.AddPin(where, kind, label, save: false, isChecked: false);
                 _pins[id] = pin;
                 Minimap.instance.m_pinUpdateRequired = true;
                 return;
@@ -121,7 +134,23 @@ namespace Kukolony.Gui
         ///     villager is doing is most of what anyone wanted to know. An unloaded villager has
         ///     no activity to report, so it says where it lives instead of inventing one.
         /// </remarks>
-        private static string Describe(ZDOID id, ZDO zdo)
+        /// <summary>
+        ///     What a settlement's pin says: its name, and how many people live there.
+        /// </summary>
+        /// <remarks>
+        ///     The population, because that is what distinguishes the settlement you are looking
+        ///     for from the outpost you forgot you founded.
+        /// </remarks>
+        private static string Settlement(ZDO zdo)
+        {
+            ColonyState state = new ColonyState(zdo);
+            int people = state.CountMembers(ColonyMemberKind.Villager);
+            string name = string.IsNullOrEmpty(state.Name) ? "A settlement" : state.Name;
+
+            return people == 1 ? $"{name} (1 villager)" : $"{name} ({people} villagers)";
+        }
+
+        private static string Describe(ZDOID id)
         {
             // The same answer the villagers list gives, from the same place, so the map and the
             // screen never disagree about what somebody is doing.
@@ -141,6 +170,7 @@ namespace Kukolony.Gui
             {
                 Minimap.instance.RemovePin(_pins[id]);
                 _pins.Remove(id);
+                _settlements.Remove(id);
                 Minimap.instance.m_pinUpdateRequired = true;
             }
         }
@@ -194,7 +224,36 @@ namespace Kukolony.Gui
 
             if (nearest.IsNone()) return;
 
-            Open(nearest);
+            if (_settlements.Contains(nearest)) OpenSettlement(nearest);
+            else Open(nearest);
+        }
+
+        /// <summary>Opens a settlement from its pin.</summary>
+        private static void OpenSettlement(ZDOID id)
+        {
+            Colony colony = null;
+            foreach (Colony candidate in Colony.Instances)
+            {
+                if (candidate == null || !candidate.TryGetComponent(out ZNetView view) ||
+                    !view.IsValid() || view.GetZDO().m_uid != id)
+                {
+                    continue;
+                }
+
+                colony = candidate;
+                break;
+            }
+
+            if (colony == null)
+            {
+                // Pinned from its record, so it can be shown on the map without being loaded -
+                // but its screen reads live state, so there is nothing honest to open yet.
+                Report.Say("That settlement is too far away to manage from here.");
+                return;
+            }
+
+            Minimap.instance.SetMapMode(Minimap.MapMode.Small);
+            ColonyScreen.Instance?.Open(colony, null);
         }
 
         private static void Open(ZDOID villager)
