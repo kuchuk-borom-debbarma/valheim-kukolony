@@ -243,13 +243,13 @@ namespace Kukolony.Gui
             if (column.TryRow(out Row tidy))
             {
                 Widgets.Flag(tidy, "Tidy containers too", job.TidyContainers,
-                    value => Edit(host, j => j.TidyContainers = value));
+                    value => { Edit(host, j => j.TidyContainers = value); host.Refresh(); });
             }
 
             if (column.TryRow(out Row load))
             {
                 Widgets.Flag(load, "Fill the bag before delivering", job.FillBagFirst,
-                    value => Edit(host, j => j.FillBagFirst = value));
+                    value => { Edit(host, j => j.FillBagFirst = value); host.Refresh(); });
             }
         }
 

@@ -217,11 +217,20 @@ namespace Kukolony.Gui
                 Widgets.Number(cap, "At most " + ItemCatalogue.Label(named), amount < 0 ? 0 : amount,
                     0f, 9999f, 10f,
                     value => value <= 0f ? "no limit" : ((int)value).ToString(),
-                    value => ColonyOperations.EditSettings(colony, record.Id, s =>
+                    value =>
                     {
-                        s.SetCap(named, value <= 0f ? -1 : (int)value);
+                        ColonyOperations.EditSettings(colony, record.Id,
+                            s => s.SetCap(named, value <= 0f ? -1 : (int)value));
+
+                        // After the edit returns, not inside it. EditSettings mutates the
+                        // decoded record and only writes it back on the way out, while the
+                        // rebuild decodes fresh from the ZDO - so refreshing from within the
+                        // mutator drew the value as it was before the change. The row then
+                        // showed the old number, the nudge closure carried the old number,
+                        // and the cap could never move more than one step from where it
+                        // started.
                         host.Refresh();
-                    }));
+                    });
             }
         }
 
