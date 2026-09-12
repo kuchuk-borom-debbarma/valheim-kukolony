@@ -174,6 +174,7 @@ namespace Kukolony.Debug
             yield return CheckWorkAreas(report, colony, origin);
             yield return CheckResting(report, colony, origin);
             CheckSayingThingsOnce(report);
+            yield return CheckMapPins(report, colony);
             yield return CheckDistantTravel(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
@@ -819,6 +820,69 @@ namespace Kukolony.Debug
         ///         the control that says the measurement apparatus itself is sound.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     Every villager appears on the map, and none of it is written to the save.
+        /// </summary>
+        /// <remarks>
+        ///     The save check is the one that would bite silently. A saved pin goes into the
+        ///     player's own map profile, so getting it wrong adds one pin per villager per
+        ///     session to their file for ever - invisible while playing, and permanent.
+        /// </remarks>
+        private static IEnumerator CheckMapPins(TestReport report, Colony colony)
+        {
+            if (Minimap.instance == null)
+            {
+                report.Note("map pin check skipped: no minimap in this session");
+                yield break;
+            }
+
+            Villager walker = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(1.5f);
+            if (walker == null || !walker.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "map pin check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            string name = VillagerRoster.Name(who);
+
+            Minimap.PinData pin = FindPin(name);
+            report.Check(pin != null, "a villager is shown on the map",
+                $"looking for a pin named like '{name}'");
+
+            report.Check(pin == null || !pin.m_save,
+                "control: villager pins are never written into the player's saved map",
+                $"save={(pin == null ? "no pin" : pin.m_save.ToString())}");
+
+            if (pin != null)
+            {
+                report.Check(Utils.DistanceXZ(pin.m_pos, walker.transform.position) < 8f,
+                    "control: the pin is where the villager actually is",
+                    $"{Utils.DistanceXZ(pin.m_pos, walker.transform.position):0.0}m apart");
+            }
+
+            // And it goes away with them, rather than pointing at somebody who is gone.
+            VillagerLifecycle.Remove(colony, who);
+            yield return new WaitForSecondsRealtime(1.5f);
+
+            report.Check(FindPin(name) == null,
+                "a villager's pin goes when the villager does",
+                $"stillPinned={(FindPin(name) != null)}");
+        }
+
+        private static Minimap.PinData FindPin(string name)
+        {
+            if (Minimap.instance == null || Minimap.instance.m_pins == null) return null;
+
+            foreach (Minimap.PinData pin in Minimap.instance.m_pins)
+            {
+                if (pin != null && pin.m_name != null && pin.m_name.StartsWith(name)) return pin;
+            }
+
+            return null;
+        }
+
         /// <summary>
         ///     A problem that keeps being true is reported once, with a count.
         /// </summary>

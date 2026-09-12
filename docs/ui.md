@@ -161,6 +161,32 @@ dressed as wearing "something they no longer have".
 every call, so a per-row lookup would cost more the more villagers a settlement had — which is
 the one shape a settlement with no population cap cannot afford.
 
+## Villagers on the map
+
+Every villager carries a pin, named and labelled with what they are doing, and clicking one
+opens that villager's screen.
+
+The game already does exactly this for other players — a pin whose position is rewritten as they
+move, with `m_pinUpdateRequired` set so the map redraws — so villager pins need no patching, only
+the public pin API and a component that keeps them current.
+
+**Unloaded villagers get a pin too**, read from their ZDO. That is precisely when a player most
+wants to know where somebody is, and it costs nothing: the colony already knows who its members
+are, and a ZDO answers its position without instantiating anything.
+
+**Pins are never saved.** A saved pin goes into the player's own map profile, so getting this
+wrong would add one pin per villager per session to their save file, for ever — invisible while
+playing and permanent. There is a check for it.
+
+The label comes from the same function the villagers list uses, so the map and the screen can
+never disagree about what somebody is doing. The map redraw walks every pin, so the position is
+only rewritten when it actually changed — claiming a change twice a second for a settlement
+standing still is work for nothing.
+
+Clicks are read directly rather than patched into the map's own input, which handles them inline
+and would need rewriting to hook. Reading the click ourselves is smaller and cannot break the map
+for anything else.
+
 ## Saying things
 
 `Core.Report.Say` is the one place the mod tells the player what happened, including refusal
