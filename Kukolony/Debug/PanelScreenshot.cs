@@ -387,6 +387,15 @@ namespace Kukolony.Debug
         internal static IEnumerator PhotographAtWork(string fileName, Vector3 subject, string note,
             Vector3? alsoShow = null)
         {
+            // The frame's own honesty, recorded here so no caller can forget it: a photograph
+            // with no second point is a lone close-up of the subject, and a caption that reads
+            // as though a counterpart is in frame has already misled a review of this suite
+            // three commits running. One suffix in the one place every capture goes through.
+            if (!alsoShow.HasValue)
+            {
+                note += " (framed alone - no second subject resolved)";
+            }
+
             // Checked here, because this is called from the functional phase rather than the UI
             // one and so sits outside that phase's gate. Without it, turning screenshots off
             // still detached the camera and froze the sky at noon in the middle of a hauling

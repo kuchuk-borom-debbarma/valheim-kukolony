@@ -2861,7 +2861,7 @@ namespace Kukolony.Debug
             {
                 yield return new WaitForSecondsRealtime(.5f);
 
-                if (hand == null || ZNetScene.instance.FindInstance(who) == null) break;
+                if (hand == null || ZNetScene.instance?.FindInstance(who) == null) break;
 
                 float away = Utils.DistanceXZ(hand.transform.position, colony.transform.position);
                 if (away > strayed) strayed = away;
@@ -2878,11 +2878,20 @@ namespace Kukolony.Debug
                 if (!caughtFetching && hand.Activity == "fetching")
                 {
                     caughtFetching = true;
-                    GameObject bound = ZNetScene.instance?.FindInstance(new VillagerState(view.GetZDO()).Target);
+                    GameObject fetching = ZNetScene.instance?.FindInstance(new VillagerState(view.GetZDO()).Target);
+
+                    // The chests are the fallback frame, not a null: a target that stopped
+                    // resolving mid-walk collapses a null second point onto the subject and
+                    // produces the minimum-distance lone close-up the end-of-run fallbacks
+                    // were written to avoid - and the latch above means no later shot
+                    // replaces this one. The caption stops asserting a journey the frame
+                    // cannot show, which was this block's own lesson applied one call late.
                     yield return BenchmarkUiScenario.PhotographAtWork("haul-fetching.png",
                         hand.transform.position,
-                        $"'{hand.DisplayName()}' on its way to something to pick up",
-                        bound != null ? bound.transform.position : (Vector3?)null);
+                        fetching != null
+                            ? $"'{hand.DisplayName()}' on its way to something to pick up"
+                            : $"'{hand.DisplayName()}' set out fetching, but its target no longer resolves",
+                        fetching != null ? fetching.transform.position : woodChest.transform.position);
                 }
 
                 // Asked again, because the capture above yields several frames and the villager
@@ -2892,28 +2901,36 @@ namespace Kukolony.Debug
                 // coroutine and taking the whole run with it.
                 if (hand == null || ZNetScene.instance?.FindInstance(who) == null) break;
 
-                if (!caughtCarrying && new VillagerState(view.GetZDO()).Cargo.Length > 0)
+                VillagerState sampled = new VillagerState(view.GetZDO());
+                if (!caughtCarrying && sampled.Cargo.Length > 0 &&
+                    Carrying.Cargo(hand.GetComponentInChildren<Container>(true)?.GetInventory(),
+                        sampled.Cargo).Count > 0)
                 {
-                    // Framed against the chest this trip is actually going to, resolved the same
-                    // way the setting-out shot resolves what it is walking to. Naming the wood
-                    // chest here was a picture that captioned itself "at the chest that asked
-                    // for it" while framing the one that did not: this check drops wood and
-                    // stone, and whichever the villager reaches first decides the trip.
+                    // The bag is asked as well as the manifest, because the manifest outlives
+                    // the bag by design - ResetJob keeps it, and the half-second idle pause
+                    // after a Skipped is exactly one sampler period wide. Triggering on the
+                    // manifest alone photographed an empty-handed villager captioned as
+                    // loaded, and the latch meant no honest moment ever replaced it.
                     caughtCarrying = true;
-                    GameObject bound = ZNetScene.instance?.FindInstance(
-                        new VillagerState(view.GetZDO()).Destination);
 
-                    // The caption follows the frame rather than asserting one. A trip can have
-                    // its destination cleared while the load is still held - the chest gone,
-                    // the chest full, the load bound elsewhere - and a picture of a villager
-                    // standing alone, captioned as being at the chest that asked for it, is a
-                    // lie told in exactly the case the picture exists to diagnose.
+                    // "Bound" and "arrived" are different claims and the old caption made the
+                    // stronger one: this shot fires the moment cargo appears, at the pickup
+                    // pile, so "at the chest that asked for it" was wrong on nearly every
+                    // normal run. What the frame proves is where the trip is going, so that
+                    // is all the caption says. An unresolved destination is only called
+                    // cleared when the trip itself says so - merely-not-instantiated looks
+                    // identical from FindInstance, and the job side already separates the two.
+                    GameObject toward = ZNetScene.instance?.FindInstance(sampled.Destination);
+                    Vector3? frame = toward != null ? toward.transform.position : (Vector3?)null;
+                    string doing = frame.HasValue
+                        ? $"'{hand.DisplayName()}' is '{hand.Activity}', bound for the chest that asked for it"
+                        : sampled.Destination.IsNone()
+                            ? $"'{hand.DisplayName()}' is '{hand.Activity}' with a load and nowhere bound"
+                            : $"'{hand.DisplayName()}' is '{hand.Activity}', bound somewhere not loaded here";
+
                     yield return BenchmarkUiScenario.PhotographAtWork("haul-delivering.png",
-                        hand.transform.position,
-                        bound != null
-                            ? $"'{hand.DisplayName()}' is '{hand.Activity}' at the chest that asked for it"
-                            : $"'{hand.DisplayName()}' is '{hand.Activity}' with a load and nowhere bound",
-                        bound != null ? bound.transform.position : (Vector3?)null);
+                        hand.transform.position, doing,
+                        frame ?? stoneChest.transform.position);
                 }
             }
 
@@ -2959,6 +2976,13 @@ namespace Kukolony.Debug
             yield return BenchmarkUiScenario.PhotographAtWork("haul-settled.png", Subject(),
                 Caption("after the hauling: "), opposite);
 
+            // Read once more, fresh. The last loop sample is stale by however long the
+            // photographs took - several frames each - and a delivery landing inside that
+            // window scored as a failure while the cross-contamination check below, which
+            // does read fresh, printed the contradicting count in the same report.
+            inWood = StructureInventory.Count(woodStore.Id, "Wood");
+            inStone = StructureInventory.Count(stoneStore.Id, "Stone");
+
             string did = string.Join(" > ", story.ToArray());
 
             report.Check(inWood >= 5, "a villager hauls loose wood to the chest that asked for wood",
@@ -2982,9 +3006,9 @@ namespace Kukolony.Debug
                 "a working villager stays within the settlement it works for",
                 $"strayed {strayed:0}m from a hearth with {colony.EffectiveRadius:0}m of reach");
 
-            report.Check(ZNetScene.instance.FindInstance(who) != null,
+            report.Check(ZNetScene.instance?.FindInstance(who) != null,
                 "control: it survived the job rather than being destroyed by it",
-                $"loaded={ZNetScene.instance.FindInstance(who) != null}");
+                $"loaded={ZNetScene.instance?.FindInstance(who) != null}");
 
             // The vanilla despawn flags, which walk a creature away from the nearest player and
             // then destroy it. Neither check asks whether the creature is tamed, so being
