@@ -35,6 +35,22 @@ namespace Kukolony
         /// <summary>How near a player must be for a travelling villager to walk rather than reckon.</summary>
         internal static ConfigEntry<float> TravelObservedRange { get; private set; }
 
+        /// <summary>Energy spent per action, successful or not.</summary>
+        internal static ConfigEntry<float> EnergyPerAction { get; private set; }
+
+        /// <summary>Energy at which a villager stops working.</summary>
+        internal static ConfigEntry<float> TiredBelow { get; private set; }
+
+        /// <summary>Energy a resting villager must reach before working again.</summary>
+        internal static ConfigEntry<float> RestedAbove { get; private set; }
+
+        /// <summary>In-game hours of sleep in a bed to go from exhausted to fully rested.</summary>
+        internal static ConfigEntry<float> BedHoursToRest { get; private set; }
+
+        internal static ConfigEntry<float> HearthHoursToRest { get; private set; }
+
+        internal static ConfigEntry<float> GroundHoursToRest { get; private set; }
+
         /// <summary>Hard ceiling on zones held open at once, across all colonies.</summary>
         internal static ConfigEntry<int> KeepAliveMaxZones { get; private set; }
 
@@ -85,6 +101,60 @@ namespace Kukolony
                 true,
                 "Villagers keep a small area around themselves loaded, so colonies carry on "
                 + "working when no player is nearby. Disable to compare against vanilla behaviour.");
+
+            EnergyPerAction = config.Bind(
+                "4 - Work",
+                nameof(EnergyPerAction),
+                2f,
+                new ConfigDescription(
+                    "Energy a villager spends on each thing it does. Failed attempts cost the "
+                    + "same as successful ones, or a villager thrashing at something unreachable "
+                    + "would work forever and never tire.",
+                    new AcceptableValueRange<float>(0f, 25f)));
+
+            TiredBelow = config.Bind(
+                "4 - Work",
+                nameof(TiredBelow),
+                20f,
+                new ConfigDescription("Energy at which a villager stops work and goes to rest.",
+                    new AcceptableValueRange<float>(0f, 90f)));
+
+            RestedAbove = config.Bind(
+                "4 - Work",
+                nameof(RestedAbove),
+                70f,
+                new ConfigDescription(
+                    "Energy a resting villager must reach before working again. Must be above "
+                    + "TiredBelow: one threshold makes a villager flicker between the two.",
+                    new AcceptableValueRange<float>(10f, 100f)));
+
+            BedHoursToRest = config.Bind(
+                "4 - Work",
+                nameof(BedHoursToRest),
+                4f,
+                new ConfigDescription(
+                    "In-game hours of sleep in an assigned bed to go from exhausted to fully "
+                    + "rested. In-game, so it scales with the world's day length rather than "
+                    + "with how long you happen to be watching.",
+                    new AcceptableValueRange<float>(.5f, 24f)));
+
+            HearthHoursToRest = config.Bind(
+                "4 - Work",
+                nameof(HearthHoursToRest),
+                10f,
+                new ConfigDescription(
+                    "The same, resting at the hearth with no bed. Longer than a bed, which is "
+                    + "what makes building beds worth doing.",
+                    new AcceptableValueRange<float>(.5f, 48f)));
+
+            GroundHoursToRest = config.Bind(
+                "4 - Work",
+                nameof(GroundHoursToRest),
+                20f,
+                new ConfigDescription(
+                    "The same, resting where it stands - for a villager still walking to its bed, "
+                    + "or one that can reach neither bed nor hearth.",
+                    new AcceptableValueRange<float>(.5f, 96f)));
 
             TravelObservedRange = config.Bind(
                 "3 - Off-screen simulation",

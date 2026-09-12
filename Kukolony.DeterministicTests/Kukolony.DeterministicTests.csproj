@@ -12,6 +12,7 @@
     <Compile Include="../Kukolony/Jobs/Placement.cs" Link="Placement.cs" />
     <Compile Include="../Kukolony/Jobs/Stacking.cs" Link="Stacking.cs" />
     <Compile Include="../Kukolony/Villagers/Navigation/Reckoning.cs" Link="Reckoning.cs" />
+    <Compile Include="../Kukolony/Villagers/Energy.cs" Link="Energy.cs" />
     <Compile Include="../Kukolony/Villagers/Navigation/Arrival.cs" Link="Arrival.cs" />
     <Compile Include="../Kukolony/Villagers/Navigation/Rescue.cs" Link="Rescue.cs" />
     <Compile Include="../Kukolony/Villagers/Navigation/Locomotor.cs" Link="Locomotor.cs" />

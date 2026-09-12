@@ -1,6 +1,7 @@
 using Kukolony.Colonies;
 using Kukolony.Jobs;
 using Kukolony.Villagers.Navigation;
+using Kukolony.Villagers;
 using Kukolony.Jobs.Haul;
 
 /// <summary>
@@ -56,6 +57,7 @@ static class Program
         Arriving();
         Rescuing();
         Locomoting();
+        Tiring();
 
         Console.WriteLine(_failed == 0
             ? $"RESULT: PASS ({_cases} cases)"
@@ -397,6 +399,44 @@ static class Program
         Case("control: nowhere to stand mid-journey still keeps covering ground",
             Locomotor.Decide(new TravelFacts(true, true, true, false, true, false, false))
                 == Locomotion.CoverGround);
+    }
+
+    /// <summary>Getting tired, recovering, and not flickering between the two.</summary>
+    static void Tiring()
+    {
+        Console.WriteLine("energy");
+
+        Case("an action costs what it costs",
+            Math.Abs(Energy.Spend(50f, 5f) - 45f) < .001f);
+        Case("a villager cannot be more tired than exhausted",
+            Math.Abs(Energy.Spend(3f, 5f)) < .001f);
+        Case("a free action costs nothing",
+            Math.Abs(Energy.Spend(50f, 0f) - 50f) < .001f);
+
+        Case("resting recovers with time",
+            Math.Abs(Energy.Recovered(50f, 10f, 2f) - 70f) < .001f);
+        Case("resting never goes past full",
+            Math.Abs(Energy.Recovered(95f, 100f, 2f) - Energy.Full) < .001f);
+        Case("no time passing recovers nothing",
+            Math.Abs(Energy.Recovered(50f, 0f, 2f) - 50f) < .001f);
+        Case("a negative span after a clock adjustment recovers nothing",
+            Math.Abs(Energy.Recovered(50f, -10f, 2f) - 50f) < .001f);
+
+        // The hysteresis, which is the whole reason there are two numbers. Tired below 20,
+        // rested above 60.
+        Case("a working villager keeps working until it is tired",
+            !Energy.ShouldRest(25f, false, 20f, 60f));
+        Case("and stops once it is",
+            Energy.ShouldRest(19f, false, 20f, 60f));
+        Case("a resting villager keeps resting past the point it stopped at",
+            Energy.ShouldRest(25f, true, 20f, 60f));
+        Case("and goes back to work once properly rested",
+            !Energy.ShouldRest(61f, true, 20f, 60f));
+
+        // Control: with one threshold this is the flicker. A villager that stopped at 20 and
+        // recovered a hundredth of a point would start work, spend one action, and stop again.
+        Case("control: the two thresholds genuinely differ, or a villager flickers",
+            Energy.ShouldRest(21f, true, 20f, 60f) && !Energy.ShouldRest(21f, false, 20f, 60f));
     }
 
     static void Burst(string what, int consecutive, float expected)

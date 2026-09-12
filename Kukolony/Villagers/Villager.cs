@@ -196,6 +196,12 @@ namespace Kukolony.Villagers
         private int _ticks;
         private float _tickTime;
 
+        /// <summary>Whether this rig can lie down, so a check can say which it is doing.</summary>
+        internal bool CanSleep => _animation != null && _animation.CanSleep;
+
+        /// <summary>This villager's durable identity, for anything that has to name it.</summary>
+        internal ZDOID Id => _nview != null && _nview.IsValid() ? _nview.GetZDO().m_uid : ZDOID.None;
+
         /// <summary>Whether this villager is partway through a journey longer than one hop.</summary>
         internal bool IsTravelling => _walk != null && _walk.Travelling;
 
@@ -561,6 +567,17 @@ namespace Kukolony.Villagers
             if (Time.time < _nextWorkTick) return _working;
 
             VillagerState state = State;
+
+            // Rest comes before work, and before the queue is even consulted. A tired villager
+            // has nothing useful to offer any job, and asking one for work it cannot do would
+            // burn a repetition to discover that.
+            if (Resting.Tick(this, colony, state, _walk, _animation, out string resting))
+            {
+                SetActivity(resting);
+                _working = true;
+                return true;
+            }
+
             List<Jobs.JobDefinition> jobs = colony.State.GetJobs();
             Jobs.JobDefinition job = Jobs.QueueRunner.Current(state, jobs);
             if (job == null)
@@ -571,6 +588,14 @@ namespace Kukolony.Villagers
 
             Jobs.JobResult result = Run(colony, job, state, out string doing);
             Jobs.QueueRunner.Apply(state, jobs, result);
+
+            // Work is paid for when something is actually decided - a finished trip, or a failed
+            // one. Not for Running, which is a step still in progress, and not for Skipped, which
+            // is a villager that found nothing to do and should not tire from looking.
+            if (result == Jobs.JobResult.Completed || result == Jobs.JobResult.Failed)
+            {
+                Resting.Spend(state);
+            }
 
             // Only a yield backs off. Everything else is progress, and progress should not be
             // made to wait.

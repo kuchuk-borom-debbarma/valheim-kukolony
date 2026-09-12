@@ -178,9 +178,18 @@ nothing useful it can do. It consumes no repetition and yields to the next entry
 Rest is triggered by energy alone, not by nightfall — a settlement works in shifts, and nobody is
 stranded until dusk.
 
-**The sleep animation must be measured, not assumed.** Valheim's bed sleeping is written for
-players and villagers are a creature rig. The name pool, the container ZDO and `VisEquipment`
-have each already turned out to differ from what the decompiled reference implied.
+**The sleep animation was measured, not assumed** — and the measurement is now a log line. The
+rig reports every animator parameter it has at startup, and it turns out to carry the player's
+own set: `attach_bed`, `lying_down`, `attach_chair`, `emote_sit` and the rest. So a villager
+lies in its bed with the game's real in-bed animation, and is placed on the bed facing the way
+the bed faces rather than standing politely beside it.
+
+A rig without one rests upright. That is a cosmetic shortfall, not a broken feature: the energy,
+the walking and the recovery are identical either way, and the check says which happened.
+
+**Recovery is counted in in-game hours**, not real seconds — four hours of sleep in a bed, ten at
+the hearth, twenty on the ground. A night's rest means a night of the world's time, so a server
+running long days gets long nights to match rather than villagers who wake at dawn regardless.
 
 ## Saying things without shouting
 

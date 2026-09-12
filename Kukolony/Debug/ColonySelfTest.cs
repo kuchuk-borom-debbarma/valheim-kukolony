@@ -172,6 +172,7 @@ namespace Kukolony.Debug
             yield return CheckHauling(report, colony, origin);
             yield return CheckTidying(report, colony, origin);
             yield return CheckWorkAreas(report, colony, origin);
+            yield return CheckResting(report, colony, origin);
             yield return CheckDistantTravel(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
@@ -722,6 +723,7 @@ namespace Kukolony.Debug
             }
 
             ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
             new VillagerState(view.GetZDO()).SetQueue(new List<string> { "haul" });
 
             // Plant a garment rather than relying on what this villager happened to be born
@@ -775,7 +777,8 @@ namespace Kukolony.Debug
 
             report.Check(inChest > 0,
                 "a villager hauls loose wood into the chest that asked for it",
-                $"inChest={inChest} doing='{doing}' holding='{holding}' " +
+                $"inChest={inChest} doing='{doing}' " +
+                $"energy={Resting.Now(new VillagerState(view.GetZDO())):0} holding='{holding}' " +
                 $"shedStatus={store.StatusIn(colony)} " +
                 $"woodGoesTo={SettlementIndex.WhereDoesItGo(colony, "Wood", origin).Count} place(s)");
 
@@ -815,6 +818,102 @@ namespace Kukolony.Debug
         ///         the control that says the measurement apparatus itself is sound.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     A tired villager stops, goes to bed, sleeps, and gets up again.
+        /// </summary>
+        /// <remarks>
+        ///     Energy is driven directly rather than by making a villager work until it tires,
+        ///     which would take an in-game night of real time. What is under test is the
+        ///     behaviour around the thresholds - stopping, walking to the right place, lying on
+        ///     it, recovering, and getting up - not the arithmetic, which is proven at a table.
+        /// </remarks>
+        private static IEnumerator CheckResting(TestReport report, Colony colony, Vector3 origin)
+        {
+            GameObject bedPiece = SpawnFirst(origin + new Vector3(-6f, 0f, 4f), "bed", "piece_bed02");
+            yield return new WaitForSecondsRealtime(.3f);
+
+            StructureRecord bed = bedPiece == null ? null : Register(colony, bedPiece, "A bed");
+            report.Check(bed != null, "rest check could place and register a bed",
+                $"placed={(bedPiece != null)}");
+            if (bed == null) yield break;
+
+            Villager sleeper = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (sleeper == null || !sleeper.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "rest check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            ColonyOperations.EditSettings(colony, bed.Id, s =>
+            {
+                s.Sleeper = who;
+                s.SleeperToken = Core.PersistentZdoReference.Ensure(view.GetZDO());
+            });
+
+            VillagerState state = new VillagerState(view.GetZDO());
+            report.Check(state.StoredEnergy > ModConfig.TiredBelow.Value,
+                "control: a new villager is rested rather than born exhausted",
+                $"energy={state.StoredEnergy:0}");
+
+            // Exhaust it and let it decide for itself what to do about that.
+            state.SetEnergy(1f);
+            state.SetResting(false);
+
+            string doing = string.Empty;
+            bool wentToBed = false;
+            for (int attempt = 0; attempt < 60 && !wentToBed; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                doing = sleeper.Activity;
+                wentToBed = doing == "sleeping";
+            }
+
+            report.Check(wentToBed, "a tired villager takes itself to bed and sleeps",
+                $"doing='{doing}' energy={Resting.Now(new VillagerState(view.GetZDO())):0}");
+
+            report.Check(Utils.DistanceXZ(sleeper.transform.position, bedPiece.transform.position) < 3f,
+                "control: it is asleep on its bed rather than standing somewhere near it",
+                $"{Utils.DistanceXZ(sleeper.transform.position, bedPiece.transform.position):0.0}m from the bed");
+
+            // The rig decides whether this can look right; say which, because a villager resting
+            // upright is a cosmetic shortfall and not a broken feature.
+            report.Note(sleeper.CanSleep
+                ? "the rig has a sleep animation and is using it"
+                : "the rig has no sleep animation; villagers rest upright");
+
+            // Recovering, and doing so from the bed's rate rather than the ground's.
+            VillagerState asleep = new VillagerState(view.GetZDO());
+            float before = Resting.Now(asleep);
+            yield return new WaitForSecondsRealtime(4f);
+            float after = Resting.Now(new VillagerState(view.GetZDO()));
+
+            report.Check(after > before, "a sleeping villager recovers energy",
+                $"{before:0.0} -> {after:0.0} in 4s");
+
+            // And gets up when rested, rather than sleeping forever.
+            new VillagerState(view.GetZDO()).SetEnergy(ModConfig.RestedAbove.Value + 5f);
+            bool woke = false;
+            for (int attempt = 0; attempt < 30 && !woke; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                woke = sleeper.Activity != "sleeping";
+            }
+
+            report.Check(woke, "a rested villager gets up again",
+                $"doing='{sleeper.Activity}'");
+
+            report.Check(!new VillagerState(view.GetZDO()).Resting,
+                "control: and stops being recorded as resting, so it is given work again",
+                $"resting={new VillagerState(view.GetZDO()).Resting}");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.RemoveStructure(bed.Id);
+            Release(bedPiece);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
         /// <summary>
         ///     A job pointed at an outpost works there and leaves the rest of the settlement alone.
         /// </summary>
@@ -882,18 +981,28 @@ namespace Kukolony.Debug
             }
 
             ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
             new VillagerState(view.GetZDO()).SetQueue(new List<string> { "outpost" });
 
             int delivered = 0;
-            for (int attempt = 0; attempt < 120 && delivered == 0; attempt++)
+            List<string> story = new List<string>();
+            // Long enough for the navmesh to be built for ground nobody has walked, which is
+            // most of half a minute, and then for the villager to walk thirty metres and back.
+            for (int attempt = 0; attempt < 240 && delivered == 0; attempt++)
             {
                 yield return new WaitForSecondsRealtime(.5f);
                 delivered = StructureInventory.Count(store.Id, "Wood");
+
+                // What it actually did, not just where it ended up. "Delivered nothing" is the
+                // same sentence whether it never found the work, never reached it, or reached it
+                // and could not pick it up.
+                if (story.Count == 0 || story[story.Count - 1] != hand.Activity) story.Add(hand.Activity);
             }
 
             report.Check(delivered > 0,
                 "a villager assigned to an outpost works there",
-                $"delivered={delivered} doing='{hand.Activity}'");
+                $"delivered={delivered} energy={Resting.Now(new VillagerState(view.GetZDO())):0} " +
+                $"did='{string.Join(" > ", story.ToArray())}'");
 
             // The half that proves the area is doing something: the log by the hearth, which any
             // unbounded hauler would have taken first because it was nearer.
@@ -910,6 +1019,27 @@ namespace Kukolony.Debug
             Release(shed);
             SweepLooseItems(colony);
             yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Sends a villager to work rested, for checks that are not about energy.
+        /// </summary>
+        /// <remarks>
+        ///     Fixture hygiene rather than hiding anything: a check controls the variables it is
+        ///     not testing. Energy is real and a villager that fails at something fifty times
+        ///     genuinely should tire - which is exactly what happened to the work-area check, and
+        ///     it failed reporting "resting", a true statement about a villager that had given up
+        ///     for entirely correct reasons. The energy each check ends with is reported either
+        ///     way, so exhaustion is never the silent explanation for a failure.
+        /// </remarks>
+        private static void SendRested(ZNetView view)
+        {
+            if (view == null || !view.IsValid()) return;
+
+            VillagerState state = new VillagerState(view.GetZDO());
+            state.SetResting(false);
+            state.SetRestRate(0f);
+            state.SetEnergy(Energy.Full);
         }
 
         /// <summary>Puts an item on the ground with an identity, the way a real drop has one.</summary>
@@ -1201,6 +1331,7 @@ namespace Kukolony.Debug
             }
 
             ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
             new VillagerState(view.GetZDO()).SetQueue(new List<string> { "tidy" });
 
             Container into = woodChest.GetComponentInChildren<Container>(true);

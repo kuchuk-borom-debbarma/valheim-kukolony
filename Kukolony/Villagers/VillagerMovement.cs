@@ -65,6 +65,29 @@ namespace Kukolony.Villagers
 
         internal static void Stop(MonsterAI ai) => ai.StopMoving();
 
+        /// <summary>
+        ///     Whether the pathfinder can offer any route at all to this point.
+        /// </summary>
+        /// <remarks>
+        ///     The difference between "the world is not ready" and "this villager is stuck", and
+        ///     the only honest way to tell them apart. No complete path usually means the navmesh
+        ///     tiles have not been built yet - measured at twenty-five seconds for new ground -
+        ///     whereas a complete path that the villager fails to follow is genuinely stuck.
+        ///     Asked only when about to give up, because it is a real query.
+        /// </remarks>
+        internal static bool HasCompletePath(MonsterAI ai, Vector3 target)
+        {
+            if (ai == null || Pathfinding.instance == null) return false;
+
+            // A COMPLETE path, deliberately. Walking follows partial paths and should - that is
+            // how Valheim streams a journey - but as evidence that the world is ready, a partial
+            // path proves nothing: one that ends at the villager's feet answers "yes, there is a
+            // path" while it stands still. Asking the strict question here is what separates
+            // "the navmesh is still building" from "this really is unreachable".
+            return Pathfinding.instance.GetPath(ai.transform.position, target, null,
+                ai.m_pathAgentType, requireFullPath: true, cleanup: false);
+        }
+
         /// <summary>What the pathfinder currently thinks, for a failure worth explaining.</summary>
         internal static string Explain(MonsterAI ai, Vector3 target)
         {

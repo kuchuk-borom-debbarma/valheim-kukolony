@@ -42,6 +42,10 @@ namespace Kukolony.Villagers
         private static readonly KeyValuePair<int, int> DestinationKey = ZDO.GetHashZDOID("kukolony.job.destination");
         private static readonly int DestinationTokenKey = "kukolony.job.destination.token".GetStableHashCode();
         private static readonly int CargoKey = "kukolony.job.cargo.v1".GetStableHashCode();
+        private static readonly int EnergyKey = "kukolony.energy.v1".GetStableHashCode();
+        private static readonly int EnergyAtKey = "kukolony.energy.at.v1".GetStableHashCode();
+        private static readonly int RestingKey = "kukolony.energy.resting.v1".GetStableHashCode();
+        private static readonly int RestRateKey = "kukolony.energy.rate.v1".GetStableHashCode();
 
         private readonly ZDO _zdo;
 
@@ -163,6 +167,54 @@ namespace Kukolony.Villagers
 
             SetCargo(manifest.Length == 0 ? prefab : manifest + "," + prefab);
         }
+
+        /// <summary>
+        ///     How much energy this villager had when its energy last changed, and when that was.
+        /// </summary>
+        /// <remarks>
+        ///     Two fields rather than one ticking number, because a villager nobody is watching
+        ///     must still be tiring and resting correctly - and because a settlement with no
+        ///     population cap cannot afford to tick anything per villager per frame. A villager
+        ///     that has never worked reads as fully rested, which is the right answer for one
+        ///     that has just been born.
+        /// </remarks>
+        internal float StoredEnergy => _zdo?.GetFloat(EnergyKey, Energy.Full) ?? Energy.Full;
+
+        internal double EnergyAt => _zdo?.GetLong(EnergyAtKey, 0L) ?? 0d;
+
+        /// <summary>Whether it is currently resting, which decides which threshold applies.</summary>
+        internal bool Resting => _zdo?.GetBool(RestingKey, false) ?? false;
+
+        /// <summary>
+        ///     Records energy and the moment it was true.
+        /// </summary>
+        /// <remarks>
+        ///     The stamp is written here rather than at call sites, so no future caller can
+        ///     record a value without recording when - which would make it decay from the wrong
+        ///     instant, silently and forever after.
+        /// </remarks>
+        internal void SetEnergy(float energy)
+        {
+            if (_zdo == null) return;
+
+            _zdo.Set(EnergyKey, energy);
+            _zdo.Set(EnergyAtKey, ZNet.instance == null ? 0L : (long)ZNet.instance.GetTimeSeconds());
+        }
+
+        internal void SetResting(bool resting) => _zdo?.Set(RestingKey, resting);
+
+        /// <summary>
+        ///     How fast energy is coming back, so the sum can be done on demand.
+        /// </summary>
+        /// <remarks>
+        ///     Stored because the rate changes during a rest - a villager walking to its bed
+        ///     recovers at the slowest rate, and at the bed's rate once it lies down. Recording
+        ///     the rate alongside the value and the time is what lets all of this stay three
+        ///     numbers and one multiplication rather than something that has to be ticked.
+        /// </remarks>
+        internal float RestRate => _zdo?.GetFloat(RestRateKey, 0f) ?? 0f;
+
+        internal void SetRestRate(float rate) => _zdo?.Set(RestRateKey, rate);
 
         /// <summary>Net time the current target was taken, so a stuck claim expires.</summary>
         internal double ClaimedSince => _zdo?.GetLong(ClaimedSinceKey, 0L) ?? 0L;

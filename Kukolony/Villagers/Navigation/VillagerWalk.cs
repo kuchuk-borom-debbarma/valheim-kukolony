@@ -212,14 +212,28 @@ namespace Kukolony.Villagers.Navigation
             // getting it wrong is not obvious from reading it: four different versions of this
             // looked right while leaving a villager walking into a rock, gliding home in plain
             // sight, or doing neither for five minutes.
-            bool canStand = !_journey.Travelling || _journey.CanStand(_ai.m_character);
+            // Being stuck qualifies a villager for help wherever it is standing. The rescue
+            // ladder used to require a journey longer than the settlement is wide, which meant a
+            // villager stuck twenty-six metres from a log it could see got nothing at all: no
+            // rescue, and after the patience above ran out, a failure every few seconds until it
+            // had tired itself out and gone to bed without delivering anything. Distance decides
+            // whether the ground ahead needs holding open, not whether somebody deserves helping.
+            // ...but you cannot be stuck where you were going. Without the second half, a
+            // villager that had arrived stopped making progress, was therefore "stuck", and kept
+            // itself eligible for a rescue that never ended - so it finished its journey sliding
+            // rather than standing, which is the one thing covering ground unseen must not do.
+            bool stuck = StalledFor > RescueAfterSeconds &&
+                         Utils.DistanceXZ(target, _ai.transform.position) > stopDistance;
+            bool onJourney = _journey.Travelling || stuck;
+
+            bool canStand = !onJourney || _journey.CanStand(_ai.m_character);
 
             TravelFacts facts = new TravelFacts(
                 rescuing: _reckoning,
-                travelling: _journey.Travelling,
+                travelling: onJourney,
                 burstSpent: Time.time >= _reckonUntil,
                 observed: _journey.Observed(_ai.transform.position),
-                stalled: StalledFor > RescueAfterSeconds,
+                stalled: stuck,
                 politeRescuesLeft: _rescues < RescuesBeforeGliding,
                 canStand: canStand);
 
@@ -321,7 +335,7 @@ namespace Kukolony.Villagers.Navigation
             // target yet. There is nothing to conclude from it either way.
             if (stepped != MoveResult.Moving && Time.time < _graceUntil) return MoveResult.Moving;
 
-            float patience = _journey.Travelling ? StallSeconds : NearbyStallSeconds;
+            float patience = onJourney ? StallSeconds : NearbyStallSeconds;
             switch (Arrival.Judge(stepped != MoveResult.Moving, distance, stopDistance,
                         StalledFor, patience))
             {
@@ -329,6 +343,23 @@ namespace Kukolony.Villagers.Navigation
                     return MoveResult.Arrived;
 
                 case Approaching.GaveUp:
+                    // Before giving up, ask whether there is a route at all. No route usually
+                    // means the navmesh has not been built for this ground yet, which takes about
+                    // twenty-five seconds and is not the villager's fault; a route that exists
+                    // while it fails to follow one is genuinely stuck and should fail quickly so
+                    // the job can pick something else.
+                    //
+                    // Distance used to decide this, and short errands got four seconds - which is
+                    // nowhere near long enough for new ground. A villager hauling thirty metres to
+                    // an outpost failed forty times in a minute, tired itself out, and went to bed
+                    // without delivering anything. Every one of those failures was the world still
+                    // loading.
+                    if (StalledFor < RescueAfterSeconds &&
+                        !VillagerMovement.HasCompletePath(_ai, _legStanding))
+                    {
+                        return MoveResult.Moving;
+                    }
+
                     return MoveResult.PathFailed;
 
                 default:
