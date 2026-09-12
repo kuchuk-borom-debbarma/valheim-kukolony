@@ -33,7 +33,11 @@ namespace Kukolony.KeepAlive
         /// </summary>
         internal static void Clear() => Zones.Clear();
 
-        /// <summary>How many anchors the cap refused on the last rebuild, for checks.</summary>
+        /// <summary>
+        ///     How many anchors the cap refused or truncated on the last rebuild, for checks.
+        ///     An anchor whose zones were all already held by something else costs nothing
+        ///     and is never counted - only an anchor that needed ground it could not get.
+        /// </summary>
         internal static int DroppedAnchors => _dropped;
 
         private static int _dropped;
@@ -71,42 +75,31 @@ namespace Kukolony.KeepAlive
             bool capped = false;
             int dropped = 0;
 
-            int haloSize = (rings * 2 + 1) * (rings * 2 + 1);
-
             foreach (Vector3 position in villagerPositions)
             {
                 // All-or-nothing per villager. Applying the cap mid-halo could leave a
                 // villager holding a couple of neighbour zones but not the one it is
                 // standing in - paying the loading cost while not being kept alive at all.
-                if (Zones.Count + haloSize > cap)
+                if (!TryHoldHalo(position, rings, cap))
                 {
                     capped = true;
                     dropped++;
-                    continue;
-                }
-
-                Vector2s centre = ZoneSystem.GetZone(position);
-
-                for (int y = -rings; y <= rings; y++)
-                {
-                    for (int x = -rings; x <= rings; x++)
-                    {
-                        Zones.Add(new Vector2s((short)(centre.x + x), (short)(centre.y + y)));
-                    }
                 }
             }
 
             // Circles: every zone the circle touches, plus one ring of neighbours so the
             // edge of an outpost is walkable ground rather than a cliff into nothing.
             //
-            // Filled nearest the anchor first, and truncated rather than refused. The
-            // all-or-nothing rule that is right for a villager's halo is wrong here: the
-            // config allows radii whose footprint alone exceeds the cap, and a circle
-            // refused wholesale meant the largest outposts - the ones a flag exists for -
-            // were exactly the ones holding nothing open, while reach went on reporting
-            // their ground Ready. A truncated circle keeps the flag and the ground closest
-            // to it, which degrades instead of vanishing.
-            List<Vector2s> circle = new List<Vector2s>();
+            // When they all fit they are simply added. When the cap binds they are grown
+            // together, each nearest its anchor first, one zone per circle per turn: every
+            // hearth and flag keeps its centre and what drops is every circle's far edge.
+            // Filling one circle to the cap before starting the next handed whole colonies
+            // to enumeration order - the first big outpost packed the set solid and the
+            // second Kolony's hearth held nothing open at all, silently, while reach went
+            // on reporting its ground Ready.
+            List<List<Vector2s>> circles = new List<List<Vector2s>>();
+            List<Vector3> anchors = new List<Vector3>();
+            int wanted = 0;
             foreach (Vector4 area in areas)
             {
                 Vector3 at = new Vector3(area.x, area.y, area.z);
@@ -115,7 +108,7 @@ namespace Kukolony.KeepAlive
                 Vector2s low = ZoneSystem.GetZone(at - new Vector3(reach, 0f, reach));
                 Vector2s high = ZoneSystem.GetZone(at + new Vector3(reach, 0f, reach));
 
-                circle.Clear();
+                List<Vector2s> circle = new List<Vector2s>();
                 for (short y = low.y; y <= high.y; y++)
                 {
                     for (short x = low.x; x <= high.x; x++)
@@ -127,45 +120,74 @@ namespace Kukolony.KeepAlive
                         float dz = Mathf.Max(Mathf.Abs(at.z - zoneCentre.z) - 32f, 0f);
                         if (dx * dx + dz * dz > reach * reach) continue;
 
-                        circle.Add(new Vector2s(x, y));
+                        Vector2s zone = new Vector2s(x, y);
+                        if (!Zones.Contains(zone)) wanted++;
+                        circle.Add(zone);
                     }
                 }
 
-                circle.Sort((a, b) =>
-                    SquaredZoneDistance(a, at).CompareTo(SquaredZoneDistance(b, at)));
+                circles.Add(circle);
+                anchors.Add(at);
+            }
 
-                foreach (Vector2s zone in circle)
+            if (Zones.Count + wanted <= cap)
+            {
+                // Everything fits, so there is no ordering to argue about and nothing to
+                // sort. `wanted` may double-count a zone two circles share, which can only
+                // send fitting work down the fair path below - never admit overflowing work
+                // up here.
+                foreach (List<Vector2s> circle in circles)
                 {
-                    if (Zones.Contains(zone)) continue;
-                    if (Zones.Count >= cap)
+                    foreach (Vector2s zone in circle) Zones.Add(zone);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < circles.Count; i++)
+                {
+                    Vector3 at = anchors[i];
+                    circles[i].Sort((a, b) =>
+                        SquaredZoneDistance(a, at).CompareTo(SquaredZoneDistance(b, at)));
+                }
+
+                for (int turn = 0; Zones.Count < cap; turn++)
+                {
+                    bool any = false;
+                    foreach (List<Vector2s> circle in circles)
                     {
-                        // Sorted nearest-first, so everything not yet added is the far edge.
+                        if (turn >= circle.Count) continue;
+
+                        any = true;
+                        Vector2s zone = circle[turn];
+                        if (Zones.Contains(zone) || Zones.Count >= cap) continue;
+
+                        Zones.Add(zone);
+                    }
+
+                    if (!any) break;
+                }
+
+                // What each circle could not get, counted honestly: a circle is truncated
+                // only if it needed ground it does not hold.
+                foreach (List<Vector2s> circle in circles)
+                {
+                    foreach (Vector2s zone in circle)
+                    {
+                        if (Zones.Contains(zone)) continue;
+
                         capped = true;
                         dropped++;
                         break;
                     }
-
-                    Zones.Add(zone);
                 }
             }
 
             foreach (Vector3 position in structurePositions)
             {
-                if (Zones.Count + haloSize > cap)
+                if (!TryHoldHalo(position, rings, cap))
                 {
                     capped = true;
                     dropped++;
-                    continue;
-                }
-
-                Vector2s centre = ZoneSystem.GetZone(position);
-
-                for (int y = -rings; y <= rings; y++)
-                {
-                    for (int x = -rings; x <= rings; x++)
-                    {
-                        Zones.Add(new Vector2s((short)(centre.x + x), (short)(centre.y + y)));
-                    }
                 }
             }
 
@@ -187,6 +209,47 @@ namespace Kukolony.KeepAlive
                     Log.Info("[KeepAlive] back under the zone cap.");
                 }
             }
+        }
+
+        /// <summary>
+        ///     Holds a point anchor's halo open, whole or not at all. False means the cap
+        ///     refused it.
+        /// </summary>
+        /// <remarks>
+        ///     The cost is counted against what is already held, not against the halo's
+        ///     nominal size: a structure standing inside an already-kept circle needs no new
+        ///     zones and must not be reported dropped for standing at a cap it never
+        ///     consumed - which is exactly what a truncated outpost circle made every chest
+        ///     inside it look like.
+        /// </remarks>
+        private static bool TryHoldHalo(Vector3 position, int rings, int cap)
+        {
+            Vector2s centre = ZoneSystem.GetZone(position);
+
+            int missing = 0;
+            for (int y = -rings; y <= rings; y++)
+            {
+                for (int x = -rings; x <= rings; x++)
+                {
+                    if (!Zones.Contains(new Vector2s((short)(centre.x + x), (short)(centre.y + y))))
+                    {
+                        missing++;
+                    }
+                }
+            }
+
+            if (missing == 0) return true;
+            if (Zones.Count + missing > cap) return false;
+
+            for (int y = -rings; y <= rings; y++)
+            {
+                for (int x = -rings; x <= rings; x++)
+                {
+                    Zones.Add(new Vector2s((short)(centre.x + x), (short)(centre.y + y)));
+                }
+            }
+
+            return true;
         }
 
         /// <summary>How far a zone's centre sits from an anchor, for nearest-first filling.</summary>

@@ -64,6 +64,12 @@ namespace Kukolony.Gui
                 return;
             }
 
+            // A joined client's registry is not fed by the keep-alive driver; without this
+            // the map showed no settlements at all until the flag screen happened to run a
+            // sweep. Throttled inside the registry, so this costs nothing where the driver
+            // already keeps the list fresh.
+            ColonyRegistry.EnsureFresh(this);
+
             if (Time.time >= _nextRefresh)
             {
                 _nextRefresh = Time.time + RefreshSeconds;

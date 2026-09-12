@@ -97,7 +97,7 @@ namespace Kukolony
                 new ConfigDescription(
                     "Default reach of a Kolony Flag, in metres. Each placed flag can be given its own "
                     + "radius from its screen; this is what a fresh one starts with.",
-                    new AcceptableValueRange<float>(8f, 256f)));
+                    new AcceptableValueRange<float>(Colonies.WorkFlag.MinRadius, Colonies.WorkFlag.MaxRadius)));
 
             ColonyRadius = config.Bind("1 - Kolony", nameof(ColonyRadius), 48f,
                 new ConfigDescription("Live registration radius around a Kolony Hearth. Registered records outside it remain visible but are ineligible.", new AcceptableValueRange<float>(8f, 128f)));

@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Generic;
 using Jotunn.Managers;
 using Kukolony.Colonies;
@@ -34,7 +33,7 @@ namespace Kukolony.Gui
         private GameObject _content;
         private WorkFlag _flag;
         private bool _blocked;
-        private bool _scanning;
+        private bool _awaitingSweep;
         private int _page;
 
         internal static void Register() => GUIManager.OnCustomGUIAvailable += Rebuild;
@@ -60,37 +59,17 @@ namespace Kukolony.Gui
                 return;
             }
 
+            // The sweep is asked for before the first Refresh, or the multi-frame scan
+            // runs while the screen shows the definitive "No Kolony exists yet" instead
+            // of saying it is looking.
+            ColonyRegistry.EnsureFresh(_instance);
+            _instance._awaitingSweep = ColonyRegistry.Sweeping;
+
             _instance._flag = flag;
             _instance._page = 0;
             _instance._root.SetActive(true);
             _instance.Block(true);
             _instance.Refresh();
-            _instance.EnsureScanned();
-        }
-
-        /// <summary>
-        ///     Sweeps for hearths when none are known yet.
-        /// </summary>
-        /// <remarks>
-        ///     The registry is normally filled by the keep-alive driver's scan - which runs
-        ///     only on the server, and only while the feature is enabled. A client on a
-        ///     dedicated server, or anyone with keep-alive off, opened this screen to "No
-        ///     Kolony exists yet" with hearths standing in the world. The screen is the
-        ///     other thing that needs the list, so it sweeps for itself.
-        /// </remarks>
-        private void EnsureScanned()
-        {
-            if (_scanning || ColonyRegistry.KnownColonies > 0) return;
-
-            _scanning = true;
-            StartCoroutine(ScanThenRefresh());
-        }
-
-        private IEnumerator ScanThenRefresh()
-        {
-            yield return ColonyRegistry.Scan();
-            _scanning = false;
-            if (_root != null && _root.activeSelf && _flag != null) Refresh();
         }
 
         private void Build()
@@ -118,6 +97,13 @@ namespace Kukolony.Gui
                 return;
             }
 
+            // The sweep the open kicked off has landed; show what it found.
+            if (_awaitingSweep && !ColonyRegistry.Sweeping)
+            {
+                _awaitingSweep = false;
+                Refresh();
+            }
+
             // The flag being destroyed under the open screen - broken by an enemy, or
             // hammered away by the player - leaves every row describing a thing that is
             // gone. Same rule as the Kolony screen: close, and say why.
@@ -140,15 +126,7 @@ namespace Kukolony.Gui
         /// <summary>Destroy-and-rebuild, never diffing, as every screen here is.</summary>
         private void Refresh()
         {
-            foreach (Transform child in Children(_content.transform))
-            {
-                Destroy(child.gameObject);
-            }
-
-            // Children die at the end of the frame, so without this the new rows are laid
-            // out alongside the old ones for a frame - the same flicker the Kolony screen's
-            // rebuild already guards against.
-            _content.transform.DetachChildren();
+            Widgets.ClearChildren(_content.transform);
 
             Widgets.Title(_content.transform, "Kolony Flag");
 
@@ -161,7 +139,8 @@ namespace Kukolony.Gui
 
             if (column.TryRow(out Row radius))
             {
-                Widgets.Number(radius, "How far it reaches", _flag.Radius, 8f, 256f, 8f,
+                Widgets.Number(radius, "How far it reaches", _flag.Radius,
+                    WorkFlag.MinRadius, WorkFlag.MaxRadius, 8f,
                     value => $"{value:0} m",
                     value =>
                     {
@@ -170,12 +149,23 @@ namespace Kukolony.Gui
                     });
             }
 
+            // Counted over the hearths that still resolve, not the raw list: a destroyed
+            // hearth's stale entry used to suppress this row while the per-row filter
+            // below rendered nothing, which read as an unexplained empty screen.
             IReadOnlyList<ZDO> known = ColonyRegistry.GetKnownColonies();
-            if (known.Count == 0 && column.TryRow(out Row none))
+            bool anyValid = false;
+            foreach (ZDO hearth in known)
             {
-                Widgets.Label(none, _scanning
-                    ? "Looking for Kolonies..."
-                    : "No Kolony exists yet. Place a Kolony Hearth first.", Color.gray);
+                if (hearth != null && hearth.IsValid())
+                {
+                    anyValid = true;
+                    break;
+                }
+            }
+
+            if (!anyValid && column.TryRow(out Row none))
+            {
+                Widgets.Label(none, EmptyListExplanation(), Color.gray);
             }
 
             foreach (ZDO hearth in known)
@@ -213,29 +203,18 @@ namespace Kukolony.Gui
                 return;
             }
 
-            if (column.Pages > 1)
+            Widgets.Pager(_content.transform, _page, column.Pages, page =>
             {
-                Row pager = new Row(_content.transform, Panel.PagerY);
-                Widgets.Caption(pager, string.Empty, 260f);
-                Widgets.Button(pager, "<", 60f, () =>
-                {
-                    _page = Mathf.Max(0, _page - 1);
-                    Refresh();
-                });
-                Widgets.Caption(pager, $"{_page + 1} / {column.Pages}", 90f);
-                Widgets.Button(pager, ">", 60f, () =>
-                {
-                    _page = Mathf.Min(column.Pages - 1, _page + 1);
-                    Refresh();
-                });
-            }
+                _page = page;
+                Refresh();
+            });
 
             // The footer, not a column row: a row has to fit on the current page, and a
             // world with more Kolonies than fit one page silently never rendered Close,
             // leaving Escape as the only way out.
             Row footer = new Row(_content.transform, Panel.FooterY);
             Widgets.Caption(footer, string.Empty, 260f);
-            Widgets.Button(footer, "Close", 160f, Close);
+            Widgets.Button(footer, "Close", 140f, Close);
         }
 
         private void Block(bool value)
@@ -246,11 +225,24 @@ namespace Kukolony.Gui
             GUIManager.BlockInput(value);
         }
 
-        private static List<Transform> Children(Transform parent)
+        /// <summary>
+        ///     What an empty Kolony list means, told honestly per peer.
+        /// </summary>
+        /// <remarks>
+        ///     A joined client only ever sees ZDOs the server replicated near some player,
+        ///     so a hearth nobody has stood near this session simply is not here to find -
+        ///     the sweep cannot fix that, and claiming "no Kolony exists" beside a standing
+        ///     hearth is the screen lying about the world. The host's answer stays
+        ///     definitive, because the host sees everything.
+        /// </remarks>
+        private static string EmptyListExplanation()
         {
-            List<Transform> children = new List<Transform>(parent.childCount);
-            foreach (Transform child in parent) children.Add(child);
-            return children;
+            if (ColonyRegistry.Sweeping) return "Looking for Kolonies...";
+
+            return ZNet.instance != null && !ZNet.instance.IsServer()
+                ? "No Kolony known here yet. A far-off hearth appears once someone has been near it - or ask the host."
+                : "No Kolony exists yet. Place a Kolony Hearth first.";
         }
+
     }
 }

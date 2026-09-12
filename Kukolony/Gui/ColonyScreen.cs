@@ -304,15 +304,7 @@ namespace Kukolony.Gui
                 return;
             }
 
-            foreach (Transform child in Children(_content.transform))
-            {
-                Object.Destroy(child.gameObject);
-            }
-
-            // Children are destroyed at the end of the frame, so the new rows would be built
-            // alongside the old ones and the audit would see both. Detaching now makes the
-            // rebuild immediate from the layout's point of view.
-            _content.transform.DetachChildren();
+            Widgets.ClearChildren(_content.transform);
 
             Widgets.Title(_content.transform, screen.Title);
             string subtitle = screen.Subtitle;
@@ -342,22 +334,11 @@ namespace Kukolony.Gui
 
         private void BuildFooter(Column column)
         {
-            if (column.Pages > 1)
+            Widgets.Pager(_content.transform, Page, column.Pages, page =>
             {
-                Row pager = new Row(_content.transform, Panel.PagerY);
-                Widgets.Caption(pager, string.Empty, 260f);
-                Widgets.Button(pager, "<", 60f, () =>
-                {
-                    Page = Page - 1;
-                    Refresh();
-                });
-                Widgets.Caption(pager, $"{Page + 1} / {column.Pages}", 90f);
-                Widgets.Button(pager, ">", 60f, () =>
-                {
-                    Page = Mathf.Min(column.Pages - 1, Page + 1);
-                    Refresh();
-                });
-            }
+                Page = page;
+                Refresh();
+            });
 
             Row footer = new Row(_content.transform, Panel.FooterY);
             Widgets.Caption(footer, string.Empty, 260f);
@@ -423,17 +404,6 @@ namespace Kukolony.Gui
 
             _blocked = value;
             GUIManager.BlockInput(value);
-        }
-
-        private static List<Transform> Children(Transform parent)
-        {
-            List<Transform> children = new List<Transform>(parent.childCount);
-            foreach (Transform child in parent)
-            {
-                children.Add(child);
-            }
-
-            return children;
         }
 
         /// <summary>One entry on the back stack: a screen, and where the player had paged to.</summary>

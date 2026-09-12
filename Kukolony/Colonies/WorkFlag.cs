@@ -29,6 +29,16 @@ namespace Kukolony.Colonies
     /// </remarks>
     internal sealed class WorkFlag : MonoBehaviour, Hoverable, Interactable
     {
+        /// <summary>
+        ///     The radius a flag may have, bounding the config default, the screen's slider
+        ///     and - through <see cref="RadiusOf" /> - whatever a ZDO happens to carry. The
+        ///     keep-alive walks every zone a circle touches once a second, so a number from
+        ///     an older build or another mod must not be allowed to make that walk unbounded.
+        /// </summary>
+        internal const float MinRadius = 8f;
+
+        internal const float MaxRadius = 256f;
+
         private static readonly int RadiusKey = "kukolony.flag.radius.v1".GetStableHashCode();
 
         private ZNetView _nview;
@@ -54,7 +64,7 @@ namespace Kukolony.Colonies
         {
             float configured = ModConfig.FlagRadius != null ? ModConfig.FlagRadius.Value : 48f;
             float stored = zdo?.GetFloat(RadiusKey, 0f) ?? 0f;
-            return stored > 0f ? stored : configured;
+            return Mathf.Clamp(stored > 0f ? stored : configured, MinRadius, MaxRadius);
         }
 
         internal void SetRadius(float radius)
@@ -66,7 +76,7 @@ namespace Kukolony.Colonies
             // happen to own the flag's zone: the screen's slider snapped back to the old
             // number with nothing said, which reads as a broken control.
             _nview.ClaimOwnership();
-            _nview.GetZDO().Set(RadiusKey, Mathf.Max(8f, radius));
+            _nview.GetZDO().Set(RadiusKey, Mathf.Clamp(radius, MinRadius, MaxRadius));
         }
 
         public string GetHoverName() => "$kukolony_flag";

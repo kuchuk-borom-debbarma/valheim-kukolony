@@ -32,6 +32,7 @@ namespace Kukolony.Colonies
         private sealed class Snapshot
         {
             internal int Revision;
+            internal int ResolvedFrame = -1;
             internal readonly List<ZDOID> Flags = new List<ZDOID>();
             internal readonly List<Vector4> Areas = new List<Vector4>();
         }
@@ -62,8 +63,11 @@ namespace Kukolony.Colonies
         }
 
         /// <summary>
-        ///     The claimed flags' circles, as (x, y, z, radius), for anyone who needs the
-        ///     shapes themselves — the keep-alive holds their zones open with this.
+        ///     The claimed flags' circles, as (x, y, z, radius). Valid until the next ask
+        ///     for any colony — read it, do not keep it: the list is a per-snapshot scratch
+        ///     buffer rebuilt in place. Callers that outlive an ask (the keep-alive walks
+        ///     hearth ZDOs on its own cadence) go through <see cref="CollectFlagAreas" />,
+        ///     which copies into a list they own.
         /// </summary>
         internal static IReadOnlyList<Vector4> FlagAreas(Colony colony)
         {
@@ -85,13 +89,20 @@ namespace Kukolony.Colonies
                 Snapshots[key] = cached;
             }
 
-            // Resolved on every ask, never frozen into the snapshot: a flag whose ZDO was
+            // Resolved once per frame, never frozen into the snapshot: a flag whose ZDO was
             // momentarily unresolved is retried rather than staying a hole in reach until
-            // some unrelated structure edit, and an edited radius answers immediately.
-            cached.Areas.Clear();
-            foreach (ZDOID id in cached.Flags)
+            // some unrelated structure edit, and an edited radius answers by the next frame.
+            // Once per frame rather than once per ask, because reach is asked per record per
+            // candidate inside index rebuilds - resolving the same flags for every question
+            // in a pass would put ZDO lookups back on the hot path the cache exists for.
+            if (cached.ResolvedFrame != Time.frameCount)
             {
-                if (TryCircle(id, out Vector4 circle)) cached.Areas.Add(circle);
+                cached.ResolvedFrame = Time.frameCount;
+                cached.Areas.Clear();
+                foreach (ZDOID id in cached.Flags)
+                {
+                    if (TryCircle(id, out Vector4 circle)) cached.Areas.Add(circle);
+                }
             }
 
             return cached.Areas;

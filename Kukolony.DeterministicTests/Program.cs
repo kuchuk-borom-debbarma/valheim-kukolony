@@ -379,12 +379,18 @@ static class Program
         Case("watched and genuinely blocked, the stall ladder still takes over",
             Locomotor.Decide(new TravelFacts(false, true, false, true, true, true, true,
                 waterAhead: true)) == Locomotion.PutBackOnNavmesh);
-        Case("a crossing does not hand back onto its feet in the middle of the sea",
-            Locomotor.Decide(new TravelFacts(true, true, true, true, true, true, true,
+        Case("an unseen crossing does not hand back onto its feet in the middle of the sea",
+            Locomotor.Decide(new TravelFacts(true, true, true, false, true, true, true,
                 waterAhead: true)) == Locomotion.CoverGround);
         Case("control: the same crossing with land ahead comes back on foot",
-            Locomotor.Decide(new TravelFacts(true, true, true, true, true, true, true))
+            Locomotor.Decide(new TravelFacts(true, true, true, false, true, true, true))
                 == Locomotion.BackOnFoot);
+        Case("a player walking up to a crossing sees it land where landing is possible",
+            Locomotor.Decide(new TravelFacts(true, true, false, true, true, true, true,
+                waterAhead: true)) == Locomotion.BackOnFoot);
+        Case("control: watched mid-sea with nowhere to stand still keeps going",
+            Locomotor.Decide(new TravelFacts(true, true, false, true, true, true, false,
+                waterAhead: true)) == Locomotion.CoverGround);
         Case("water near home is not a journey and is not crossed",
             Locomotor.Decide(new TravelFacts(false, false, false, true, false, true, true,
                 waterAhead: true)) == Locomotion.Walk);

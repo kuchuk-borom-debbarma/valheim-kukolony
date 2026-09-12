@@ -104,10 +104,13 @@ namespace Kukolony.Villagers.Navigation
                 // Otherwise stop when the rescue is spent, or when somebody can see it and it has
                 // not yet earned the right to be seen doing this - but only where there is ground
                 // to stand on. Otherwise keep going, because the alternative is standing still.
-                // Never back on foot into the sea: while the route ahead is water, the
-                // crossing continues whatever a burst timer or a watching player would
-                // otherwise prefer. The landing is what CanStand is for.
-                if (facts.WaterAhead) return Locomotion.CoverGround;
+                // Never back on foot into the sea unseen: while the route ahead is water and
+                // nobody watches, the crossing continues whatever a burst timer would prefer.
+                // The landing is what CanStand is for. But a watched crossing follows the same
+                // rules as every other watched rescue below - a player walking up to a villager
+                // mid-crossing must see it land where landing is possible, not glide onward
+                // because the chord to its waypoint still clips water.
+                if (facts.WaterAhead && !facts.Observed) return Locomotion.CoverGround;
 
                 bool wantsToWalk = facts.BurstSpent || (facts.Observed && facts.PoliteRescuesLeft);
 

@@ -83,7 +83,60 @@ namespace Kukolony.Colonies
         }
 
         internal static IReadOnlyList<ZDO> GetKnownColonies() => ColonyZdos;
-        internal static void Clear() => ColonyZdos.Clear();
+
+        internal static void Clear()
+        {
+            ColonyZdos.Clear();
+
+            // A fresh world deserves a fresh sweep, not the tail of the last one's timer.
+            _nextSweep = 0f;
+        }
+
+        /// <summary>Whether a sweep is in flight, for screens that want to say "looking".</summary>
+        internal static bool Sweeping => _sweeping;
+
+        private static bool _sweeping;
+        private static float _nextSweep;
+
+        /// <summary>How stale the registry may go on peers the keep-alive driver ignores.</summary>
+        private const float SweepSeconds = 10f;
+
+        /// <summary>
+        ///     Rescans if the registry may be stale, throttled. Any consumer may poke this
+        ///     from its own Update; the registry is static, so the caller lends the body the
+        ///     coroutine runs on.
+        /// </summary>
+        /// <remarks>
+        ///     This is what fills the list for everyone the keep-alive driver does not: a
+        ///     joined client, and anyone with the feature off. Left to the driver alone, the
+        ///     flag screen and the map pins read an empty registry forever on exactly those
+        ///     peers. Where the driver already sweeps on its own timer this stands down, so
+        ///     the server never runs the scan twice. A one-shot ("only when empty") gate is
+        ///     deliberately not used - it froze the list at its first answer, so a hearth
+        ///     built afterwards never appeared and a destroyed one never left.
+        /// </remarks>
+        internal static void EnsureFresh(MonoBehaviour host)
+        {
+            if (host == null || _sweeping || Time.time < _nextSweep) return;
+            if (ZNet.instance == null || ZDOMan.instance == null) return;
+            if (ModConfig.KeepAliveEnabled.Value && ZNet.instance.IsServer()) return;
+
+            _sweeping = true;
+            _nextSweep = Time.time + SweepSeconds;
+            host.StartCoroutine(Sweep());
+        }
+
+        private static IEnumerator Sweep()
+        {
+            try
+            {
+                yield return Scan();
+            }
+            finally
+            {
+                _sweeping = false;
+            }
+        }
 
         /// <summary>
         ///     Sweeps the world for colony hearths without instantiating any. Iterative so

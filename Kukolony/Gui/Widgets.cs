@@ -141,6 +141,44 @@ namespace Kukolony.Gui
             Button(row, string.IsNullOrEmpty(chosen) ? "Choose..." : chosen, width, onOpen);
         }
 
+        /// <summary>
+        ///     Tears a rebuilt panel's content down, immediately from the layout's point of
+        ///     view.
+        /// </summary>
+        /// <remarks>
+        ///     Destroy only takes effect at the end of the frame, so without the detach the
+        ///     new rows are built alongside the old ones for a frame and the layout audit
+        ///     sees both. Iterating the live children is safe precisely because the destroy
+        ///     is deferred; the detach afterwards is what makes it immediate. One shared
+        ///     teardown, because the flag screen copied the Kolony screen's and shipped
+        ///     without the detach.
+        /// </remarks>
+        internal static void ClearChildren(Transform parent)
+        {
+            foreach (Transform child in parent)
+            {
+                UnityEngine.Object.Destroy(child.gameObject);
+            }
+
+            parent.DetachChildren();
+        }
+
+        /// <summary>
+        ///     The page-turning row, when there is anything to turn. One builder, because
+        ///     two hand-copied pagers had already drifted (clamping inline vs in a setter)
+        ///     within a single commit of each other.
+        /// </summary>
+        internal static void Pager(Transform parent, int page, int pages, Action<int> turn)
+        {
+            if (pages <= 1) return;
+
+            Row row = new Row(parent, Panel.PagerY);
+            Caption(row, string.Empty, 260f);
+            Button(row, "<", 60f, () => turn(Mathf.Max(0, page - 1)));
+            Caption(row, $"{page + 1} / {pages}", 90f);
+            Button(row, ">", 60f, () => turn(Mathf.Min(pages - 1, page + 1)));
+        }
+
         internal static Text Title(Transform parent, string text) =>
             Text(parent, text, 0f, Panel.TitleY, TitleSize, Panel.ContentWidth, TextAnchor.MiddleCenter);
 

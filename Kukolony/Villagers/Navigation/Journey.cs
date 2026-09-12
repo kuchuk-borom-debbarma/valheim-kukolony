@@ -64,9 +64,13 @@ namespace Kukolony.Villagers.Navigation
         private const float ProbeStep = 12f;
 
         /// <summary>
-        ///     How far under the surface ground must sit before it counts as water. A ford a
-        ///     villager can wade through on foot is not a crossing, and counting any depth at
-        ///     all sent villagers into a deliberate crossing over ankle-deep shallows.
+        ///     Fallback for how far under the surface ground must sit before it counts as
+        ///     water, used only when the villager's own swim depth is unset. A ford a
+        ///     villager can wade through on foot is not a crossing, and counting any depth
+        ///     at all sent villagers into a deliberate crossing over ankle-deep shallows.
+        ///     The live threshold comes from <c>Character.m_swimDepth</c> - the game's own
+        ///     number for where this body stops walking - so a prefab or game update that
+        ///     changes it cannot silently diverge from a constant restating it here.
         /// </summary>
         private const float WadeDepth = 1.5f;
 
@@ -137,6 +141,7 @@ namespace Kukolony.Villagers.Navigation
             if (WorldGenerator.instance == null || ZoneSystem.instance == null) return false;
 
             float water = ZoneSystem.instance.m_waterLevel;
+            float wade = SwimDepth();
             Vector3 bearing = _waypoint - from;
             bearing.y = 0f;
             float span = bearing.magnitude;
@@ -146,7 +151,7 @@ namespace Kukolony.Villagers.Navigation
             for (float along = ProbeStep; along <= span; along += ProbeStep)
             {
                 Vector3 at = from + step * along;
-                if (WorldGenerator.instance.GetHeight(at.x, at.z) < water - WadeDepth)
+                if (WorldGenerator.instance.GetHeight(at.x, at.z) < water - wade)
                 {
                     _waterAhead = true;
                     break;
@@ -239,6 +244,13 @@ namespace Kukolony.Villagers.Navigation
         {
             _waterAhead = false;
             _nextProbe = 0f;
+        }
+
+        /// <summary>Where this body stops walking and starts swimming.</summary>
+        private float SwimDepth()
+        {
+            Character body = _ai != null ? _ai.m_character : null;
+            return body != null && body.m_swimDepth > 0f ? body.m_swimDepth : WadeDepth;
         }
 
         /// <summary>
