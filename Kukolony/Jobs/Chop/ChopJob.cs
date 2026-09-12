@@ -388,6 +388,18 @@ namespace Kukolony.Jobs.Chop
         }
 
         /// <summary>
+        ///     Whether this job would take this thing, asked from outside.
+        /// </summary>
+        /// <remarks>
+        ///     The same predicate the choosing uses, exposed rather than reimplemented. A
+        ///     check that called its own copy of this would go on passing while the job
+        ///     quietly ignored the setting - which is exactly how a feature that never ran in
+        ///     game survived a suite that counted it as covered.
+        /// </remarks>
+        internal static bool WouldTake(JobDefinition job, ZDO zdo) =>
+            zdo != null && zdo.IsValid() && Wanted(job, Choppable.Of(zdo.GetPrefab()), zdo);
+
+        /// <summary>
         ///     Whether this job takes a thing of this kind and this species.
         /// </summary>
         /// <remarks>

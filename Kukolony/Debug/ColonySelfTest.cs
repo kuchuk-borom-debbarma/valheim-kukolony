@@ -5,7 +5,10 @@ using System.Linq;
 using System.Reflection;
 using Kukolony.Colonies;
 using Kukolony.Jobs;
+using Kukolony.Jobs.Chop;
 using Kukolony.Gui;
+using Kukolony.KeepAlive;
+using Kukolony.Resources;
 using Kukolony.Villagers;
 using UnityEngine;
 
@@ -204,6 +207,16 @@ namespace Kukolony.Debug
             yield return ClearTheGround(colony, "CheckBulkAssignment");
             yield return CheckWorkFlags(report, colony, origin);
             yield return CheckDistantTravel(report, colony, origin);
+            yield return CheckFlagToFlagTravel(report, colony, origin);
+
+            // Chopping. The index first, because an empty one makes every check below pass by
+            // finding nothing to contradict.
+            yield return CheckChoppingIndex(report);
+            yield return CheckTreesAreKeptLoaded(report);
+            yield return CheckUnclaimedDamageDoesNothing(report, origin);
+            yield return CheckGivingUpOnAnUncuttableTree(report, origin);
+            yield return CheckChopSettings(report, origin);
+            yield return CheckChoppingFellsATree(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
@@ -1603,6 +1616,259 @@ namespace Kukolony.Debug
 
             arrived(reached);
         }
+
+        /// <summary>
+        ///     Flag to flag at three hundred metres, with water staged in the middle.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Every other travel measurement in this suite is a hundred and sixty metres
+        ///         over ground a villager can walk. This is the case the flag exists for and
+        ///         the one the water-crossing code was written for, and neither has been
+        ///         measured: an outpost is only an outpost if villagers can reliably get to it,
+        ///         and "reliably" across water is exactly where walking stops being an option.
+        ///     </para>
+        ///     <para>
+        ///         The water is <em>found</em> rather than built. Digging a channel would mean
+        ///         terrain edits that outlive the check, and a staged pond is not what the
+        ///         probe reads anyway - it samples the world generator, so the crossing has to
+        ///         be real world water to be the thing under test.
+        ///     </para>
+        ///     <para>
+        ///         Both ends carry a claimed flag, because the ground at an outpost has to stay
+        ///         loaded for a villager to arrive into it at all. That makes this a check of
+        ///         the flag and the crossing together, which is how they will be used.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckFlagToFlagTravel(TestReport report, Colony colony, Vector3 origin)
+        {
+            if (!TryFindLandAcrossWater(origin, FarTravelDistance, out Vector3 across, out float wet))
+            {
+                // Not a failure of the mod. Said plainly rather than silently passing, because
+                // a check that quietly did not run is worse than one that says it could not.
+                report.Check(true,
+                    "flag-to-flag check: this world has no water crossing within reach, so it did not run",
+                    $"no bearing at {FarTravelDistance:0}m crosses water onto land");
+                yield break;
+            }
+
+            GameObject nearFlag = Spawn(WorkFlagPrefab.PrefabName, origin + new Vector3(6f, 0f, 0f));
+            GameObject farFlag = Spawn(WorkFlagPrefab.PrefabName, across);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            WorkFlag near = nearFlag != null ? nearFlag.GetComponent<WorkFlag>() : null;
+            WorkFlag far = farFlag != null ? farFlag.GetComponent<WorkFlag>() : null;
+            if (near == null || far == null)
+            {
+                report.Check(false, "flag-to-flag check could place two flags");
+                Release(nearFlag);
+                Release(farFlag);
+                yield break;
+            }
+
+            RegisterOutcome tookNear = ColonyOperations.AssignFlag(colony.Id, near);
+            RegisterOutcome tookFar = ColonyOperations.AssignFlag(colony.Id, far);
+            report.Check(tookNear == RegisterOutcome.Registered && tookFar == RegisterOutcome.Registered,
+                "both ends of the crossing are claimed outposts",
+                $"near={tookNear} far={tookFar} gap={wet:0}m of water");
+
+            Villager walker = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.5f);
+            if (walker == null || !walker.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "flag-to-flag check could spawn a villager");
+                Cleanup(colony, near, far, nearFlag, farFlag);
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+
+            // Watched for a dropped anchor across the whole run, not sampled at the end. The
+            // cap consumes anchors until it binds and the run is the only time the budget is
+            // under real pressure - two flags, a villager and its waypoint all at once.
+            int droppedDuring = 0;
+            bool arrived = false;
+
+            yield return FarJourney(report, walker, who, across,
+                $"across {wet:0}m of water to a flag {FarTravelDistance:0}m out",
+                dropped => droppedDuring = Mathf.Max(droppedDuring, dropped),
+                result => arrived = result);
+
+            report.Check(droppedDuring == 0,
+                "control: no keep-alive anchor was silently dropped during the crossing",
+                $"worstDropped={droppedDuring}");
+
+            if (arrived)
+            {
+                report.Check(walker != null && !walker.IsReckoning,
+                    "it comes back onto its feet at the far shore rather than arriving mid-glide",
+                    $"reckoning={walker != null && walker.IsReckoning}");
+
+                report.Check(walker != null && walker.TryGetComponent(out Character body) &&
+                             body.m_body != null && !body.m_body.isKinematic,
+                    "control: physics is restored after the crossing",
+                    "a villager left kinematic cannot be moved by anything");
+            }
+
+            Cleanup(colony, near, far, nearFlag, farFlag);
+            if (walker != null) VillagerLifecycle.Remove(colony, who);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        private static void Cleanup(Colony colony, WorkFlag near, WorkFlag far,
+            GameObject nearFlag, GameObject farFlag)
+        {
+            if (near != null) colony.RemoveStructure(near.Id);
+            if (far != null) colony.RemoveStructure(far.Id);
+            Release(nearFlag);
+            Release(farFlag);
+        }
+
+        /// <summary>
+        ///     One long leg, watched to its end, reporting the worst zone-budget moment.
+        /// </summary>
+        /// <remarks>
+        ///     A separate walk from <see cref="Journey" /> rather than a parameter on it: this
+        ///     one runs to a different time bound, watches the anchor budget, and is not
+        ///     staged around a player standing at the far end. Threading all of that through
+        ///     the existing one would make the shorter check harder to read for the sake of
+        ///     sharing a loop.
+        /// </remarks>
+        private static IEnumerator FarJourney(TestReport report, Villager walker, ZDOID who,
+            Vector3 destination, string what, System.Action<int> dropped, System.Action<bool> arrived)
+        {
+            float startedAt = Utils.DistanceXZ(walker.transform.position, destination);
+            walker.SendOnErrand(destination);
+
+            bool crossed = false;
+            bool destroyed = false;
+            int unloads = 0;
+            bool wasLoaded = true;
+            float closest = startedAt;
+            float elapsed = 0f;
+
+            while (elapsed < FarTravelSeconds && closest > ArrivedWithin)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                elapsed += .5f;
+
+                dropped(KeepAlive.KeepAliveZones.DroppedAnchors);
+
+                ZDO living = ZDOMan.instance.GetZDO(who);
+                if (living == null)
+                {
+                    destroyed = true;
+                    break;
+                }
+
+                bool loaded = walker != null && ZNetScene.instance.FindInstance(who) != null;
+                if (wasLoaded && !loaded) unloads++;
+                wasLoaded = loaded;
+
+                if (loaded && walker.IsReckoning) crossed = true;
+
+                float now = Utils.DistanceXZ(
+                    loaded ? walker.transform.position : living.GetPosition(), destination);
+                if (now < closest) closest = now;
+            }
+
+            string story = $"{startedAt:0}m to {closest:0}m in {elapsed:0}s, crossed={crossed}, " +
+                           $"unloadedTimes={unloads}" +
+                           (destroyed ? " - ZDO GONE, TRULY DESTROYED" : string.Empty);
+            Core.Log.Info($"[Benchmark] far travel {what}: {story}");
+
+            bool reached = closest <= ArrivedWithin;
+            report.Check(reached, $"a villager sent {what} arrives", story);
+
+            report.Check(unloads == 0,
+                "control: it was never unloaded en route - the flags held its corridor open",
+                story);
+
+            report.Check(!destroyed, "control: it still exists after the crossing", story);
+
+            // Let the landing finish before anyone asks whether it landed. Three separate
+            // failures in this suite have been a check and the code disagreeing about
+            // "arrived".
+            float landing = 0f;
+            while (landing < 5f && walker != null && walker.IsReckoning)
+            {
+                yield return new WaitForSecondsRealtime(.25f);
+                landing += .25f;
+            }
+
+            arrived(reached);
+        }
+
+        /// <summary>
+        ///     Somewhere solid roughly this far off whose straight line from here crosses open
+        ///     water, and how much water that is.
+        /// </summary>
+        /// <remarks>
+        ///     The straight line is what matters rather than the walking route, because the
+        ///     straight line is what the villager's own probe samples. Sixteen bearings, the
+        ///     same as <see cref="TryFindLand" /> - and the widest crossing wins, because a
+        ///     puddle a villager can wade is not the case under test.
+        /// </remarks>
+        private static bool TryFindLandAcrossWater(Vector3 from, float distance,
+            out Vector3 found, out float water)
+        {
+            found = from;
+            water = 0f;
+            if (WorldGenerator.instance == null || ZoneSystem.instance == null) return false;
+
+            float level = ZoneSystem.instance.m_waterLevel;
+
+            for (int step = 0; step < 16; step++)
+            {
+                float radians = step * Mathf.PI * 2f / 16f;
+                Vector3 bearing = new Vector3(Mathf.Cos(radians), 0f, Mathf.Sin(radians));
+                Vector3 candidate = from + bearing * distance;
+
+                // The far end has to be standable ground, or this measures a villager
+                // sensibly refusing to walk into the sea.
+                if (WorldGenerator.instance.GetBiome(candidate.x, candidate.z) == Heightmap.Biome.Ocean) continue;
+                float height = WorldGenerator.instance.GetHeight(candidate.x, candidate.z);
+                if (height < level + 5f) continue;
+
+                // How much of the line between is under water, sampled every eight metres.
+                float wet = 0f;
+                for (float along = 8f; along < distance; along += 8f)
+                {
+                    Vector3 at = from + bearing * along;
+                    if (WorldGenerator.instance.GetHeight(at.x, at.z) < level) wet += 8f;
+                }
+
+                if (wet < MinimumCrossing || wet <= water) continue;
+
+                candidate.y = height;
+                found = candidate;
+                water = wet;
+            }
+
+            return water >= MinimumCrossing;
+        }
+
+        /// <summary>How far off the far flag goes, in metres.</summary>
+        private const float FarTravelDistance = 300f;
+
+        /// <summary>
+        ///     How long to allow for three hundred metres including a swim.
+        /// </summary>
+        /// <remarks>
+        ///     Scaled from the shorter leg's allowance rather than guessed: roughly twice the
+        ///     distance, and dead reckoning covers ground at running pace rather than faster,
+        ///     so the crossing is not a shortcut in time either.
+        /// </remarks>
+        private const float FarTravelSeconds = 600f;
+
+        /// <summary>
+        ///     How much water makes a crossing worth calling one.
+        /// </summary>
+        /// <remarks>
+        ///     Wide enough that walking around it is not the obvious route and that the probe's
+        ///     twelve-metre sampling cannot step over it.
+        /// </remarks>
+        private const float MinimumCrossing = 40f;
 
         /// <summary>How far off to send the villager, in metres.</summary>
         private const float TravelDistance = 160f;
@@ -4702,11 +4968,524 @@ namespace Kukolony.Debug
         }
 
         /// <summary>
-        ///     Clears what felling a tree leaves behind. Each control below asserts that a
-        ///     villager finds nothing to do, and a log dropped by the phase before it is
-        ///     something to do - which is correct behaviour reported as a failure.
+        ///     What the classifier knows, before anything is asked to act on it.
         /// </summary>
- 
+        /// <remarks>
+        ///     Cheap, and it fails first when it fails: every chopping check below is
+        ///     meaningless if the index is empty, and an empty index makes them all pass by
+        ///     finding nothing to contradict.
+        /// </remarks>
+        private static IEnumerator CheckChoppingIndex(TestReport report)
+        {
+            if (!Choppable.IsReady) Choppable.Rebuild();
+
+            report.Check(Choppable.IsReady, "the chopping classifier found prefabs to classify");
+
+            string anyTree = Choppable.SampleTree(0, 99);
+            report.Check(!string.IsNullOrEmpty(anyTree),
+                "it can name a real tree, so checks need not guess at prefab names",
+                $"sample={anyTree}");
+
+            // The tiers the give-up test depends on. If a world has only one tier of tree,
+            // that check cannot be staged and should say so rather than pass.
+            string soft = Choppable.SampleTree(0, 0);
+            string hard = Choppable.SampleTree(2, 99);
+            report.Check(!string.IsNullOrEmpty(soft) && !string.IsNullOrEmpty(hard),
+                "control: it can tell a tree any axe can fell from one that needs a good axe",
+                $"soft={soft} hard={hard}");
+
+            List<string> names = new List<string>();
+            Choppable.TreeNames(names);
+            report.Check(names.Count > 0,
+                "the species picker has real species to offer",
+                $"species={names.Count}");
+
+            yield break;
+        }
+
+        /// <summary>
+        ///     The worst trap in the job, proven by its absence.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Damage is routed to whoever owns the object, and a world-generated tree has
+        ///         no owner - so every peer decides the blow is somebody else's business and
+        ///         drops it. The villager swings, the health does not move, and nothing
+        ///         anywhere reports a problem.
+        ///     </para>
+        ///     <para>
+        ///         This check needs the loudest control in the suite precisely because the trap
+        ///         reports nothing when it bites: asserting that an unclaimed blow does
+        ///         <em>nothing</em> is the only way to prove that claiming is what makes the
+        ///         claimed one work.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckUnclaimedDamageDoesNothing(TestReport report, Vector3 origin)
+        {
+            Vector3 site = ChoppingSite(origin);
+            SweepFelling(site, 24f);
+
+            string species = Choppable.SampleTree(0, 0);
+            if (string.IsNullOrEmpty(species))
+            {
+                report.Check(false, "unclaimed-damage check could find a tree to plant");
+                yield break;
+            }
+
+            GameObject axe = FindAxe(0, 99);
+            GameObject tree = Spawn(species, site);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (tree == null || axe == null || !tree.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "unclaimed-damage check could plant a tree and find an axe",
+                    $"tree={(tree == null ? "none" : species)} axe={(axe == null ? "none" : "yes")}");
+                Release(tree);
+                yield break;
+            }
+
+            ItemDrop.ItemData tool = axe.GetComponent<ItemDrop>().m_itemData;
+
+            // Given away deliberately, so the blow below is made by a peer that does not own
+            // the target - which is the state every world-generated tree starts in.
+            view.GetZDO().SetOwner(0L);
+            yield return new WaitForSecondsRealtime(.2f);
+
+            float before = view.GetZDO().GetFloat(ZDOVars.s_health, tree.GetComponent<TreeBase>().m_health);
+            BlowResult unclaimed = Felling.Strike(tree, tool, site + Vector3.back * 2f, out string said);
+            yield return new WaitForSecondsRealtime(.2f);
+            float afterUnclaimed = view.GetZDO().GetFloat(ZDOVars.s_health, before);
+
+            report.Check(unclaimed == BlowResult.Claiming,
+                "a blow at a tree nobody owns takes ownership instead of swinging",
+                $"result={unclaimed} said='{said}'");
+
+            report.Check(Mathf.Approximately(afterUnclaimed, before),
+                "control: and it does not damage the tree - an unowned blow achieves nothing",
+                $"health {before:0.0} -> {afterUnclaimed:0.0}");
+
+            // Now it is ours, because the call above claimed it. The next blow must land.
+            yield return new WaitForSecondsRealtime(.4f);
+            BlowResult claimed = Felling.Strike(tree, tool, site + Vector3.back * 2f, out string then);
+            yield return new WaitForSecondsRealtime(.2f);
+
+            float afterClaimed = tree == null || !view.IsValid()
+                ? 0f
+                : view.GetZDO().GetFloat(ZDOVars.s_health, before);
+
+            report.Check(claimed == BlowResult.Struck || claimed == BlowResult.Felled,
+                "once owned, the same blow lands",
+                $"result={claimed} said='{then}' health {before:0.0} -> {afterClaimed:0.0}");
+
+            report.Check(afterClaimed < before,
+                "control: the health actually moved, which is the only honest proof a blow landed",
+                $"health {before:0.0} -> {afterClaimed:0.0}");
+
+            // Health defaulting: an untouched tree and a damaged one must not read the same.
+            // Defaulting the read to zero would make them identical, which is how a felled
+            // tree and a fresh one became indistinguishable.
+            GameObject fresh = Spawn(species, site + new Vector3(8f, 0f, 0f));
+            yield return new WaitForSecondsRealtime(.4f);
+            if (fresh != null && fresh.TryGetComponent(out ZNetView freshView) && freshView.IsValid())
+            {
+                float untouched = freshView.GetZDO()
+                    .GetFloat(ZDOVars.s_health, fresh.GetComponent<TreeBase>().m_health);
+                report.Check(untouched > afterClaimed,
+                    "an untouched tree and a damaged one report different health",
+                    $"untouched={untouched:0.0} damaged={afterClaimed:0.0}");
+            }
+
+            Release(fresh);
+            Release(tree);
+            SweepFelling(site, 24f);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     The loop, end to end: a standing tree becomes a log, and the log becomes wood.
+        /// </summary>
+        /// <remarks>
+        ///     Sited well away from the settlement, because a falling tree has already
+        ///     destroyed a benchmark chest in this repo and surfaced two phases later as a
+        ///     persistence failure.
+        /// </remarks>
+        private static IEnumerator CheckChoppingFellsATree(TestReport report, Colony colony, Vector3 origin)
+        {
+            Vector3 site = ChoppingSite(origin);
+            SweepFelling(site, 30f);
+
+            string species = Choppable.SampleTree(0, 0);
+            if (string.IsNullOrEmpty(species))
+            {
+                report.Check(false, "chop check could find a tree a basic axe can fell");
+                yield break;
+            }
+
+            // A flag makes the site the Kolony's, which is also what lets a job be pointed at
+            // it - the forest is not inside the hearth's radius and is not meant to be.
+            GameObject flag = Spawn(WorkFlagPrefab.PrefabName, site);
+            yield return new WaitForSecondsRealtime(.3f);
+            WorkFlag planted = flag != null ? flag.GetComponent<WorkFlag>() : null;
+            if (planted == null || ColonyOperations.AssignFlag(colony.Id, planted) != RegisterOutcome.Registered)
+            {
+                report.Check(false, "chop check could plant and claim a flag at the wood");
+                Release(flag);
+                yield break;
+            }
+
+            StructureRecord flagRecord = colony.State.GetStructures().Find(r => r.Id == planted.Id);
+            GameObject tree = Spawn(species, site + new Vector3(6f, 0f, 0f));
+            yield return new WaitForSecondsRealtime(.4f);
+
+            report.Check(tree != null, "control: there is a tree to fell", $"species={species}");
+            if (tree == null)
+            {
+                Cleanup(colony, planted, null, flag, null);
+                yield break;
+            }
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition
+                {
+                    Id = "chop", Name = "Chop", Kind = JobKind.Chop, Repeat = 30,
+                    WorkArea = flagRecord?.PersistentId ?? string.Empty, WorkRadius = 32f
+                }
+            });
+
+            Villager chopper = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+            if (chopper == null || !chopper.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "chop check could spawn a villager");
+                Cleanup(colony, planted, null, flag, null);
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+            Container bag = VillagerInventory.Attach(chopper.gameObject, view);
+            bool armed = GiveAxe(bag, view, 0, 99);
+            report.Check(armed, "control: the villager has an axe, without which this job does nothing");
+
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "chop" });
+            chopper.transform.position = site + new Vector3(3f, 0f, 0f);
+
+            bool sawALog = false;
+            int wood = 0;
+            float elapsed = 0f;
+
+            while (elapsed < ChopSeconds && wood == 0)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                elapsed += .5f;
+
+                if (Nearby<TreeLog>(site, 30f) > 0) sawALog = true;
+                wood = LooseCount("Wood", site + new Vector3(6f, 0f, 0f));
+                if (wood == 0) wood = NearbyWood(site, 30f);
+            }
+
+            report.Check(Nearby<TreeBase>(site, 30f) == 0,
+                "the tree came down",
+                $"standing={Nearby<TreeBase>(site, 30f)} after {elapsed:0}s");
+
+            report.Check(sawALog,
+                "control: felling it left a log - a tree does not produce wood directly",
+                $"sawALog={sawALog}");
+
+            report.Check(wood > 0,
+                "and cutting the log up produced wood on the ground",
+                $"wood={wood} after {elapsed:0}s");
+
+            VillagerLifecycle.Remove(colony, who);
+            Cleanup(colony, planted, null, flag, null);
+            SweepFelling(site, 30f);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A tree this axe cannot bite is released and said once, not swung at forever.
+        /// </summary>
+        private static IEnumerator CheckGivingUpOnAnUncuttableTree(TestReport report, Vector3 origin)
+        {
+            Vector3 site = ChoppingSite(origin) + new Vector3(0f, 0f, 40f);
+            SweepFelling(site, 20f);
+
+            string tough = Choppable.SampleTree(2, 99);
+            GameObject weak = FindAxe(0, 0);
+            if (string.IsNullOrEmpty(tough) || weak == null)
+            {
+                report.Check(true,
+                    "give-up check: this world has no tree/axe pair that cannot cut, so it did not run",
+                    $"tough={tough} weakAxe={(weak == null ? "none" : "yes")}");
+                yield break;
+            }
+
+            GameObject tree = Spawn(tough, site);
+            yield return new WaitForSecondsRealtime(.4f);
+            if (tree == null || !tree.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "give-up check could plant a tough tree");
+                Release(tree);
+                yield break;
+            }
+
+            view.ClaimOwnership();
+            yield return new WaitForSecondsRealtime(.3f);
+
+            ItemDrop.ItemData blunt = weak.GetComponent<ItemDrop>().m_itemData;
+            BlowResult result = Felling.Strike(tree, blunt, site + Vector3.back * 2f, out string said);
+
+            report.Check(result == BlowResult.TooHard,
+                "a blunt axe on a hard tree reports that it cannot cut it, rather than nothing",
+                $"result={result} said='{said}'");
+
+            // Control: the same tree yields to a better axe, so the refusal is about the tool
+            // and not about the tree being unhittable.
+            GameObject good = FindAxe(2, 99);
+            if (good != null)
+            {
+                float before = view.GetZDO()
+                    .GetFloat(ZDOVars.s_health, tree.GetComponent<TreeBase>().m_health);
+                BlowResult better = Felling.Strike(tree, good.GetComponent<ItemDrop>().m_itemData,
+                    site + Vector3.back * 2f, out string _);
+                yield return new WaitForSecondsRealtime(.2f);
+                float after = !view.IsValid() ? 0f : view.GetZDO().GetFloat(ZDOVars.s_health, before);
+
+                report.Check(better == BlowResult.Struck || better == BlowResult.Felled,
+                    "control: the same tree yields to a better axe",
+                    $"result={better} health {before:0.0} -> {after:0.0}");
+            }
+
+            Release(tree);
+            SweepFelling(site, 20f);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Each chopping setting changes behaviour, with the control that proves it.
+        /// </summary>
+        /// <remarks>
+        ///     A job must not offer a setting it ignores. These are asked of the decision
+        ///     directly rather than by watching a villager for minutes per setting: whether a
+        ///     thing is eligible is the whole of what these settings do, and a check that
+        ///     waits for a felling is measuring the walk as well.
+        /// </remarks>
+        private static IEnumerator CheckChopSettings(TestReport report, Vector3 origin)
+        {
+            Vector3 site = ChoppingSite(origin) + new Vector3(40f, 0f, 0f);
+            SweepFelling(site, 20f);
+
+            string species = Choppable.SampleTree(0, 0);
+            if (string.IsNullOrEmpty(species))
+            {
+                report.Check(false, "chop-settings check could find a tree to plant");
+                yield break;
+            }
+
+            GameObject tree = Spawn(species, site);
+            yield return new WaitForSecondsRealtime(.4f);
+            if (tree == null || !tree.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "chop-settings check could plant a tree");
+                Release(tree);
+                yield break;
+            }
+
+            ZDO zdo = view.GetZDO();
+
+            JobDefinition fells = new JobDefinition { Kind = JobKind.Chop, ChopTrees = true };
+            JobDefinition logsOnly = new JobDefinition
+            {
+                Kind = JobKind.Chop, ChopTrees = false, ChopLogs = true
+            };
+
+            report.Check(ChopJob.WouldTake(fells, zdo),
+                "control: a felling job takes a standing tree");
+
+            report.Check(!ChopJob.WouldTake(logsOnly, zdo),
+                "a logs-only job leaves standing trees alone");
+
+            JobDefinition wrongSpecies = new JobDefinition
+            {
+                Kind = JobKind.Chop, ChopTrees = true,
+                Species = new List<string> { species + "_not_a_real_species" }
+            };
+            JobDefinition rightSpecies = new JobDefinition
+            {
+                Kind = JobKind.Chop, ChopTrees = true, Species = new List<string> { species }
+            };
+
+            report.Check(!ChopJob.WouldTake(wrongSpecies, zdo),
+                "a species allow-list leaves species it does not name standing",
+                $"planted={species}");
+
+            report.Check(ChopJob.WouldTake(rightSpecies, zdo),
+                "control: and takes the one it does name");
+
+            report.Check(ChopJob.WouldTake(fells, zdo),
+                "control: an empty species list still means every species");
+
+            Release(tree);
+            SweepFelling(site, 20f);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Trees survive in a zone kept open for a villager.
+        /// </summary>
+        /// <remarks>
+        ///     The off-screen case, asked of the allowlist rather than by walking away: a
+        ///     chopping villager in a kept zone whose trees were filtered out finds nothing to
+        ///     do, idles, and works perfectly every time somebody comes to look. Watching for
+        ///     that requires nobody watching, which a check cannot arrange - so the mechanism
+        ///     it depends on is asserted instead, and the full behaviour is left to the
+        ///     off-screen run.
+        /// </remarks>
+        private static IEnumerator CheckTreesAreKeptLoaded(TestReport report)
+        {
+            if (!LoadAllowlist.IsReady) LoadAllowlist.Rebuild();
+            if (!Choppable.IsReady) Choppable.Rebuild();
+
+            string species = Choppable.SampleTree(0, 99);
+            if (string.IsNullOrEmpty(species) || ZNetScene.instance == null)
+            {
+                report.Check(false, "kept-trees check could name a tree");
+                yield break;
+            }
+
+            report.Check(LoadAllowlist.Contains(species.GetStableHashCode()),
+                "trees are loaded in a zone kept open for a villager, so chopping works off-screen",
+                $"species={species}");
+
+            // Control: the allowlist is a filter and not a pass-through. Something the colony
+            // has no interest in must still be excluded, or this proves nothing.
+            report.Check(!LoadAllowlist.Contains("not_a_real_prefab".GetStableHashCode()),
+                "control: the allowlist still excludes what a colony has no use for");
+
+            yield break;
+        }
+
+        /// <summary>Where destructive chopping fixtures go, clear of anything registered.</summary>
+        /// <remarks>
+        ///     Far enough that a falling trunk cannot reach the settlement. A tree felled in
+        ///     this repo has already destroyed a benchmark chest, and it surfaced two phases
+        ///     later as a persistence failure rather than as a falling tree.
+        /// </remarks>
+        private static Vector3 ChoppingSite(Vector3 origin)
+        {
+            Vector3 site = origin + new Vector3(90f, 0f, -90f);
+            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(site, out float ground))
+            {
+                site.y = ground;
+            }
+
+            return site;
+        }
+
+        /// <summary>Wood lying anywhere near a site, however the log scattered it.</summary>
+        /// <remarks>
+        ///     A log drops its wood along the trunk axis rather than in a pile, so counting
+        ///     within a couple of metres of one point misses most of it.
+        /// </remarks>
+        private static int NearbyWood(Vector3 site, float radius)
+        {
+            int count = 0;
+            foreach (ItemDrop drop in ItemDrop.s_instances)
+            {
+                if (drop == null || Vector3.Distance(drop.transform.position, site) > radius) continue;
+                if (Utils.GetPrefabName(drop.gameObject) != "Wood") continue;
+                count += drop.m_itemData != null ? drop.m_itemData.m_stack : 1;
+            }
+
+            return count;
+        }
+
+        /// <summary>
+        ///     How long to allow for felling one tree and cutting up its log.
+        /// </summary>
+        /// <remarks>
+        ///     Generous: the villager has to walk to it, and a tree is many blows. A check that
+        ///     fails because it was in a hurry teaches nothing.
+        /// </remarks>
+        private const float ChopSeconds = 180f;
+
+        /// <summary>
+        ///     Clears what felling a tree leaves behind: the trunk, its sub-logs, the stump and
+        ///     the wood.
+        /// </summary>
+        /// <remarks>
+        ///     Each chopping control asserts that a villager finds nothing to do, and a log
+        ///     left by the phase before it is something to do - which is correct behaviour
+        ///     reported as a failure. Run before a control, never after a positive check,
+        ///     where it would destroy the evidence.
+        /// </remarks>
+        private static void SweepFelling(Vector3 site, float radius)
+        {
+            foreach (TreeLog log in FindAll<TreeLog>())
+            {
+                if (log != null && Vector3.Distance(log.transform.position, site) <= radius)
+                    Release(log.gameObject);
+            }
+
+            foreach (TreeBase tree in FindAll<TreeBase>())
+            {
+                if (tree != null && Vector3.Distance(tree.transform.position, site) <= radius)
+                    Release(tree.gameObject);
+            }
+
+            foreach (ItemDrop drop in new List<ItemDrop>(ItemDrop.s_instances))
+            {
+                if (drop != null && Vector3.Distance(drop.transform.position, site) <= radius)
+                    Release(drop.gameObject);
+            }
+        }
+
+        /// <summary>
+        ///     An axe from the game's own item list whose tool tier falls in a range.
+        /// </summary>
+        /// <remarks>
+        ///     Found by capability rather than named, for the reason every other list here is
+        ///     asked rather than written: the mod does not ship the assets and has already been
+        ///     wrong about a prefab name. "The worst axe in the game" and "a better one" are
+        ///     the two things these checks actually need, and both are questions about tiers.
+        /// </remarks>
+        private static GameObject FindAxe(int lowestTier, int highestTier)
+        {
+            if (ObjectDB.instance == null) return null;
+
+            GameObject best = null;
+            foreach (GameObject candidate in ObjectDB.instance.m_items)
+            {
+                if (candidate == null || !candidate.TryGetComponent(out ItemDrop drop)) continue;
+
+                ItemDrop.ItemData.SharedData shared = drop.m_itemData?.m_shared;
+                if (shared == null || shared.m_damages.m_chop <= 0f) continue;
+                if (shared.m_toolTier < lowestTier || shared.m_toolTier > highestTier) continue;
+
+                best = candidate;
+                break;
+            }
+
+            return best;
+        }
+
+        /// <summary>Puts an axe of a given tier range into a villager's bag.</summary>
+        private static bool GiveAxe(Container bag, ZNetView view, int lowestTier, int highestTier)
+        {
+            GameObject axe = FindAxe(lowestTier, highestTier);
+            if (bag == null || axe == null || !axe.TryGetComponent(out ItemDrop drop)) return false;
+
+            // Item data taken straight off a prefab has no m_dropPrefab - the field is filled
+            // in when an item passes through an inventory - so a clone of it has no identity
+            // and nothing can name it.
+            ItemDrop.ItemData planted = drop.m_itemData.Clone();
+            planted.m_dropPrefab = axe;
+            bag.GetInventory().AddItem(planted);
+            VillagerInventory.Persist(bag, view);
+            return true;
+        }
+
         private static int Nearby<T>(Vector3 origin, float radius) where T : Component
         {
             int count = 0;
