@@ -404,6 +404,13 @@ namespace Kukolony.Debug
             VillagerState persisted = new VillagerState(zdo);
             persisted.SetName(PersistedVillagerName);
 
+            // Idled here rather than assumed to be idle. This villager now survives the sweep
+            // between checks, so it is on the roster when work is handed out to everybody in
+            // bulk - and it kept that queue, into the save, for a later build to resume. The
+            // remark below says there is no work for it to do; this is what makes that true.
+            persisted.SetQueue(new List<string>());
+            persisted.ResetJob();
+
             // Fill the bag here rather than earlier so nothing can spend it before the save.
             // There is no work for a villager to do yet, so it simply idles until the save.
             GameObject carried = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(zdo.m_uid) : null;
@@ -2639,6 +2646,18 @@ namespace Kukolony.Debug
                 VillagerLifecycle.Remove(colony, member);
             }
 
+            // Sparing the primary means it now outlives every check, including the one that
+            // hands work out to everybody. It must go back to idle: the persistence snapshot
+            // states plainly that it has nothing to do until the save, and a queue left on it
+            // would be carried into the save to be resumed by a later build.
+            ZDO primaryRecord = primary.IsNone() ? null : ZDOMan.instance?.GetZDO(primary);
+            if (primaryRecord != null)
+            {
+                VillagerState primaryState = new VillagerState(primaryRecord);
+                primaryState.SetQueue(new List<string>());
+                primaryState.ResetJob();
+            }
+
             colony.State.SetJobs(new List<JobDefinition>());
             SweepLooseItems(colony);
             SettlementIndex.ResetForTest();
@@ -2852,28 +2871,22 @@ namespace Kukolony.Debug
 
                 if (story.Count == 0 || story[story.Count - 1] != hand.Activity) story.Add(hand.Activity);
 
-                if (!caughtFetching)
+                // Two independent ifs rather than a chain: a villager can be worth
+                // photographing walking out and walking back within the same sample, and an
+                // else-if meant the first sample was spent on one of them and the other could
+                // then be missed entirely.
+                if (!caughtFetching && hand.Activity == "fetching")
                 {
-                    // Taken on the first look, not when a particular word is sampled. The shell
-                    // requires this file, and keying it to "fetching" meant a villager that
-                    // picked up and delivered inside one half-second window - likelier now that
-                    // villagers move at a player's pace - failed the run for a missing
-                    // photograph while every assertion passed.
                     caughtFetching = true;
                     GameObject bound = ZNetScene.instance?.FindInstance(new VillagerState(view.GetZDO()).Target);
                     yield return BenchmarkUiScenario.PhotographAtWork("haul-fetching.png",
                         hand.transform.position,
-                        $"'{hand.DisplayName()}' setting out, doing '{hand.Activity}'",
+                        $"'{hand.DisplayName()}' on its way to something to pick up",
                         bound != null ? bound.transform.position : (Vector3?)null);
                 }
-                else if (!caughtCarrying && new VillagerState(view.GetZDO()).Cargo.Length > 0)
+
+                if (!caughtCarrying && new VillagerState(view.GetZDO()).Cargo.Length > 0)
                 {
-                    // Keyed on the villager actually holding cargo, not on a word in the
-                    // activity line. The chests here are close enough that the delivery walk
-                    // can finish inside a single tick, so the trip reads "fetching > putting it
-                    // away" and sometimes neither word is ever sampled - and a required
-                    // screenshot keyed to a state that may not occur fails a run that did
-                    // everything right. Twice.
                     caughtCarrying = true;
                     yield return BenchmarkUiScenario.PhotographAtWork("haul-delivering.png",
                         hand.transform.position,
@@ -2882,20 +2895,38 @@ namespace Kukolony.Debug
                 }
             }
 
-            // Always written, even if the villager went away. The loop can break on the
-            // villager being unloaded while both chests are already full, which passes every
-            // assertion here and then fails the run several minutes later with "missing
-            // screenshot" - a message pointing nowhere near the cause. With nobody to
-            // photograph, the chests are the subject, and the note says so.
+            // Whatever the sampler did not catch is written anyway.
+            //
+            // The captures above are keyed on states that make a good picture, and a state that
+            // makes a good picture is exactly the kind that can pass between two samples - more
+            // so now that villagers move at a player's pace. The shell requires all three files,
+            // so a missed one ends the run with "missing screenshot" long after the hauling it
+            // was photographing, which is a failure message pointing nowhere near its cause.
+            // Catching the moment is worth trying for and must not be worth failing for.
             bool stillHere = hand != null && ZNetScene.instance?.FindInstance(who) != null;
-            yield return BenchmarkUiScenario.PhotographAtWork("haul-settled.png",
-                stillHere ? hand.transform.position : woodChest.transform.position,
-                stillHere
-                    ? $"'{hand.DisplayName()}' after the hauling, doing '{hand.Activity}'; " +
-                      $"wood chest holds {inWood}, stone chest holds {inStone}"
-                    : $"the villager is no longer loaded; wood chest holds {inWood}, " +
-                      $"stone chest holds {inStone}",
-                stoneChest.transform.position);
+            Vector3 subject = stillHere ? hand.transform.position : woodChest.transform.position;
+            string whoOrWhat = stillHere
+                ? $"'{hand.DisplayName()}', doing '{hand.Activity}'"
+                : "the villager is no longer loaded";
+            string holdings = $"wood chest holds {inWood}, stone chest holds {inStone}";
+
+            if (!caughtFetching)
+            {
+                yield return BenchmarkUiScenario.PhotographAtWork("haul-fetching.png", subject,
+                    $"no setting-out moment was sampled; {whoOrWhat}, {holdings}",
+                    woodChest.transform.position);
+            }
+
+            if (!caughtCarrying)
+            {
+                yield return BenchmarkUiScenario.PhotographAtWork("haul-delivering.png", subject,
+                    $"no carrying moment was sampled; {whoOrWhat}, {holdings}",
+                    woodChest.transform.position);
+            }
+
+            yield return BenchmarkUiScenario.PhotographAtWork("haul-settled.png", subject,
+                $"after the hauling: {whoOrWhat}; {holdings}",
+                woodChest.transform.position);
 
             string did = string.Join(" > ", story.ToArray());
 
