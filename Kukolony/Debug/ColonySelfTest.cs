@@ -5523,10 +5523,21 @@ namespace Kukolony.Debug
             Villager villager = VillagerLifecycle.Spawn(colony);
             yield return new WaitForSecondsRealtime(.4f);
 
-            if (villager == null || !villager.TryGetComponent(out ZNetView view) || !view.IsValid() ||
-                !villager.TryGetComponent(out VisEquipment vis))
+            ZNetView view = villager != null && villager.TryGetComponent(out ZNetView found) &&
+                            found.IsValid()
+                ? found
+                : null;
+            VisEquipment vis = villager != null && villager.TryGetComponent(out VisEquipment worn)
+                ? worn
+                : null;
+
+            if (view == null || vis == null)
             {
                 report.Check(false, "axe check could spawn a villager with equipment");
+
+                // Removed even on this path. A villager left behind is counted by the next
+                // check's claim and collision measurements.
+                if (view != null) VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
                 yield break;
             }
 
@@ -5541,15 +5552,26 @@ namespace Kukolony.Debug
                 yield break;
             }
 
-            // Put one in its hand the way the job does, then ask for it back.
-            VillagerWardrobe.Set(vis, WearSlot.RightHand, axe.GetComponent<ItemDrop>().m_itemData);
-            yield return new WaitForSecondsRealtime(.3f);
+            // Put one in its hand the way the job does.
+            //
+            // Cloned with its drop prefab restored, because item data taken straight off an
+            // ObjectDB prefab has no m_dropPrefab - the field is filled in when an item
+            // passes through an inventory - and the wardrobe hashes exactly that field. Handed
+            // the bare prefab data it writes hash zero, so the hand stays empty, the control
+            // below fails, and the assertion after it passes because nothing was ever there.
+            // That is this suite's own recorded trap, and this check walked into it.
+            ItemDrop.ItemData held = axe.GetComponent<ItemDrop>().m_itemData.Clone();
+            held.m_dropPrefab = axe;
+            VillagerWardrobe.Set(vis, WearSlot.RightHand, held);
 
+            // Read with no wait. An idle villager's own tick calls PutAxeAway every frame, so
+            // anything yielded here takes the axe back before the control can see it - and
+            // the check would then prove the behaviour by never observing it.
             report.Check(VillagerWardrobe.Worn(zdo, WearSlot.RightHand) != 0,
-                "control: the villager is visibly holding something");
+                "control: the villager is visibly holding the axe",
+                $"worn={VillagerWardrobe.Worn(zdo, WearSlot.RightHand)}");
 
             ChopJob.PutAxeAway(vis, zdo);
-            yield return new WaitForSecondsRealtime(.3f);
 
             report.Check(VillagerWardrobe.Worn(zdo, WearSlot.RightHand) == 0,
                 "an axe is put away when the villager is no longer chopping");
@@ -5565,13 +5587,15 @@ namespace Kukolony.Debug
             }
             else
             {
-                VillagerWardrobe.Set(vis, WearSlot.RightHand,
-                    keepsake.GetComponent<ItemDrop>().m_itemData);
-                yield return new WaitForSecondsRealtime(.3f);
+                ItemDrop.ItemData kept = keepsake.GetComponent<ItemDrop>().m_itemData.Clone();
+                kept.m_dropPrefab = keepsake;
+                VillagerWardrobe.Set(vis, WearSlot.RightHand, kept);
 
                 int before = VillagerWardrobe.Worn(zdo, WearSlot.RightHand);
+                report.Check(before != 0, "control: the villager is visibly holding it",
+                    $"item={keepsake.name} worn={before}");
+
                 ChopJob.PutAxeAway(vis, zdo);
-                yield return new WaitForSecondsRealtime(.3f);
 
                 report.Check(VillagerWardrobe.Worn(zdo, WearSlot.RightHand) == before,
                     "control: gear the player chose is left alone - only an axe is taken back",

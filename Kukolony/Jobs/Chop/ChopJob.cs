@@ -204,9 +204,68 @@ namespace Kukolony.Jobs.Chop
             if (equipment == null || zdo == null) return;
 
             int worn = VillagerWardrobe.Worn(zdo, WearSlot.RightHand);
-            if (worn == 0 || !IsAxe(worn)) return;
+            if (worn == 0) return;
 
-            VillagerWardrobe.Set(equipment, WearSlot.RightHand, null);
+            switch (Identify(worn))
+            {
+                case HandItem.Axe:
+                    VillagerWardrobe.Set(equipment, WearSlot.RightHand, null);
+                    return;
+
+                case HandItem.Other:
+                    // The player's choice. Left alone.
+                    return;
+
+                default:
+                    // Could not tell, which is a different answer from "not an axe" and must
+                    // not share its branch: the slot persists in the save and nothing else
+                    // writes it, so quietly leaving an unidentifiable item would leave an axe
+                    // in that hand for the rest of the world with nobody any the wiser.
+                    Chatter.Warn("[chop] unknown held item",
+                        $"cannot identify held item {worn}; leaving it in place");
+                    return;
+            }
+        }
+
+        /// <summary>What a villager is holding, as far as can be told.</summary>
+        private enum HandItem
+        {
+            /// <summary>The hash resolves to nothing this build knows about.</summary>
+            Unknown,
+
+            /// <summary>Something that chops - an axe, whoever put it there.</summary>
+            Axe,
+
+            /// <summary>Something else the villager was dressed in.</summary>
+            Other
+        }
+
+        /// <summary>
+        ///     Resolves a worn prefab hash against the item table.
+        /// </summary>
+        /// <remarks>
+        ///     Asked of <c>ObjectDB</c> rather than <c>ZNetScene</c>, because the item table is
+        ///     what the equipment slot itself resolves from, and where every other hash lookup
+        ///     in this mod goes.
+        /// </remarks>
+        private static HandItem Identify(int prefabHash)
+        {
+            if (ObjectDB.instance == null) return HandItem.Unknown;
+
+            foreach (GameObject prefab in ObjectDB.instance.m_items)
+            {
+                if (prefab == null || prefab.name.GetStableHashCode() != prefabHash) continue;
+                if (!prefab.TryGetComponent(out ItemDrop drop) || drop.m_itemData?.m_shared == null)
+                {
+                    return HandItem.Other;
+                }
+
+                return drop.m_itemData.m_shared.m_damages.m_chop > 0f
+                    ? HandItem.Axe
+                    : HandItem.Other;
+            }
+
+            return HandItem.Unknown;
         }
 
         /// <summary>This villager's own record, for reading what it is wearing.</summary>
@@ -214,18 +273,6 @@ namespace Kukolony.Jobs.Chop
         {
             ZDOID id = context.Villager.Id;
             return id.IsNone() ? null : ZDOMan.instance?.GetZDO(id);
-        }
-
-        /// <summary>Whether a worn prefab hash is something that chops.</summary>
-        private static bool IsAxe(int prefabHash)
-        {
-            GameObject prefab = ZNetScene.instance != null
-                ? ZNetScene.instance.GetPrefab(prefabHash)
-                : null;
-
-            return prefab != null && prefab.TryGetComponent(out ItemDrop drop) &&
-                   drop.m_itemData?.m_shared != null &&
-                   drop.m_itemData.m_shared.m_damages.m_chop > 0f;
         }
 
         internal static JobResult Tick(ChopContext context, out string activity)

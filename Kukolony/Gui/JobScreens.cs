@@ -174,8 +174,22 @@ namespace Kukolony.Gui
 
             if (!string.IsNullOrEmpty(job.WorkArea) && column.TryRow(out Row radius))
             {
-                float shown = job.WorkRadius > 0f ? job.WorkRadius : WorkArea.DefaultRadius;
-                Widgets.Number(radius, "How far it reaches", shown, 8f, 128f, 4f,
+                // The number actually in force, not a constant that happens to be the
+                // fallback for some work areas. Pointed at a flag, an unset reach means the
+                // flag's own radius - so a job on a two-hundred-metre flag used to read
+                // "48 m" on this row while working the whole outpost, and no slider position
+                // could have stated the truth.
+                float shown = WorkArea.For(colony, job).Radius;
+
+                // Capped for chopping at the ceiling the scan will honour, because a reach
+                // set past it is a promise this screen cannot keep: the search never looks
+                // that far, so the job would report nothing to chop for trees this row said
+                // were in range.
+                float most = job.Kind == JobKind.Chop
+                    ? Mathf.Min(128f, ModConfig.ResourceScanRadius.Value)
+                    : 128f;
+
+                Widgets.Number(radius, "How far it reaches", Mathf.Min(shown, most), 8f, most, 4f,
                     value => $"{value:F0} m",
                     value => Edit(host, j => j.WorkRadius = value));
             }

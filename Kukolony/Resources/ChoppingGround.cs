@@ -104,19 +104,23 @@ namespace Kukolony.Resources
             // the search the same way the hearth does.
             float bound = ModConfig.ResourceScanRadius.Value;
 
-            // Every anchor gets the same reach: the config distance. The hearth and each
-            // claimed flag are both places the Kolony works, and the setting is the single
-            // ceiling on how far from any of them work is looked for.
+            // The hearth and every claimed flag both anchor the search, each out to the
+            // config distance - but never past the ground the keep-alive actually holds
+            // open for it.
             //
-            // A flag was briefly capped at its own radius instead, to keep a settlement of
-            // many outposts from scanning more than the setting appears to allow. That
-            // inverted the rule the job relies on - the scan bounds, the work area narrows -
-            // and a job whose reach was set wider than its flag then found nothing while its
-            // own screen said otherwise. The breadth is the cost of the setting being the
-            // ceiling, and the setting is the player's to lower.
+            // That second bound is the one that took three attempts. The config alone
+            // inverted nothing, but it let the scan offer trees in zones nothing keeps
+            // loaded: a flag with a small radius holds only its own circle plus a ring, so
+            // work beyond that exists while a player happens to be out there and vanishes
+            // when they walk home. A job that finds work only when watched is the exact
+            // fault off-screen simulation is for. Capping at the flag's bare radius instead
+            // was worse - it inverted the rule the job relies on, that the scan bounds and
+            // the work area narrows. So: the config is the ceiling, and what is kept loaded
+            // is the floor under it.
             Anchors.Clear();
             Vector3 hearth = colony.transform.position;
-            Anchors.Add(new Vector4(hearth.x, hearth.y, hearth.z, bound));
+            Anchors.Add(new Vector4(hearth.x, hearth.y, hearth.z,
+                Mathf.Min(bound, Kept(Colonies.Colony.ConfiguredRadius))));
 
             IReadOnlyList<Vector4> flags = Colonies.KolonyReach.FlagAreas(colony);
             for (int i = 0; i < flags.Count; i++)
@@ -124,7 +128,7 @@ namespace Kukolony.Resources
                 // Copied out immediately, and by index: that list is a shared scratch buffer
                 // rebuilt on the next ask by anyone.
                 Vector4 flag = flags[i];
-                Anchors.Add(new Vector4(flag.x, flag.y, flag.z, bound));
+                Anchors.Add(new Vector4(flag.x, flag.y, flag.z, Mathf.Min(bound, Kept(flag.w))));
             }
 
             foreach (ZNetView view in ZNetScene.instance.m_instances.Values)
@@ -140,6 +144,19 @@ namespace Kukolony.Resources
 
             return cache.Found;
         }
+
+        /// <summary>
+        ///     How far from a circle's centre the keep-alive actually holds zones open.
+        /// </summary>
+        /// <remarks>
+        ///     The same arithmetic <c>KeepAliveZones</c> applies to a circle anchor: its own
+        ///     radius plus one ring of neighbouring zones, so the edge of an outpost is
+        ///     walkable ground rather than a cliff into nothing. Written here rather than
+        ///     shared because the two are asking different questions of the same number - one
+        ///     decides which zones to hold, this decides how far it is honest to look - and a
+        ///     single helper would invite changing both by editing one.
+        /// </remarks>
+        private static float Kept(float radius) => radius + 64f;
 
         /// <summary>
         ///     Where this colony works and how far, reused across refreshes so the scan does
