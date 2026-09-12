@@ -243,6 +243,96 @@ namespace Kukolony.Debug
         }
 
         /// <summary>
+        ///     One slice of the acceptance run, with only the setup its own checks need.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The full run builds a settlement, exercises registration, hauling, tidying,
+        ///         resting, work areas, travel and the screens, then saves and relaunches to
+        ///         verify persistence. That is the right shape for proving a release and the
+        ///         wrong shape for iterating on one feature: most of an hour of real time, of
+        ///         which the part under test is two minutes.
+        ///     </para>
+        ///     <para>
+        ///         So a focus runs its own checks against a bare colony and nothing else. It
+        ///         deliberately shares the checks themselves rather than copying them - a
+        ///         focused run that drifted from the full one would be worse than no focused
+        ///         run, because it would pass while the real one failed.
+        ///     </para>
+        /// </remarks>
+        internal static IEnumerator RunFocused(string runId, string focus)
+        {
+            LastPassed = false;
+            string wanted = (focus ?? string.Empty).Trim().ToLowerInvariant();
+            TestReport report = new TestReport($"Colony acceptance run - {wanted} only");
+
+            Vector3 origin = Player.m_localPlayer.transform.position;
+            Colony colony = Spawn<Colony>(ColonyPrefab.PrefabName, origin + Vector3.forward * 4f);
+            report.Check(colony != null, "colony prefab is registered");
+            if (colony == null) { LastPassed = report.Print(); yield break; }
+
+            colony.EnsureNamed();
+            colony.State.SetName(PersistenceName);
+            SetRunId(colony, runId);
+            yield return new WaitForSecondsRealtime(.3f);
+
+            switch (wanted)
+            {
+                case "chop":
+                    yield return CheckChoppingIndex(report);
+                    yield return CheckTreesAreKeptLoaded(report);
+                    yield return CheckTheAxeIsPutAway(report, colony);
+                    yield return CheckACappedChestKeepsWhatItHas(report, colony, origin);
+                    yield return CheckUnclaimedDamageDoesNothing(report, origin);
+                    yield return CheckGivingUpOnAnUncuttableTree(report, origin);
+                    yield return CheckChopSettings(report, origin);
+                    yield return CheckChopStoppingRules(report, colony, origin);
+                    yield return CheckChoppingFellsATree(report, colony, origin);
+                    break;
+
+                case "travel":
+                    yield return CheckWorkFlags(report, colony, origin);
+                    yield return CheckDistantTravel(report, colony, origin);
+                    yield return CheckFlagToFlagTravel(report, colony, origin);
+                    break;
+
+                default:
+                    // Named but unknown. Failing beats running everything under a name that
+                    // says otherwise, or running nothing and reporting a pass.
+                    report.Check(false, $"'{wanted}' is not a slice this run knows",
+                        "known: chop, travel");
+                    break;
+            }
+
+            // The fixtures go with it. A focused run does not save, so anything left standing
+            // is left in the player's world rather than in a throwaway one.
+            Cleanup(colony);
+            LastPassed = report.Print();
+        }
+
+        /// <summary>Takes a focused run's colony and everything it registered back out again.</summary>
+        private static void Cleanup(Colony colony)
+        {
+            if (colony == null) return;
+
+            foreach (ZDOID member in colony.State.GetMembers(ColonyMemberKind.Villager))
+            {
+                VillagerLifecycle.Remove(colony, member);
+            }
+
+            foreach (StructureRecord record in colony.State.GetStructures())
+            {
+                colony.RemoveStructure(record.Id);
+            }
+
+            if (colony.TryGetComponent(out ZNetView view) && view.IsValid())
+            {
+                view.ClaimOwnership();
+                ZNetScene.instance.Destroy(colony.gameObject);
+            }
+        }
+
+        /// <summary>
         ///     Second-launch phase: assert the snapshot written before exit survived the save,
         ///     including cross-ZDO references that a chunked save renormalises, then clean up
         ///     the run's fixtures.

@@ -106,6 +106,18 @@ namespace Kukolony.Debug
             Write("heartbeat.txt", "settling " + DateTime.UtcNow.ToString("O"));
             yield return new WaitForSecondsRealtime(ModConfig.BenchmarkSettleSeconds.Value);
 
+            // A focused run is its own whole thing: one stage, no save, no relaunch, no
+            // screenshots. It exists so that iterating on one feature costs minutes rather
+            // than most of an hour, and every step below that it skips is a step that only
+            // earns its time when the whole settlement is being proved.
+            string focus = (ModConfig.BenchmarkFocus.Value ?? string.Empty).Trim();
+            if (focus.Length > 0)
+            {
+                yield return Guard("focus-" + focus, BenchmarkFunctionalScenario.RunFocused(_runId, focus));
+                yield return Finish("focus", !_phaseFailed && BenchmarkFunctionalScenario.LastPassed);
+                yield break;
+            }
+
             bool passed = false;
             string stage = "create";
             bool reloadExpected = PreviousCreatePassed();
@@ -167,6 +179,19 @@ namespace Kukolony.Debug
                 passed &= !_phaseFailed;
             }
 
+            yield return Finish(stage, passed);
+        }
+
+        /// <summary>
+        ///     Writes the terminal marker the shell waits for, and leaves if asked to.
+        /// </summary>
+        /// <remarks>
+        ///     Shared by the full run and a focused one so the harness has one thing to wait
+        ///     for. A focused run that wrote a different marker would need its own waiting
+        ///     logic in the script, and the two would drift.
+        /// </remarks>
+        private IEnumerator Finish(string stage, bool passed)
+        {
             string terminal = $"BENCHMARK TERMINAL {stage} {(passed ? "PASS" : "FAIL")} run={_runId}";
             Write("benchmark-" + stage + ".log", TestReport.LastText + Environment.NewLine + terminal + Environment.NewLine);
             Write("benchmark-report.json", "{\"runId\":\"" + Escape(_runId) + "\",\"stage\":\"" + stage +
@@ -175,6 +200,7 @@ namespace Kukolony.Debug
             Write("heartbeat.txt", (ModConfig.BenchmarkAutoExit.Value ? "exiting " : "complete ") +
                 DateTime.UtcNow.ToString("O"));
             if (ModConfig.BenchmarkAutoExit.Value) Application.Quit();
+            yield break;
         }
 
         private IEnumerator Guard(string name, IEnumerator phase)

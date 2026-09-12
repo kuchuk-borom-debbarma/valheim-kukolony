@@ -80,6 +80,9 @@ namespace Kukolony
         internal static ConfigEntry<bool> BenchmarkScreenshots { get; private set; }
         internal static ConfigEntry<bool> BenchmarkAutoExit { get; private set; }
 
+        /// <summary>Which slice of the acceptance run to execute. Empty runs all of it.</summary>
+        internal static ConfigEntry<string> BenchmarkFocus { get; private set; }
+
         internal static void Bind(ConfigFile config)
         {
             // Binding writes the file once per entry by default; batch it instead.
@@ -266,6 +269,12 @@ namespace Kukolony
                 "World used only by automated menu boot. Manual benchmark mode runs in the world you enter.");
             BenchmarkRunId = config.Bind("9 - Development", nameof(BenchmarkRunId), string.Empty,
                 "Stable ID shared by create and reload processes. Empty generates one in-game.");
+            BenchmarkFocus = config.Bind("9 - Development", nameof(BenchmarkFocus), string.Empty,
+                "Run one slice of the acceptance checks instead of all of them: 'chop' or "
+                + "'travel'. Empty runs everything. A focused run does the minimum setup its "
+                + "own checks need and skips the reload phase, so it costs a couple of minutes "
+                + "rather than most of an hour - which is what makes it usable while iterating "
+                + "on one feature.");
             BenchmarkOutputPath = config.Bind("9 - Development", nameof(BenchmarkOutputPath),
                 "BepInEx/kukolony-benchmarks", "Canonical folder for benchmark reports and screenshots.");
             BenchmarkSettleSeconds = config.Bind("9 - Development", nameof(BenchmarkSettleSeconds), 10f,
