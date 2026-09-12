@@ -175,6 +175,7 @@ namespace Kukolony.Debug
             yield return CheckResting(report, colony, origin);
             CheckSayingThingsOnce(report);
             yield return CheckMapPins(report, colony);
+            yield return CheckBulkAssignment(report, colony);
             yield return CheckDistantTravel(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
@@ -820,6 +821,109 @@ namespace Kukolony.Debug
         ///         the control that says the measurement apparatus itself is sound.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     One preset, given to everybody at once, including villagers nobody has loaded.
+        /// </summary>
+        /// <remarks>
+        ///     The unloaded half is the point. A settlement worth assigning in bulk is spread
+        ///     over enough ground that some of it is always out of memory, and orders that only
+        ///     reached whoever happened to be standing nearby would be worse than none - a player
+        ///     would have no way to tell which half took.
+        /// </remarks>
+        private static IEnumerator CheckBulkAssignment(TestReport report, Colony colony)
+        {
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "bulk-a", Name = "First", Kind = JobKind.Haul, Repeat = 2 },
+                new JobDefinition { Id = "bulk-b", Name = "Second", Kind = JobKind.Haul, Repeat = 3 }
+            });
+
+            JobPreset preset = new JobPreset
+            {
+                Id = "bulk-preset",
+                Name = "Hauler",
+                Jobs = new List<string> { "bulk-a", "bulk-b" }
+            };
+
+            colony.State.SetPresets(new List<JobPreset> { preset });
+
+            JobPreset reread = colony.State.GetPresets().Find(p => p.Id == "bulk-preset");
+            report.Check(reread != null && reread.Name == "Hauler" && reread.Jobs.Count == 2 &&
+                         reread.Jobs[0] == "bulk-a" && reread.Jobs[1] == "bulk-b",
+                "a preset survives being written to the colony record, in order",
+                reread == null ? "no record" : $"'{reread.Name}' with {reread.Jobs.Count} job(s)");
+
+            List<ZDOID> made = new List<ZDOID>();
+            for (int i = 0; i < 3; i++)
+            {
+                Villager villager = VillagerLifecycle.Spawn(colony);
+                yield return null;
+                if (villager != null && villager.TryGetComponent(out ZNetView spawned) && spawned.IsValid())
+                {
+                    made.Add(spawned.GetZDO().m_uid);
+                }
+            }
+
+            report.Check(made.Count == 3, "control: three villagers to assign work to",
+                $"spawned={made.Count}");
+            if (made.Count != 3) yield break;
+
+            // One of them is unloaded on purpose: its ZDO stays, its instance goes. That is the
+            // state most of a real settlement is in most of the time.
+            //
+            // Unloaded the way the game unloads things - drop it from the scene's instance table
+            // and destroy the object - NOT with ZNetScene.Destroy, which destroys the ZDO as
+            // well. Using that deleted the villager outright, and the check correctly reported
+            // that two of three had been assigned: the code had behaved properly and the fixture
+            // had not.
+            GameObject instance = ZNetScene.instance.FindInstance(made[2]);
+            if (instance != null && instance.TryGetComponent(out ZNetView loaded) && loaded.IsValid())
+            {
+                ZNetScene.instance.m_instances.Remove(loaded.GetZDO());
+                UnityEngine.Object.Destroy(instance);
+            }
+
+            yield return new WaitForSecondsRealtime(.5f);
+
+            report.Check(ZNetScene.instance.FindInstance(made[2]) == null,
+                "control: one of them really is unloaded",
+                $"loaded={(ZNetScene.instance.FindInstance(made[2]) != null)}");
+
+            int assigned = Assignment.Apply(Assignment.Everyone(colony), preset.Jobs);
+            report.Check(assigned >= 3,
+                "one preset assigns every villager in the settlement at once",
+                $"assigned={assigned} of {Assignment.Everyone(colony).Count}");
+
+            int carried = 0;
+            foreach (ZDOID id in made)
+            {
+                ZDO zdo = ZDOMan.instance.GetZDO(id);
+                if (zdo == null) continue;
+
+                List<string> queue = new VillagerState(zdo).GetQueue();
+                if (queue.Count == 2 && queue[0] == "bulk-a" && queue[1] == "bulk-b") carried++;
+            }
+
+            report.Check(carried == 3,
+                "control: the orders reached the unloaded villager as well as the loaded ones",
+                $"{carried} of 3 carry the queue in order");
+
+            // And a reassignment starts the new orders from the beginning rather than resuming
+            // at whatever position the old queue had reached.
+            ZDO first = ZDOMan.instance.GetZDO(made[0]);
+            new VillagerState(first).SetQueuePosition(1);
+            Assignment.Apply(new List<ZDOID> { made[0] }, preset.Jobs);
+
+            report.Check(new VillagerState(ZDOMan.instance.GetZDO(made[0])).QueuePosition == 0,
+                "control: new orders start at the beginning, not where the old ones left off",
+                $"position={new VillagerState(ZDOMan.instance.GetZDO(made[0])).QueuePosition}");
+
+            foreach (ZDOID id in made) VillagerLifecycle.Remove(colony, id);
+            colony.State.SetPresets(new List<JobPreset>());
+            colony.State.SetJobs(new List<JobDefinition>());
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
         /// <summary>
         ///     Every villager appears on the map, and none of it is written to the save.
         /// </summary>

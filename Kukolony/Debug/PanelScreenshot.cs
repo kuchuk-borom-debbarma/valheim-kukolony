@@ -186,6 +186,24 @@ namespace Kukolony.Debug
             yield return new WaitForSecondsRealtime(.4f);
             yield return Capture("colony-screen-job.png");
 
+            // A preset with something in it, because an empty one shows none of what the screen
+            // is for - a photograph must frame its subject.
+            colony.State.SetPresets(new List<JobPreset>
+            {
+                new JobPreset
+                {
+                    Id = "screenshot-preset", Name = "Hauler",
+                    Jobs = new List<string> { "screenshot-haul" }
+                }
+            });
+
+            screen.Root(new ColonyHomeScreen());
+            screen.Push(new JobListScreen());
+            screen.Push(new PresetListScreen());
+            screen.Push(new PresetDetailScreen("screenshot-preset"));
+            yield return new WaitForSecondsRealtime(.4f);
+            yield return Capture("colony-screen-preset.png");
+
             screen.Root(new ColonyHomeScreen());
             screen.Push(new VillagerListScreen());
             yield return new WaitForSecondsRealtime(.4f);

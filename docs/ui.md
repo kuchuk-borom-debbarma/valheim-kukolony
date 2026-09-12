@@ -142,6 +142,31 @@ A villager's **Works at** row is a multi-select whose order is kept, because a q
 order. It reads as the first job plus a count — "Haul +4" — rather than a list that would not fit
 and would be truncated somewhere arbitrary.
 
+## Presets, and handing work out
+
+A **job** says what work is. A **preset** is a named queue — "Hauler" is *these jobs in this
+order* — which is the unit you actually want to copy to many villagers. Without one, a settlement
+of a hundred is assigned a hundred times by hand.
+
+A preset holds job *identities*, not copies of their settings, so editing a job changes it for
+everyone doing it. Copying settings in would make a preset a snapshot, and a settlement would
+drift back into a hundred configurations by a slower route.
+
+**Applying is a one-way copy.** A villager assigned from a preset is simply a villager with that
+queue; editing the preset afterwards does not reach back, and deleting it leaves everyone's
+orders alone. The alternative is a villager whose orders change because somebody edited a
+template they no longer remember applying.
+
+Assignment reaches **villagers that are not loaded**, which is most of the point — a settlement
+worth assigning in bulk is spread over enough ground that some of it is always out of memory.
+Orders are written to the villager's own ZDO after claiming ownership, because `ZDO.Set` ignores
+its `okForNotOwner` argument and a non-owner's write is discarded on the next sync. The count
+reported back is how many *actually* took it, not how many were asked: "assigned to 12" when it
+was 11 is the kind of small lie that makes a player distrust the screen.
+
+New orders start at the beginning of the queue rather than resuming at whatever position the old
+ones had reached.
+
 ## The villager screens
 
 A villagers list off the colony screen, and a screen per villager: name, what they are doing,

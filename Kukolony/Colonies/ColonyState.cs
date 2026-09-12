@@ -30,6 +30,7 @@ namespace Kukolony.Colonies
         ///     what stops a settlement of a hundred being a hundred configurations.
         /// </summary>
         private static readonly int JobsKey = "kukolony.colony.jobs.v1".GetStableHashCode();
+        private static readonly int PresetsKey = "kukolony.colony.presets.v1".GetStableHashCode();
 
         private static readonly int StructuresKey = "kukolony.colony.structures.v2".GetStableHashCode();
 
@@ -129,6 +130,41 @@ namespace Kukolony.Colonies
             }
 
             return result;
+        }
+
+        /// <summary>The named queues this settlement keeps, for assigning work in bulk.</summary>
+        internal List<Jobs.JobPreset> GetPresets()
+        {
+            List<Jobs.JobPreset> result = new List<Jobs.JobPreset>();
+            string encoded = _zdo?.GetString(PresetsKey, string.Empty) ?? string.Empty;
+            if (string.IsNullOrEmpty(encoded)) return result;
+
+            try
+            {
+                ZPackage p = new ZPackage(encoded);
+                if (p.ReadInt() != 1) return result;
+
+                int count = p.ReadInt();
+                if (count < 0 || count > 256) return result;
+
+                for (int i = 0; i < count; i++) result.Add(Jobs.JobPreset.Read(p));
+            }
+            catch (System.Exception e)
+            {
+                Core.Log.Warning("[colony] invalid preset record: " + e.Message);
+            }
+
+            return result;
+        }
+
+        internal void SetPresets(List<Jobs.JobPreset> presets)
+        {
+            ZPackage p = new ZPackage();
+            p.Write(1);
+            p.Write(presets.Count);
+            foreach (Jobs.JobPreset preset in presets) preset.Write(p);
+
+            _zdo.Set(PresetsKey, p.GetBase64());
         }
 
         internal void SetJobs(List<Jobs.JobDefinition> jobs)

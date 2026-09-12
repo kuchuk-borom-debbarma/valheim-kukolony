@@ -42,6 +42,15 @@ namespace Kukolony.Gui
                 Widgets.Button(row, "Open", 110f, () => host.Push(new JobDetailScreen(id)));
             }
 
+            // Presets live next to jobs because that is where a player is when they realise
+            // they are about to configure the same thing twenty times.
+            if (column.TryRow(out Row presets))
+            {
+                Widgets.Caption(presets, "Work presets");
+                Widgets.Caption(presets, colony.State.GetPresets().Count.ToString(), 80f);
+                Widgets.Button(presets, "Manage", 160f, () => host.Push(new PresetListScreen()));
+            }
+
             if (!column.TryRow(out Row adding)) return;
 
             Widgets.Button(adding, "New job", 200f, () =>
