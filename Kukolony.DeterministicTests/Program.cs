@@ -4,7 +4,6 @@ using Kukolony.Jobs;
 using Kukolony.Villagers.Navigation;
 using Kukolony.Villagers;
 using Kukolony.Jobs.Haul;
-using Kukolony.Colonies;
 using Kukolony.Jobs.Chop;
 using Kukolony.Jobs.Tend;
 
