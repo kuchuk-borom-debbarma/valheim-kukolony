@@ -194,6 +194,38 @@ namespace Kukolony.Gui
             ? $"{_chosen.Count} chosen - order is kept"
             : null;
 
+        /// <summary>How wide the box is, and how much is left for the name beside it.</summary>
+        /// <remarks>
+        ///     Seventy and five hundred against a content width of eight hundred, which leaves
+        ///     room the old two-cell row did not have: the name had four hundred and twenty and
+        ///     the button a hundred and fifty, and a job named at length ran straight through
+        ///     both.
+        /// </remarks>
+        private const float MarkWidth = 70f;
+
+        private const float LabelWidth = 500f;
+
+        /// <summary>
+        ///     A tick box, or a radio button when only one thing may be picked.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The shape says how many may be chosen before anything is pressed: square
+        ///         brackets take several, round ones take one and replace what was there. That
+        ///         is a thing the words "Choose" and "Chosen" never said at all.
+        ///     </para>
+        ///     <para>
+        ///         Drawn in ASCII rather than with the box characters that would look better.
+        ///         The game's font is its own asset and nothing here can promise it carries
+        ///         U+2611 - a glyph it lacks renders as an empty rectangle, which is precisely
+        ///         the state this is meant to distinguish.
+        ///     </para>
+        /// </remarks>
+        private string Mark(bool picked) =>
+            _multiple
+                ? picked ? "[x]" : "[ ]"
+                : picked ? "(o)" : "( )";
+
         internal override void Build(ColonyScreen host, Column column)
         {
             if (column.TryRow(out Row searchRow))
@@ -225,10 +257,14 @@ namespace Kukolony.Gui
                 }
 
                 bool picked = _chosen.Contains(option.Id);
-                Widgets.Caption(row, option.Label, 420f);
 
+                // The box first and the name after it, which is the way a list of choices is
+                // read - and a box says what it is without a verb. "Choose" and "Chosen" differ
+                // by two letters in the middle of a word, so telling a picked row from an
+                // unpicked one meant reading rather than glancing, down a list where glancing
+                // is the whole job.
                 Option captured = option;
-                Widgets.Button(row, picked ? "Chosen" : "Choose", 150f, () =>
+                Widgets.Button(row, Mark(picked), MarkWidth, () =>
                 {
                     if (_multiple)
                     {
@@ -249,6 +285,8 @@ namespace Kukolony.Gui
                     _commit(new List<string> { captured.Id });
                     host.Pop();
                 });
+
+                Widgets.Caption(row, option.Label, LabelWidth);
             }
         }
 
