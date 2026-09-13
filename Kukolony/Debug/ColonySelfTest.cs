@@ -7078,7 +7078,19 @@ namespace Kukolony.Debug
             int coalBefore = CountIn(box, fuel);
             float fuelBefore = smelter.GetFuel();
 
+            // Where it was standing when it ran out of things to do. A villager with nothing to
+            // do should be standing still, and for a long time it was not: saying "nothing to
+            // haul" does not stop a Valheim character, which keeps the direction it was last
+            // given until something takes it back - so one walked off in a straight line and
+            // was found swimming out to sea. This is the half minute in which that shows.
+            Vector3 stood = hand.transform.position;
+
             for (int attempt = 0; attempt < 60; attempt++) yield return new WaitForSecondsRealtime(.5f);
+
+            float drifted = Utils.DistanceXZ(stood, hand.transform.position);
+            report.Check(drifted <= 4f,
+                "a villager with nothing to do stays where it is",
+                $"drifted={drifted:0.#}m while saying '{hand.Activity}'");
 
             int coalIdle = CountIn(box, fuel);
             float fuelIdle = smelter.GetFuel();

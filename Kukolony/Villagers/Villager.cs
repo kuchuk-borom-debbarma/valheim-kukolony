@@ -703,6 +703,20 @@ namespace Kukolony.Villagers
             }
 
             Jobs.JobResult result = Run(colony, job, state, deltaTime, out string doing);
+
+            // A job that is not running is not walking anywhere, and saying so is not the same
+            // as stopping. A Valheim character keeps the direction it was last given until
+            // something takes it back, so a villager that walked towards a log and then found
+            // the trip over - nothing to haul, the load delivered, the target taken by someone
+            // else - kept walking that way for ever. In a straight line, across whatever was in
+            // front of it. It was last seen swimming out to sea with "nothing to haul" written
+            // over its head.
+            //
+            // Here rather than in each job, because this is the one place that sees every
+            // outcome of every job, and the bug is exactly the kind a job forgets rather than
+            // gets wrong.
+            if (result != Jobs.JobResult.Running) _walk.Stop();
+
             Jobs.QueueRunner.Apply(state, jobs, result);
 
             // Work is paid for when something is actually decided - a finished trip, or a failed
