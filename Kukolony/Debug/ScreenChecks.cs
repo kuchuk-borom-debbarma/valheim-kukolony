@@ -37,6 +37,7 @@ namespace Kukolony.Debug
             yield return Context(report, screen, colony, origin);
             yield return Layout(report, screen, colony);
             yield return StructureStatusReads(report, screen, colony);
+            yield return CraftingScreensRead(report, screen, colony);
             yield return Paging(report, screen, colony);
             yield return BackStack(report, screen, colony);
             yield return SubjectVanishes(report, screen, origin);
@@ -253,6 +254,60 @@ namespace Kukolony.Debug
         ///     Asserted on the row the player reads rather than on the enum behind it, because
         ///     the fault was in the rendering and an enum check would have passed throughout.
         /// </remarks>
+        /// <summary>
+        ///     A crafting station's own screen, and one of its orders, draw without faults.
+        /// </summary>
+        /// <remarks>
+        ///     Audited against a record rather than a real workbench, because what is under test
+        ///     is the layout and a fixture station would have to be built, registered and torn
+        ///     down for it. The prefab name is real, so the catalogue behind the picker is the
+        ///     one a player would see.
+        /// </remarks>
+        private static IEnumerator CraftingScreensRead(TestReport report, ColonyScreen screen, Colony colony)
+        {
+            List<StructureRecord> before = colony.State.GetStructures();
+
+            List<StructureRecord> with = new List<StructureRecord>(before);
+            StructureRecord bench = new StructureRecord
+            {
+                Id = ZDOID.None, PersistentId = "audit-bench",
+                Name = "A workbench with a long enough name to crowd its row",
+                Prefab = "piece_workbench", Capabilities = StructureCapability.Crafting
+            };
+
+            // An order in each mode, and one finished, so every branch of the row's summary is
+            // drawn at least once.
+            bench.Settings.Orders.Add(new StructureOrder { Item = "Wood", Count = 1200 });
+            bench.Settings.Orders.Add(new StructureOrder
+                { Item = "Stone", Count = 50, Mode = OrderMode.Once, Done = true });
+            with.Add(bench);
+            colony.State.SetStructures(with);
+
+            try
+            {
+                screen.Root(new ColonyHomeScreen());
+                screen.Push(new StructureDetailScreen("audit-bench", ZDOID.None));
+                yield return null;
+
+                ScreenAudit.Result station = ScreenAudit.Inspect(screen.Content);
+                report.Check(station.Clean,
+                    "a crafting station's screen has no layout faults, orders and all",
+                    station.Clean ? station.Summary : station.FirstFault);
+
+                screen.Push(new StructureOrderScreen("audit-bench", ZDOID.None, "Stone"));
+                yield return null;
+
+                ScreenAudit.Result order = ScreenAudit.Inspect(screen.Content);
+                report.Check(order.Clean, "and so does one of its orders",
+                    order.Clean ? order.Summary : order.FirstFault);
+            }
+            finally
+            {
+                colony.State.SetStructures(before);
+                screen.Root(new ColonyHomeScreen());
+            }
+        }
+
         private static IEnumerator StructureStatusReads(TestReport report, ColonyScreen screen, Colony colony)
         {
             screen.Close();

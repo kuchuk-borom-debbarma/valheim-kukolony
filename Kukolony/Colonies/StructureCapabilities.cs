@@ -36,7 +36,18 @@ namespace Kukolony.Colonies
         ///     capability whose holder is exempt from the reach gate, because being beyond
         ///     reach is its entire purpose.
         /// </summary>
-        WorkArea = 128
+        WorkArea = 128,
+
+        /// <summary>
+        ///     Things are made here by hand. A CraftingStation - workbench, forge, cauldron.
+        /// </summary>
+        /// <remarks>
+        ///     A fresh bit rather than one a retired capability used, for the reason
+        ///     <see cref="Rest" /> took one: a record carrying a retired bit would otherwise
+        ///     come back as a crafting station, and a settlement would try to forge nails at
+        ///     an old fireplace.
+        /// </remarks>
+        Crafting = 256
     }
 
     /// <summary>
@@ -55,7 +66,7 @@ namespace Kukolony.Colonies
     /// </remarks>
     internal const StructureCapability Known =
         StructureCapability.Storage | StructureCapability.Processing | StructureCapability.Rest |
-        StructureCapability.WorkArea;
+        StructureCapability.WorkArea | StructureCapability.Crafting;
 
     /// <summary>
     ///     What a player should read for a set of capabilities.
@@ -75,11 +86,12 @@ namespace Kukolony.Colonies
         capabilities &= Known;
         if (capabilities == StructureCapability.None) return "no longer understood";
 
-        List<string> parts = new List<string>(3);
+        List<string> parts = new List<string>(5);
         if ((capabilities & StructureCapability.Storage) != 0) parts.Add("Storage");
         if ((capabilities & StructureCapability.Processing) != 0) parts.Add("Processing");
         if ((capabilities & StructureCapability.Rest) != 0) parts.Add("Rest");
         if ((capabilities & StructureCapability.WorkArea) != 0) parts.Add("Work area");
+        if ((capabilities & StructureCapability.Crafting) != 0) parts.Add("Crafting");
         return string.Join(" + ", parts.ToArray());
     }
     }

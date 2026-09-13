@@ -112,6 +112,21 @@ namespace Kukolony.Gui
             }
 
             StructureSettings settings = record.Settings;
+
+            // Above the capability panels because it governs all of them. A switched-off
+            // structure keeps its name, its orders and everything else it was told - turning
+            // it off for a night is not unregistering it, and it comes back configured.
+            if (column.TryRow(out Row service))
+            {
+                Widgets.Flag(service, "Villagers may use this", settings.InService, value =>
+                {
+                    ColonyOperations.EditSettings(colony, record.Id, s => s.InService = value);
+                    Report.Say(value ? $"{record.Name} is back in service."
+                        : $"{record.Name} is out of service.");
+                    host.Refresh();
+                });
+            }
+
             if ((record.Capabilities & StructureCapability.Storage) != 0)
             {
                 BuildStorage(host, column, colony, record, settings);
@@ -120,6 +135,11 @@ namespace Kukolony.Gui
             if ((record.Capabilities & StructureCapability.Processing) != 0)
             {
                 BuildProcessing(host, column, colony, record, settings);
+            }
+
+            if ((record.Capabilities & StructureCapability.Crafting) != 0)
+            {
+                BuildCrafting(host, column, colony, record, settings);
             }
 
             if ((record.Capabilities & StructureCapability.Rest) != 0)
@@ -314,6 +334,127 @@ namespace Kukolony.Gui
         }
 
         /// <summary>
+        ///     What this station is to make, and whether gear may be mended at it.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The catalogue comes from the prefab, so a forge at an outpost can be given
+        ///         orders from home - the same property the processing rows rely on. What it
+        ///         cannot answer from home is the station's <em>level</em>, which depends on
+        ///         extensions standing beside it that may not be loaded, so recipes needing a
+        ///         higher level are listed and marked rather than hidden. Hiding them would
+        ///         make an unloaded forge look like it could make less than it can.
+        ///     </para>
+        ///     <para>
+        ///         One row per order, opening a screen, rather than the two rows an order needs
+        ///         to show inline. Rows are finite - <c>TryRow</c> stops handing them out - and
+        ///         a cauldron can be given a dozen orders.
+        ///     </para>
+        /// </remarks>
+        private static void BuildCrafting(ColonyScreen host, Column column, Colony colony,
+            StructureRecord record, StructureSettings settings)
+        {
+            List<CraftOption> catalogue = CraftCatalogue.For(CraftCatalogue.StationNameOf(record.Prefab));
+
+            if (catalogue.Count == 0)
+            {
+                if (column.TryRow(out Row none))
+                {
+                    Widgets.Label(none, "Nothing known to make here.", Color.gray);
+                }
+            }
+            else if (column.TryRow(out Row make))
+            {
+                List<string> ordered = Ordered(settings);
+                Widgets.Choice(make, "Makes", ordered.Count == 0 ? "nothing" : Summarise(ordered),
+                    () => host.Push(new PickerScreen("What to make here",
+                        filter => CraftOptions(catalogue, filter), ordered, true, chosen =>
+                        {
+                            ColonyOperations.EditSettings(colony, record.Id, s => Reconcile(s, chosen));
+                            host.Refresh();
+                        })));
+            }
+
+            foreach (StructureOrder order in settings.Orders)
+            {
+                if (!column.TryRow(out Row row)) continue;
+
+                string item = order.Item;
+                Widgets.Choice(row, ItemCatalogue.Label(item), Describe(order),
+                    () => host.Push(new StructureOrderScreen(record.PersistentId, record.Id, item)));
+            }
+
+            if (column.TryRow(out Row repair))
+            {
+                Widgets.Flag(repair, "Repair gear here", settings.Repairs, value =>
+                {
+                    ColonyOperations.EditSettings(colony, record.Id, s => s.Repairs = value);
+                    host.Refresh();
+                });
+            }
+        }
+
+        internal static string Describe(StructureOrder order)
+        {
+            if (order.Count <= 0) return "none";
+            if (order.Mode == OrderMode.Maintain) return $"keep {order.Count}";
+            return order.Done ? $"{order.Count} made" : $"make {order.Count}";
+        }
+
+        private static List<string> Ordered(StructureSettings settings)
+        {
+            List<string> items = new List<string>();
+            foreach (StructureOrder order in settings.Orders) items.Add(order.Item);
+            return items;
+        }
+
+        /// <summary>
+        ///     Brings the order list in line with what was picked, keeping what is already set.
+        /// </summary>
+        /// <remarks>
+        ///     Rebuilding the list from the picker would reset a count and a mode every time
+        ///     somebody added a second item - the caps rows learned that lesson the hard way,
+        ///     where committing a list destroyed the settings of everything about to be put
+        ///     straight back.
+        /// </remarks>
+        private static void Reconcile(StructureSettings settings, List<string> chosen)
+        {
+            settings.Orders.RemoveAll(o => !chosen.Contains(o.Item));
+
+            foreach (string item in chosen)
+            {
+                if (string.IsNullOrEmpty(item)) continue;
+                if (settings.Orders.Exists(o => o.Item == item)) continue;
+
+                // Ten rather than one, because the count steps in tens and an order of one
+                // would take nine taps to become a number anybody wanted.
+                settings.Orders.Add(new StructureOrder { Item = item, Count = 10 });
+            }
+        }
+
+        private static List<PickerScreen.Option> CraftOptions(List<CraftOption> catalogue, string filter)
+        {
+            List<PickerScreen.Option> options = new List<PickerScreen.Option>();
+            foreach (CraftOption option in catalogue)
+            {
+                string label = option.MinLevel > 1
+                    ? $"{option.Display} (level {option.MinLevel})"
+                    : option.Display;
+
+                if (filter.Length > 0 &&
+                    label.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0 &&
+                    option.Item.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                options.Add(new PickerScreen.Option(option.Item, label));
+            }
+
+            return options;
+        }
+
+        /// <summary>
         ///     Who sleeps here. One villager, and assigning a bed that is taken moves them.
         /// </summary>
         private static void BuildRest(ColonyScreen host, Column column, Colony colony,
@@ -367,16 +508,149 @@ namespace Kukolony.Gui
             return options;
         }
 
-        private StructureRecord Find(Colony colony)
+        private StructureRecord Find(Colony colony) => Find(colony, _token, _fallback);
+
+        /// <summary>
+        ///     The record behind a durable token, falling back to a runtime address.
+        /// </summary>
+        /// <remarks>
+        ///     Shared so every screen that outlives a structure's loaded lifetime resolves it
+        ///     the same way. Two lookups would be two chances to prefer the address, which is
+        ///     only valid while the object stays loaded.
+        /// </remarks>
+        internal static StructureRecord Find(Colony colony, string token, ZDOID fallback)
         {
+            if (colony == null) return null;
+
             List<StructureRecord> records = colony.State.GetStructures();
-            if (_token.Length > 0)
+            if (!string.IsNullOrEmpty(token))
             {
-                StructureRecord byToken = records.Find(r => r.PersistentId == _token);
+                StructureRecord byToken = records.Find(r => r.PersistentId == token);
                 if (byToken != null) return byToken;
             }
 
-            return _fallback.IsNone() ? null : records.Find(r => r.Id == _fallback);
+            return fallback.IsNone() ? null : records.Find(r => r.Id == fallback);
+        }
+    }
+
+    /// <summary>
+    ///     One order on one station: what to make, how many, and whether it stands.
+    /// </summary>
+    /// <remarks>
+    ///     Keyed on the item rather than on an index into the list. An index is only right
+    ///     until somebody else edits the station - the picker can remove a line while this
+    ///     screen is open - and editing the order that happened to slide into that slot is the
+    ///     kind of mistake nobody would ever see reported.
+    /// </remarks>
+    internal sealed class StructureOrderScreen : ScreenView
+    {
+        /// <summary>
+        ///     How much a nudge moves the count.
+        /// </summary>
+        /// <remarks>
+        ///     Ten, as the storage caps use. Counts here are settlement-scale - fifty arrows,
+        ///     two hundred nails - and stepping to those by ones is not a setting anybody would
+        ///     reach the end of.
+        /// </remarks>
+        private const float Step = 10f;
+
+        private readonly string _token;
+        private readonly ZDOID _fallback;
+        private readonly string _item;
+
+        internal StructureOrderScreen(string token, ZDOID fallback, string item)
+        {
+            _token = token ?? string.Empty;
+            _fallback = fallback;
+            _item = item ?? string.Empty;
+        }
+
+        internal override string Title => "Order";
+
+        internal override bool StillValid(ColonyScreen host) => host.Colony != null;
+
+        internal override void Build(ColonyScreen host, Column column)
+        {
+            Colony colony = host.Colony;
+            StructureRecord record = StructureDetailScreen.Find(colony, _token, _fallback);
+            StructureOrder order = record?.Settings.Orders.Find(o => o.Item == _item);
+
+            if (order == null)
+            {
+                if (column.TryRow(out Row gone))
+                {
+                    Widgets.Label(gone, "This order is no longer set.", Color.gray);
+                }
+
+                return;
+            }
+
+            if (column.TryRow(out Row what))
+            {
+                Widgets.Caption(what, "Makes");
+                Widgets.Label(what, ItemCatalogue.Label(_item));
+            }
+
+            if (column.TryRow(out Row many))
+            {
+                Widgets.Number(many, "How many", order.Count, 0f, 9999f, Step,
+                    value => value <= 0f ? "none" : ((int)value).ToString(),
+                    value => Edit(host, colony, record, o => o.Count = (int)value));
+            }
+
+            if (column.TryRow(out Row mode))
+            {
+                // Spelled as what it does rather than as the enum's own words. "Maintain" and
+                // "Once" are precise and mean nothing to somebody who has not read the code.
+                Widgets.Cycle(mode, "Repeat",
+                    new[] { "keep this many", "make them once" },
+                    order.Mode == OrderMode.Once ? 1 : 0,
+                    index => Edit(host, colony, record,
+                        o => o.Mode = index == 1 ? OrderMode.Once : OrderMode.Maintain));
+            }
+
+            if (order.Mode == OrderMode.Once && column.TryRow(out Row state))
+            {
+                Widgets.Caption(state, "Status");
+                Widgets.Label(state, order.Done ? "made - it will not start again" : "not made yet",
+                    order.Done ? Color.gray : Color.white);
+            }
+
+            if (column.TryRow(out Row drop))
+            {
+                Widgets.Button(drop, "Remove this order", 260f, () =>
+                {
+                    ColonyOperations.EditSettings(colony, record.Id,
+                        s => s.Orders.RemoveAll(o => o.Item == _item));
+                    host.Pop();
+                });
+            }
+        }
+
+        /// <summary>
+        ///     Changes one order, and un-finishes it.
+        /// </summary>
+        /// <remarks>
+        ///     Editing a line clears its latch, because a one-off order that has been filled is
+        ///     finished for good - and the only way to ask for another fifty is to say so
+        ///     again. Without this, raising a finished order from fifty to a hundred would
+        ///     change a number that nothing would ever read.
+        /// </remarks>
+        private void Edit(ColonyScreen host, Colony colony, StructureRecord record,
+            System.Action<StructureOrder> change)
+        {
+            ColonyOperations.EditSettings(colony, record.Id, s =>
+            {
+                StructureOrder order = s.Orders.Find(o => o.Item == _item);
+                if (order == null) return;
+
+                change(order);
+                order.Done = false;
+            });
+
+            // After the edit returns, for the reason the cap rows give: EditSettings writes
+            // back on the way out, and refreshing from inside it redraws the value as it was.
+            host.Refresh();
         }
     }
 

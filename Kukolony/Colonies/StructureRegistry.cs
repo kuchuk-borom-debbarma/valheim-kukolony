@@ -149,6 +149,11 @@ namespace Kukolony.Colonies
             // component this mod has a protocol for - smelter, cooking station, fermenter -
             // which is why a modded oven needs no change here. See docs/components.md.
             if (Stations.StationProbe.Is(candidate)) capabilities |= StructureCapability.Processing;
+            // The same arrangement as Processing: one predicate, shared with the job, so what
+            // may be registered and what a villager will work at cannot come to disagree. Any
+            // object carrying CraftingStation qualifies, which is why a modded forge needs no
+            // change here.
+            if (Stations.CraftProbe.Is(candidate)) capabilities |= StructureCapability.Crafting;
             if (Has<Bed>(candidate)) capabilities |= StructureCapability.Rest;
             if (Has<WorkFlag>(candidate)) capabilities |= StructureCapability.WorkArea;
             return capabilities != StructureCapability.None;

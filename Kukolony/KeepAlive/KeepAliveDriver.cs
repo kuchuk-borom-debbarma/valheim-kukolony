@@ -124,6 +124,7 @@ namespace Kukolony.KeepAlive
             // mods can register their own, a colony's identity does not survive a world, and
             // "my axe cannot cut that tree" is about a tree that no longer exists.
             Colonies.Stock.Clear();
+            Colonies.CraftCatalogue.Clear();
             Resources.Choppable.Clear();
             Resources.ChoppingGround.Clear();
             Jobs.Chop.ChopJob.Clear();
