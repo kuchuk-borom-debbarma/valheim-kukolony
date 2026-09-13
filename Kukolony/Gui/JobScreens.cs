@@ -50,7 +50,11 @@ namespace Kukolony.Gui
                 if (!column.TryRow(out Row row)) continue;
 
                 string id = job.Id;
-                Widgets.Caption(row, job.Name, 220f);
+
+                // Held to the cell like everything else on this row. A job name is refused
+                // only when empty, so "Haul everything to the shed by the docks" was free to
+                // run across the two columns beside it.
+                Widgets.Caption(row, Fit(job.Name, 22), 220f);
                 Widgets.Caption(row, JobDefinition.Describe(job.Kind), 150f, Color.gray);
                 Widgets.Caption(row, Where(records, job, RowBudget), 190f, Color.gray);
                 Widgets.Button(row, "Open", 110f, () => host.Push(new JobDetailScreen(id)));
@@ -123,9 +127,6 @@ namespace Kukolony.Gui
         /// </summary>
         internal const int PickerBudget = 18;
 
-        /// <summary>The narrowest cell that can name two places and still show its suffixes.</summary>
-        private const int TwoNameBudget = 24;
-
         /// <summary>What a name is cut to when it shares a cell with something else.</summary>
         internal const int NameBudget = 18;
 
@@ -144,14 +145,20 @@ namespace Kukolony.Gui
         /// </summary>
         /// <remarks>
         ///     <para>
-        ///         The first two places are named rather than counted: "the whole Kolony +1"
-        ///         was accurate and read as "and the copse as well" rather than "the copse
-        ///         after this one", and the order is the whole point of the list.
+        ///         <b>One name, then counts.</b> Naming the first two places and joining them
+        ///         with "then" was tried, to make the ordering visible in the summary itself,
+        ///         and it cost four review rounds: "the whole Kolony" is sixteen characters
+        ///         and " then " is six, so in a 190 px cell the second name never got a
+        ///         character and every job starting at the settlement drew the same truncated
+        ///         string - while the two-name arithmetic overran its budget whenever a
+        ///         warning was present. The ordering is stated where there is room for it:
+        ///         the picker lists the places in order and says so.
         ///     </para>
         ///     <para>
-        ///         Held to <paramref name="budget" /> characters, because two names and a
-        ///         count is a good deal longer than one name and a count, and these cells do
-        ///         not clip.
+        ///         <b>Only the name is ever cut.</b> Everything else is short by construction
+        ///         - a count is three characters, the missing-place marker six - so the parts
+        ///         a player cannot reconstruct from the name survive any budget, which is
+        ///         what trimming from the right had been quietly deleting.
         ///     </para>
         /// </remarks>
         internal static string Where(List<StructureRecord> records, JobDefinition job, int budget)
@@ -161,43 +168,26 @@ namespace Kukolony.Gui
             List<string> tokens = job.Areas ?? new List<string>();
             if (tokens.Count == 0) return Fit(WholeKolony, budget);
 
-            // A narrow cell names one place and counts the rest; a wider control names two,
-            // which is what makes the order visible. Naming two in the 190 px row spent the
-            // whole cell before the second name contributed a character - every job whose
-            // first area was the settlement rendered as the same truncated string.
-            int named = tokens.Count > 1 && budget >= TwoNameBudget ? 2 : 1;
-
-            // Counted over the places the summary does *not* name. The named ones say so
-            // themselves, and counting them as well turned "the first of five is gone" into
-            // a row that also claimed one of the hidden ones was.
+            // Counted over the places behind the "+N", because the first one says so itself.
             int gone = 0;
-            for (int i = named; i < tokens.Count; i++)
+            for (int i = 1; i < tokens.Count; i++)
             {
                 if (!TryPlaceName(records, tokens[i], out string _)) gone++;
             }
 
-            // Built first and kept whole, whatever has to be cut. These carry what the names
-            // cannot say - how many places are not shown, and that some of them are gone -
-            // and they sit at the end, which is exactly where trimming from the right bites:
-            // a job whose second area had been destroyed rendered as a cut-off name with no
-            // warning at all, which is the silence "a place that is gone" exists to break.
-            string tail = tokens.Count > named ? $" +{tokens.Count - named}" : string.Empty;
+            int hidden = tokens.Count - 1;
+            string tail = hidden > 0 ? $" +{hidden}" : string.Empty;
             if (gone > 0) tail += $" ({gone} gone)";
 
-            string first = PlaceName(records, tokens[0]);
-            string second = named == 2 ? PlaceName(records, tokens[1]) : string.Empty;
+            // The named place, or the marker. The marker is short on purpose: the sentence it
+            // replaced was twenty characters, which is the whole of the narrowest cell, so
+            // the one row that most needed to say "this is broken" was the one that could not
+            // fit the words.
+            string first = TryPlaceName(records, tokens[0], out string name) ? name : GonePlace;
 
-            string full = named == 2 ? $"{first} then {second}{tail}" : $"{first}{tail}";
-            if (full.Length <= budget) return full;
-
-            // Over the cell, so the names give up the room rather than the suffixes. Six for
-            // the joining word, and what is left is split between however many names there
-            // are.
-            int share = Mathf.Max(4, (budget - tail.Length - (named == 2 ? 6 : 0)) / named);
-
-            return named == 2
-                ? $"{Fit(first, share)} then {Fit(second, share)}{tail}"
-                : $"{Fit(first, share)}{tail}";
+            // What is left after the parts that must survive. At least one character, so a
+            // budget swallowed whole by counts still shows that a place was named.
+            return Fit(first, Mathf.Max(1, budget - tail.Length)) + tail;
         }
 
         /// <summary>
@@ -225,11 +215,15 @@ namespace Kukolony.Gui
             TryPlaceName(records, token, out string name) ? name : GonePlace;
 
         /// <summary>
-        ///     The area was destroyed or unregistered. Said plainly, because the job still
-        ///     runs - it falls back to the settlement - and a player should know why it
-        ///     suddenly ranges further than they told it to.
+        ///     The area was destroyed or unregistered.
         /// </summary>
-        private const string GonePlace = "a place that is gone";
+        /// <remarks>
+        ///     Six characters, not a sentence. The job still runs - it falls back to the
+        ///     settlement - and a player should know why it suddenly ranges further than they
+        ///     told it to, which means this has to reach them in a cell nineteen characters
+        ///     wide. "A place that is gone" did not, and was cut to "a place that is go".
+        /// </remarks>
+        private const string GonePlace = "(gone)";
 
         private static bool TryPlaceName(List<StructureRecord> records, string token, out string name)
         {

@@ -180,7 +180,10 @@ namespace Kukolony.Debug
             // exercised whatever the fixture colony happens to have registered.
             areas.Add("kukolony.audit.gone.2");
 
-            List<JobDefinition> audited = new List<JobDefinition>(before)
+            // The fixture alone, not appended to what is there. A settlement with a page of
+            // jobs already would have pushed this one to page two, where the audit never
+            // sees it and the check passes without inspecting its own fixture.
+            colony.State.SetJobs(new List<JobDefinition>
             {
                 new JobDefinition
                 {
@@ -190,23 +193,31 @@ namespace Kukolony.Debug
                     Repeat = 4,
                     Areas = areas
                 }
-            };
-            colony.State.SetJobs(audited);
+            });
 
-            screen.Root(new ColonyHomeScreen());
-            screen.Push(new JobListScreen());
-            yield return null;
-            ScreenAudit.Result jobs = ScreenAudit.Inspect(screen.Content);
-            report.Check(jobs.Clean, "the jobs list has no layout faults, with a job named at length",
-                jobs.Clean ? jobs.Summary : jobs.FirstFault);
+            // Restored whatever happens in between. The jobs live in the colony's ZDO, which
+            // is about to be saved for the reload phase - a fixture leaked here is a debug
+            // job in the player's world, and a screen build that throws kills the coroutine
+            // without running another statement. A finally may hold a yield; a catch may not.
+            try
+            {
+                screen.Root(new ColonyHomeScreen());
+                screen.Push(new JobListScreen());
+                yield return null;
+                ScreenAudit.Result jobs = ScreenAudit.Inspect(screen.Content);
+                report.Check(jobs.Clean, "the jobs list has no layout faults, with a job named at length",
+                    jobs.Clean ? jobs.Summary : jobs.FirstFault);
 
-            screen.Push(new JobDetailScreen("audit-job"));
-            yield return null;
-            ScreenAudit.Result detail = ScreenAudit.Inspect(screen.Content);
-            report.Check(detail.Clean, "a job's own screen has no layout faults",
-                detail.Clean ? detail.Summary : detail.FirstFault);
-
-            colony.State.SetJobs(before);
+                screen.Push(new JobDetailScreen("audit-job"));
+                yield return null;
+                ScreenAudit.Result detail = ScreenAudit.Inspect(screen.Content);
+                report.Check(detail.Clean, "a job's own screen has no layout faults",
+                    detail.Clean ? detail.Summary : detail.FirstFault);
+            }
+            finally
+            {
+                colony.State.SetJobs(before);
+            }
 
             screen.Root(new ColonyHomeScreen());
             yield return null;

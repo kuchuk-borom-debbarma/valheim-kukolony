@@ -137,9 +137,14 @@ the flags, because burying the outposts among every chest, kiln and bed made the
 **Several may be chosen, and the order is kept.** The job works the first place that has anything
 to do and only moves on when that place is done, so *"the near copse, then the far one"* is a
 thing you can say. The whole Kolony is one of the choices and is what an unpointed job shows as
-chosen, so a haul job starts out working the settlement and you add outposts to it. A job pointed
-at a structure that has since been destroyed reads *"a place that is gone"* rather than silently
-ranging over the whole settlement without saying why.
+chosen, so a haul job starts out working the settlement and you add outposts to it. The picker is
+where the order is visible, because it has room to list it; a summary row names the first place
+and counts the rest — *"North copse +2"*.
+
+A place that has since been destroyed is said rather than silently fallen back from: the named one
+reads *"(gone)"* and the ones behind the count are tallied — *"North copse +3 (1 gone)"*. The
+marker is terse because the cell is nineteen characters wide, and a warning that does not fit is
+a warning nobody gets.
 
 The reach row belongs to the named places. It is one number applied to each of them, and it is
 hidden for a job that only works the Kolony — that reach is the hearth's, set on the hearth.
