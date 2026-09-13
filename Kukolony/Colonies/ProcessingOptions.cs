@@ -34,8 +34,15 @@ namespace Kukolony.Colonies
         internal static string Fuel(string prefabName)
         {
             Smelter smelter = Component<Smelter>(prefabName);
-            return smelter != null && smelter.m_fuelItem != null
-                ? smelter.m_fuelItem.gameObject.name
+            if (smelter != null && smelter.m_fuelItem != null) return smelter.m_fuelItem.gameObject.name;
+
+            // A cooking station burns too - a stone oven is exactly this case, and asking only
+            // the smelter meant its fuel row was never drawn, its fuel setting stayed empty for
+            // ever, and a villager loaded it with meat and left it cold. The failure the whole
+            // job was specified around, arrived at through the settings screen.
+            CookingStation cooking = Component<CookingStation>(prefabName);
+            return cooking != null && cooking.m_useFuel && cooking.m_fuelItem != null
+                ? cooking.m_fuelItem.gameObject.name
                 : string.Empty;
         }
 
@@ -104,7 +111,10 @@ namespace Kukolony.Colonies
         internal static int MaxFuel(string prefabName)
         {
             Smelter smelter = Component<Smelter>(prefabName);
-            return smelter != null ? smelter.m_maxFuel : 0;
+            if (smelter != null) return smelter.m_maxFuel;
+
+            CookingStation cooking = Component<CookingStation>(prefabName);
+            return cooking != null && cooking.m_useFuel ? cooking.m_maxFuel : 0;
         }
 
         private static void Add(List<string> inputs, ItemDrop from)

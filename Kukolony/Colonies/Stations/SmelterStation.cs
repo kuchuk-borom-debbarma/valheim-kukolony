@@ -22,15 +22,17 @@ namespace Kukolony.Colonies.Stations
 
         internal override StationKind Kind => StationKind.Smelter;
 
-        internal override StationWant WhatItWants(StructureSettings settings)
+        internal override StationWant WhatItWants(StructureSettings settings, string carrying)
         {
             if (_smelter == null || settings == null) return StationWant.Nothing;
+
+            bool free = string.IsNullOrEmpty(carrying);
 
             // Fuel before material, and it is safe by construction rather than by policy:
             // FuelWanted answers zero whenever nothing is queued, so a fuel-first villager
             // cannot stoke an idle station - and when it is running, fuel is what keeps it so.
             string fuel = _smelter.m_fuelItem != null ? _smelter.m_fuelItem.gameObject.name : string.Empty;
-            if (fuel.Length > 0 && settings.Fuel.Contains(fuel))
+            if ((free || carrying == fuel) && fuel.Length > 0 && settings.Fuel.Contains(fuel))
             {
                 int wanted = StationAppetite.FuelWanted(_smelter.GetQueueSize(), _smelter.m_fuelPerProduct,
                     _smelter.m_maxFuel, _smelter.GetFuel());
@@ -43,13 +45,13 @@ namespace Kukolony.Colonies.Stations
 
             foreach (string input in settings.Input)
             {
+                if (string.IsNullOrEmpty(input)) continue;
+                if (!free && carrying != input) continue;
+
                 // Asked of the station rather than assumed from the record: the settings were
                 // chosen from the prefab's conversion list, and a record outlives the asset data
                 // it was made from.
-                if (!string.IsNullOrEmpty(input) && _smelter.IsItemAllowed(input))
-                {
-                    return new StationWant(input, false, room);
-                }
+                if (_smelter.IsItemAllowed(input)) return new StationWant(input, false, room);
             }
 
             return StationWant.Nothing;

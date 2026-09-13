@@ -29,20 +29,31 @@ namespace Kukolony.Colonies.Stations
 
         internal override StationKind Kind => StationKind.Cooking;
 
-        internal override StationWant WhatItWants(StructureSettings settings)
+        internal override StationWant WhatItWants(StructureSettings settings, string carrying)
         {
             if (_station == null || settings == null) return StationWant.Nothing;
 
-            // A cooking station burns nothing of its own - the ones that do carry a Fireplace as
-            // well, which is a protocol this mod does not have yet and deliberately does not
-            // guess at.
+            bool free = string.IsNullOrEmpty(carrying);
+
+            // Some of them burn. A stone oven keeps a fire going under the food, and asking it
+            // for fuel before asking it for meat is the same order a smelter uses and for the
+            // same reason: fuel is what keeps the work it already has moving.
+            string fuel = Burns();
+            if ((free || carrying == fuel) && fuel.Length > 0 && settings.Fuel.Contains(fuel))
+            {
+                int logs = Fuelling();
+                if (logs > 0) return new StationWant(fuel, true, logs);
+            }
+
             int slots = Slots();
             int wanted = StationAppetite.InputWanted(Used(), slots, settings.KeepFull);
             if (wanted <= 0) return StationWant.Nothing;
 
             foreach (string input in settings.Input)
             {
-                if (!string.IsNullOrEmpty(input) && Cooks(input)) return new StationWant(input, false, wanted);
+                if (string.IsNullOrEmpty(input)) continue;
+                if (!free && carrying != input) continue;
+                if (Cooks(input)) return new StationWant(input, false, wanted);
             }
 
             return StationWant.Nothing;
@@ -86,16 +97,48 @@ namespace Kukolony.Colonies.Stations
         internal override FeedResult WouldTake(string prefab, bool asFuel)
         {
             if (_station == null) return FeedResult.Unavailable;
-            if (asFuel) return FeedResult.Refused;
+            if (asFuel)
+            {
+                if (Burns() != prefab) return FeedResult.Refused;
+                return Fuelling() > 0 ? FeedResult.Fed : FeedResult.Full;
+            }
+
             if (!Cooks(prefab)) return FeedResult.Refused;
 
             return _station.GetFreeSlot() < 0 ? FeedResult.Full : FeedResult.Fed;
         }
 
-        protected override double Progress(bool asFuel) => Used();
+        protected override double Progress(bool asFuel) => asFuel ? _station.GetFuel() : Used();
 
-        protected override void Submit(string prefab, bool asFuel) =>
-            View.InvokeRPC("RPC_AddItem", prefab, false);
+        protected override void Submit(string prefab, bool asFuel)
+        {
+            if (asFuel) View.InvokeRPC("RPC_AddFuel");
+            else View.InvokeRPC("RPC_AddItem", prefab, false);
+        }
+
+        /// <summary>What this station burns, or empty if it burns nothing.</summary>
+        private string Burns() =>
+            _station.m_useFuel && _station.m_fuelItem != null
+                ? _station.m_fuelItem.gameObject.name
+                : string.Empty;
+
+        /// <summary>
+        ///     How much fuel it is short of.
+        /// </summary>
+        /// <remarks>
+        ///     The same rule a smelter follows, in the terms an oven has: one that does not burn
+        ///     while empty has nothing to burn for until there is food on it, so it is not lit -
+        ///     and one that burns regardless is kept going, because that is what it does whether
+        ///     anybody feeds it or not.
+        /// </remarks>
+        private int Fuelling()
+        {
+            if (!_station.m_useFuel || _station.m_maxFuel <= 0) return 0;
+            if (!_station.m_useFueldWhileEmpty && Used() <= 0) return 0;
+
+            double shortfall = System.Math.Floor(_station.m_maxFuel - _station.GetFuel());
+            return shortfall <= 0d ? 0 : (int)shortfall;
+        }
 
         private int Slots() => _station.m_slots != null ? _station.m_slots.Length : 0;
 

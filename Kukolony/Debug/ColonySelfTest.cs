@@ -6548,28 +6548,93 @@ namespace Kukolony.Debug
         /// </remarks>
         private static IEnumerator CheckTheStationContract(TestReport report, Vector3 origin)
         {
-            GameObject kiln = SpawnFirst(origin + Vector3.right * 6f, "smelter", "charcoal_kiln");
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(6f, 0f, -6f));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            Container bag = chest != null ? chest.GetComponentInChildren<Container>(true) : null;
+            report.Check(bag != null, "control: the contract check has somewhere to take items from");
+            if (bag == null) yield break;
+
+            yield return Contract(report, bag, origin + new Vector3(9f, 0f, -6f), "smelter");
+            yield return Contract(report, bag, origin + new Vector3(12f, 0f, -6f), "piece_cookingstation");
+            yield return Contract(report, bag, origin + new Vector3(15f, 0f, -6f), "fermenter");
+
+            Release(chest);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     One station, fed for real, with its own numbers read back.
+        /// </summary>
+        /// <remarks>
+        ///     The argument shapes are the thing at issue and a name check cannot reach them:
+        ///     <c>ZNetView.m_functions</c> is keyed by name hash alone, so a handler registered
+        ///     for a string and invoked with an int passes every test that only asks whether the
+        ///     name is there. The three stations disagree about this in a way nothing else in
+        ///     the game does - ore by name, fermenter items by hash - and the repo's own
+        ///     decompiled reference contradicts the shipped assembly about which. So this puts a
+        ///     real item in and asks the station whether it arrived.
+        /// </remarks>
+        private static IEnumerator Contract(TestReport report, Container bag, Vector3 where, string prefabName)
+        {
+            GameObject placed = SpawnFirst(where, prefabName);
             yield return new WaitForSecondsRealtime(.4f);
 
-            report.Check(kiln != null, "control: a smelter could be placed for the contract check");
-            if (kiln == null) yield break;
-
-            report.Check(Colonies.Stations.StationProbe.Is(kiln),
-                "a smelter is recognised as a station by its component",
-                $"prefab={Utils.GetPrefabName(kiln)}");
-
-            if (kiln.TryGetComponent(out ZNetView view) && view.IsValid())
+            if (placed == null)
             {
-                // Registered handlers live on the placed object - a prefab's Awake never ran, so
-                // its function table is empty and asking it would prove nothing.
-                bool ore = view.m_functions.ContainsKey("RPC_AddOre".GetStableHashCode());
-                bool fuel = view.m_functions.ContainsKey("RPC_AddFuel".GetStableHashCode());
-                report.Check(ore && fuel,
-                    "a placed smelter has registered the handlers this mod invokes",
-                    $"addOre={ore} addFuel={fuel} handlers={view.m_functions.Count}");
+                report.Check(false, $"control: '{prefabName}' could be placed for the contract check");
+                yield break;
             }
 
-            Release(kiln);
+            if (!Colonies.Stations.StationProbe.TryFind(placed, out Colonies.Stations.StationProtocol protocol))
+            {
+                report.Check(false, $"'{prefabName}' is recognised as a station by its component",
+                    $"components={StructureRegistry.Explain(placed)}");
+                Release(placed);
+                yield break;
+            }
+
+            if (placed.TryGetComponent(out ZNetView view) && view.IsValid()) view.ClaimOwnership();
+            yield return new WaitForSecondsRealtime(.4f);
+
+            List<string> inputs = ProcessingOptions.Inputs(Utils.GetPrefabName(placed));
+            string material = inputs.Count > 0 ? inputs[0] : string.Empty;
+            int seeded = material.Length > 0 ? PutIn(bag, material, 5) : 0;
+
+            if (seeded <= 0)
+            {
+                report.Check(false, $"control: '{prefabName}' converts something this run could carry",
+                    $"inputs={inputs.Count} material='{material}'");
+                Release(placed);
+                yield break;
+            }
+
+            ItemDrop.ItemData item = bag.GetInventory().GetItem(material);
+            Colonies.Stations.FeedResult result = item == null
+                ? Colonies.Stations.FeedResult.Unavailable
+                : protocol.Give(bag.GetInventory(), item, false);
+
+            // Waiting means ownership had not landed yet, which is a legitimate answer on the
+            // first ask rather than a verdict. One retry, then it counts.
+            if (result == Colonies.Stations.FeedResult.Waiting)
+            {
+                yield return new WaitForSecondsRealtime(.6f);
+                item = bag.GetInventory().GetItem(material);
+                if (item != null) result = protocol.Give(bag.GetInventory(), item, false);
+            }
+
+            report.Check(result == Colonies.Stations.FeedResult.Fed,
+                $"a {prefabName} takes what this mod hands it, and its own numbers say so",
+                $"result={result} material='{material}' kind={protocol.Kind}");
+
+            // The other half of the same claim: what it was handed actually left the bag. A
+            // station that reported success while the item stayed put would be worse than one
+            // that refused.
+            report.Check(CountIn(bag, material) < seeded,
+                $"control: feeding a {prefabName} spends exactly what it was given",
+                $"held={CountIn(bag, material)} seeded={seeded}");
+
+            Release(placed);
             yield return new WaitForSecondsRealtime(.2f);
         }
 

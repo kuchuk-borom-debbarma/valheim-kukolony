@@ -24,10 +24,11 @@ This describes the code, not an aspiration:
 
 | Question | Where | Test |
 |---|---|---|
-| May this be registered? | `Colonies/StructureRegistry.TryCapabilities` | `Container`, `Smelter`, `Bed`, `WorkFlag` |
-| What stays loaded off-screen? | `KeepAlive/LoadAllowlist.Matters` | `Piece`, `Container`, `CraftingStation`, `Smelter`, `Fireplace`, `TerrainComp`, `ItemDrop` |
+| May this be registered? | `Colonies/StructureRegistry.TryCapabilities` | `Container`, `Bed`, `WorkFlag`, and a station via `StationProbe` |
+| Which station is this, and how is it worked? | `Colonies/Stations/StationProbe` | `CookingStation`, `Fermenter`, `Smelter` |
+| What stays loaded off-screen? | `KeepAlive/LoadAllowlist.Matters` | `Piece`, `Container`, `CraftingStation`, `Smelter`, `CookingStation`, `Fermenter`, `Fireplace`, `TerrainComp`, `ItemDrop`, and what an axe can cut |
 | What can an axe cut? | `Resources/Choppable` | `TreeBase`, `TreeLog`, `Destructible` — compiled into a prefab-hash set, so the scan is an integer compare rather than a `GetComponent` per candidate |
-| What is this called? | `StructureRegistry.DisplayName` | `Piece.m_name` or `Container.m_name`, localised — never the prefab, or rows read `charcoal_kiln(Clone)` |
+| What is this called? | `StructureRegistry.DisplayName` | `Piece.m_name` or `Container.m_name`, localised. The cleaned prefab name is the fallback when a thing carries neither — honest, and the reason rows do not read `charcoal_kiln(Clone)` |
 
 ## The four questions, and each is a component question
 
@@ -40,20 +41,32 @@ This describes the code, not an aspiration:
 
 ## One predicate, every surface
 
-Each capability has exactly **one** function that decides whether an object has it, and every
-surface asks that same function: registration, the *register something nearby* list, a job's
+A capability should have exactly **one** function that decides whether an object has it, and every
+surface should ask that function: registration, the *register something nearby* list, a job's
 target picker, and the settlement index.
 
-Two surfaces with two tests will drift apart, and the symptom is ugly: a structure a player can
-register that no job will ever touch, or one a job wants that cannot be registered. The single
-predicate is what makes those states unrepresentable rather than merely unlikely.
+Two surfaces with two tests drift apart, and the symptom is ugly: a structure a player can register
+that no job will ever touch, or one a job wants that cannot be registered.
+
+**Processing holds to this; Storage does not yet.** Every station question goes through
+`StationProbe`. A container, by contrast, is decided at registration by the ZNetView-scoped test in
+`StructureRegistry`, while half a dozen readers — `StructureInventory`, `Selection`, `HaulJob`,
+`TendJob` — reach for `GetComponentInChildren<Container>` directly. Those readers already hold a
+registered record and are fetching the component off the object that record names, so the looser
+test is harmless *there* — but the guarantee is a convention in that half of the code and an
+invariant only in this half. Written down as it is rather than as it ought to be, because a
+doctrine that overstates is worse than none.
 
 ## Five consequences, each already paid for once
 
 1. **Probe order matters, because objects carry several components.** An oven is a
    `CookingStation`. A hearth is a `Fireplace`. A windmill is a `Smelter`. A fuelled cooking
-   station is both. `Fireplace` is probed **last**, precisely because it is the one most often
-   present alongside something else.
+   station is both. So the more specific component is asked first — `StationProbe` asks
+   `CookingStation`, then `Fermenter`, then `Smelter` — and a component we have no protocol for
+   is not asked at all. `Fireplace` is in that second group today: it is genuinely feedable, and
+   one that burns for ever or refuses refills still accepts fuel and still reports a change, so
+   feeding one destroys the fuel silently. When it gets a protocol it goes **last** in the order,
+   precisely because it is the component most often present alongside something else.
 
 2. **Children count, but only this object's children.** Valheim routinely splits an object's parts
    across child transforms — a cart's container lives there — and this mod does the same thing: a

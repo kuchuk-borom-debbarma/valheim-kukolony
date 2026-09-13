@@ -372,18 +372,9 @@ namespace Kukolony.Jobs
         }
 
 
-        /// <summary>
-        ///     What this kind of work is called, for a player.
-        /// </summary>
-        /// <remarks>
-        ///     Explicit, with no fallback that invents a plausible name. The previous catalogue
-        ///     had one, and a newly added job reached the screen labelled "Collect beehives" —
-        ///     convincing, wrong, and invisible to a check that counted job types rather than
-        ///     asking whether each was named. Unnamed work returns empty and fails loudly.
-        /// </remarks>
         /// <summary>What half of tending a job does, for a player.</summary>
         /// <remarks>
-        ///     Explicit, with an empty default, for the reason <see cref="Describe" /> has one: a
+        ///     Explicit, with an empty default, for the same reason <see cref="Describe" /> is: a
         ///     fallback that returns a plausible name once made a newly added job display on
         ///     screen as an existing one.
         /// </remarks>
@@ -409,6 +400,15 @@ namespace Kukolony.Jobs
             }
         }
 
+        /// <summary>
+        ///     What this kind of work is called, for a player.
+        /// </summary>
+        /// <remarks>
+        ///     Explicit, with no fallback that invents a plausible name. The previous catalogue
+        ///     had one, and a newly added job reached the screen labelled "Collect beehives" —
+        ///     convincing, wrong, and invisible to a check that counted job types rather than
+        ///     asking whether each was named. Unnamed work returns empty and fails loudly.
+        /// </remarks>
         internal static string Describe(JobKind kind)
         {
             switch (kind)

@@ -28,7 +28,7 @@ namespace Kukolony.Colonies.Stations
 
         internal override StationKind Kind => StationKind.Fermenter;
 
-        internal override StationWant WhatItWants(StructureSettings settings)
+        internal override StationWant WhatItWants(StructureSettings settings, string carrying)
         {
             if (_fermenter == null || settings == null) return StationWant.Nothing;
 
@@ -38,7 +38,9 @@ namespace Kukolony.Colonies.Stations
 
             foreach (string input in settings.Input)
             {
-                if (!string.IsNullOrEmpty(input) && Ferments(input)) return new StationWant(input, false, 1);
+                if (string.IsNullOrEmpty(input)) continue;
+                if (!string.IsNullOrEmpty(carrying) && carrying != input) continue;
+                if (Ferments(input)) return new StationWant(input, false, 1);
             }
 
             return StationWant.Nothing;

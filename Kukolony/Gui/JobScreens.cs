@@ -492,10 +492,13 @@ namespace Kukolony.Gui
                 // Narrows and never widens: the station has already said what it takes, so this
                 // can only refuse some of it. Said on the row, because a setting that looks like
                 // it adds and cannot is worse than no setting at all.
+                // 260, not the default 150: "whatever they ask for" is twenty-one characters,
+                // and these labels overflow their cell rather than clipping - they are drawn
+                // over whatever sits next in the row.
                 Widgets.Choice(items, "Which items it carries",
                     job.Items.Count == 0 ? "whatever they ask for" : Summarise(job.Items),
                     () => host.Push(new PickerScreen("Which items", SearchItems, job.Items, true,
-                        chosen => { Edit(host, j => j.Items = chosen); host.Refresh(); })));
+                        chosen => { Edit(host, j => j.Items = chosen); host.Refresh(); })), 260f);
             }
         }
 

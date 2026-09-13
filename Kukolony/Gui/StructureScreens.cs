@@ -293,11 +293,16 @@ namespace Kukolony.Gui
                         })));
             }
 
-            if (column.TryRow(out Row full))
+            // Only where "how full" can mean anything. A fermenter takes one batch and is then
+            // busy for days, so the row rendered "50% (0)" - a number that told the player to
+            // keep it empty, for a setting its protocol does not read. A job must not offer a
+            // setting it ignores, and neither must a structure.
+            int capacity = ProcessingOptions.MaxInput(record.Prefab);
+            if (capacity > 1 && column.TryRow(out Row full))
             {
                 // A fraction, shown as the count it works out to, because "half full" is the
                 // durable intent and "5 ore" is what the player can picture.
-                int max = ProcessingOptions.MaxInput(record.Prefab);
+                int max = capacity;
                 Widgets.Number(full, "Keep it", settings.KeepFull, 0f, 1f, .25f,
                     v => max > 0 ? $"{v * 100f:F0}% ({Mathf.RoundToInt(v * max)})" : $"{v * 100f:F0}%",
                     value =>

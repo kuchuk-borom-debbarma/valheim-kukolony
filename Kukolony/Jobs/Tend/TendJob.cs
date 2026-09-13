@@ -219,7 +219,8 @@ namespace Kukolony.Jobs.Tend
                         return JobResult.Running;
                     }
 
-                    StationWant want = Allowed(context.Job, protocol.WhatItWants(record.Settings));
+                    StationWant want = Allowed(context.Job, protocol.WhatItWants(record.Settings,
+                        string.Empty));
                     if (!want.Any) continue;
 
                     StructureRecord from = Holding(context, want.Item, here);
@@ -272,7 +273,7 @@ namespace Kukolony.Jobs.Tend
                     StationProtocol protocol = Operating(instance);
                     if (protocol == null || !Kind(context.Job, protocol.Kind)) continue;
 
-                    StationWant want = Allowed(context.Job, protocol.WhatItWants(record.Settings));
+                    StationWant want = Allowed(context.Job, protocol.WhatItWants(record.Settings, prefab));
                     if (!want.Any || want.Item != prefab) continue;
 
                     Take(context, record.Id);
@@ -502,18 +503,42 @@ namespace Kukolony.Jobs.Tend
         }
 
         /// <summary>Puts a load into a container, which is where an orphaned load ends up.</summary>
+        /// <remarks>
+        ///     Bounded by what that container was told to hold, as hauling's deposit is. Without
+        ///     the cap a shed told to keep ten, holding nine, takes a villager's fifty and sits
+        ///     at fifty-nine for good with its own screen still reading "at most 10" - and
+        ///     nothing brings it back down, because a chest keeps what it holds.
+        ///
+        ///     Re-checked against the record on arrival rather than trusted from when the trip
+        ///     was chosen: a villager can be carrying two kinds at once - a haul job's leftovers
+        ///     ahead of this one in the queue - and the second kind was never what this chest
+        ///     was chosen for.
+        /// </remarks>
         private static JobResult Stow(TendContext context, GameObject target, ItemDrop.ItemData item,
             out string activity)
         {
             Container container = target.GetComponentInChildren<Container>(true);
-            if (container == null)
+            StructureRecord record = SettlementIndex.Find(context.Colony, context.State.Target);
+            if (container == null || record == null)
             {
                 context.State.ClearTarget();
                 activity = "it was gone";
                 return JobResult.Running;
             }
 
-            switch (Carrying.Deposit(context.Bag.GetInventory(), item, container))
+            string prefab = Carrying.NameOf(item);
+            int allowed = SettlementIndex.RoomUnderCap(record, prefab);
+            if (SettlementIndex.ScoreOf(record, prefab) <= 0 || allowed == 0)
+            {
+                // This chest was chosen for something else in the bag. Choosing again is right:
+                // the settlement may still have somewhere for this, and dropping it here would
+                // put it somewhere its own screen says it does not belong.
+                context.State.ClearTarget();
+                activity = "it does not belong here";
+                return JobResult.Running;
+            }
+
+            switch (Carrying.Deposit(context.Bag.GetInventory(), item, container, allowed))
             {
                 case TakeResult.Took:
                     activity = "putting it away";
@@ -681,13 +706,11 @@ namespace Kukolony.Jobs.Tend
                     : new StationWant(filing, false, carried[0].m_stack);
             }
 
-            StationWant want = Allowed(context.Job, protocol.WhatItWants(record.Settings));
-
-            // Carrying something else entirely means this station is no longer the errand it
-            // was, which the table reads as "re-choose" rather than as a failure.
-            if (want.Any && carried.Count > 0 && !Holds(carried, want.Item)) return StationWant.Nothing;
-
-            return want;
+            // Holding something narrows the question to "do you still want this", so a station
+            // that has moved on to wanting something else does not send a loaded villager back
+            // to the chest with what it came for.
+            string holding = carried.Count > 0 ? Carrying.NameOf(carried[0]) : string.Empty;
+            return Allowed(context.Job, protocol.WhatItWants(record.Settings, holding));
         }
 
         /// <summary>What the job will carry, of what the station asked for.</summary>
@@ -754,7 +777,7 @@ namespace Kukolony.Jobs.Tend
 
             return record == null || protocol == null || !Kind(job, protocol.Kind)
                 ? StationWant.Nothing
-                : Allowed(job, protocol.WhatItWants(record.Settings));
+                : Allowed(job, protocol.WhatItWants(record.Settings, string.Empty));
         }
     }
 }

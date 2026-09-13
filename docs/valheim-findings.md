@@ -237,6 +237,15 @@ decompiled source do not, and calling those does nothing.
 | | `InvokeRPC("RPC_AddItem", prefabHash, false)` | by **hash**, not name — unlike the others |
 | Beehive | `InvokeRPC("RPC_Extract")` | |
 
+**The decompiled reference in `.reference/` is stale for these members, and it has now misled two
+reviews.** It shows `Fermenter.RPC_AddItem` registered for a `string`; the assembly this mod
+compiles against declares `RPC_AddItem(long sender, int prefabHash, bool cheated)` — a parameter
+name no decompiled text could invent. `Smelter.RPC_AddOre` likewise carries a third argument the
+reference does not show. **Where they disagree, the shipped assembly wins**, because that is what
+the game runs — and the `tend` slice now settles it by feeding a real item to each of the three
+station kinds and reading the station's own numbers back, which is the only evidence that cannot
+be argued with.
+
 Behavioural facts, each of which cost a run to find:
 
 - **Consume the carried item before submitting the RPC**, never after. A removal that fails

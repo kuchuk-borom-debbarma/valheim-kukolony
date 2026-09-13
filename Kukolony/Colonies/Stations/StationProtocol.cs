@@ -93,12 +93,23 @@ namespace Kukolony.Colonies.Stations
         ///     What this station is short of right now, given what the player configured.
         /// </summary>
         /// <remarks>
-        ///     Loaded-only by nature: capacity is asset data but how full it is is not, and a
-        ///     prefab fallback would report every unreadable station as empty and feed it for
-        ///     ever. An unreadable station is not an answer - the same rule taking from a chest
-        ///     already follows.
+        ///     <para>
+        ///         Loaded-only by nature: capacity is asset data but how full it is is not, and a
+        ///         prefab fallback would report every unreadable station as empty and feed it for
+        ///         ever. An unreadable station is not an answer - the same rule taking from a
+        ///         chest already follows.
+        ///     </para>
+        ///     <para>
+        ///         <b><paramref name="carrying" /> is what stops the errand changing under the
+        ///         villager.</b> Asked freely, a station answers with what it most wants, and
+        ///         that answer moves: a cold furnace wants ore, and the instant one ore is in it
+        ///         wants coal instead. A villager holding four more ore would then be told its
+        ///         load is unwanted and walk it back to the chest - one ore in and four out,
+        ///         every trip, for ever. So a villager that is already carrying something asks a
+        ///         narrower question: <em>do you still want this?</em>
+        ///     </para>
         /// </remarks>
-        internal abstract StationWant WhatItWants(StructureSettings settings);
+        internal abstract StationWant WhatItWants(StructureSettings settings, string carrying);
 
         /// <summary>Whether something finished is sitting on it, blocking anything else going in.</summary>
         internal abstract bool HasOutput();
