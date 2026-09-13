@@ -228,8 +228,14 @@ namespace Kukolony.Jobs.Tend
                     {
                         // Nothing in the settlement has it. Said once rather than every tick,
                         // and keyed on the item so two stations short of coal say it together.
+                        //
+                        // "No registered chest", not "nothing", because the difference is the
+                        // whole of what a player has to fix: a pile of ore on the ground or in
+                        // their own pockets is not somewhere a villager may take from, and the
+                        // shorter wording sent somebody hunting for ore they were standing on.
                         Chatter.Say($"no {want.Item} to fetch",
-                            $"nothing has {ItemCatalogue.Label(want.Item)} for {record.Name}.");
+                            $"No registered chest holds {ItemCatalogue.Label(want.Item)} " +
+                            $"for {record.Name}.");
                         continue;
                     }
 
