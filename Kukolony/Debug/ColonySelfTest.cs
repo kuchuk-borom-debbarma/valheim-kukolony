@@ -5714,28 +5714,48 @@ namespace Kukolony.Debug
             // is a check that proves nothing.
             state.SetTarget(who);
             JobResult? gaveUp = JobOutcomes.GiveUpIfStuck(villager, state,
-                JobOutcomes.AbandonAfterSeconds + 1f, () => "that", out string _, out ZDOID abandoned);
+                JobOutcomes.AbandonAfterSeconds + 1f, who, () => "that", out string _);
 
             report.Check(gaveUp == JobResult.Failed,
                 "a trip that has stopped making progress is given up on",
                 $"result={gaveUp}");
 
-            report.Check(abandoned == who,
-                "and says what it gave up on, before the ending clears it",
-                $"abandoned={abandoned} target was {who}");
-
             report.Check(state.Target.IsNone(),
                 "control: the trip really is released, not merely reported");
 
-            report.Check(!JobOutcomes.GiveUpIfStuck(villager, state, 0f, () => "that",
-                    out string _, out ZDOID _).HasValue,
+            report.Check(!JobOutcomes.GiveUpIfStuck(villager, state, 0f, who, () => "that",
+                    out string _).HasValue,
                 "control: a trip that is making progress is left alone");
 
             report.Check(!JobOutcomes.GiveUpIfStuck(villager, state,
-                    JobOutcomes.AbandonAfterSeconds - 1f, () => "that",
-                    out string _, out ZDOID _).HasValue,
+                    JobOutcomes.AbandonAfterSeconds - 1f, who, () => "that", out string _).HasValue,
                 "control: and is left alone right up to the limit",
                 $"limit={JobOutcomes.AbandonAfterSeconds:0}s");
+
+            // And the clock the bound reads, which nothing had exercised. A check that feeds
+            // the bound a number of its own proves the comparison and nothing about whether
+            // the villager's own trip clock ever starts, advances or resets - which is where
+            // every fault in this area has actually been.
+            report.Check(villager.TripStalledFor <= 0f,
+                "control: a villager that has not walked anywhere has no stalled trip",
+                $"stalled={villager.TripStalledFor:0.0}s");
+
+            Vector3 far = villager.transform.position + new Vector3(0f, 0f, 40f);
+            villager.WalkForTest(far);
+            yield return new WaitForSecondsRealtime(1.2f);
+            villager.WalkForTest(far);
+
+            float afterWalking = villager.TripStalledFor;
+            report.Check(afterWalking > 0f,
+                "a trip that is walking and not arriving accrues a stall",
+                $"stalled={afterWalking:0.0}s");
+
+            // A different place is a different trip, which is what every leg relies on -
+            // including the ones that never pass through choosing.
+            villager.WalkForTest(villager.transform.position + new Vector3(0f, 0f, -40f));
+            report.Check(villager.TripStalledFor <= 0f,
+                "walking somewhere else starts the clock again",
+                $"stalled={villager.TripStalledFor:0.0}s");
             state.SetQueue(new List<string> { "first", "second" });
             state.SetQueuePosition(0);
             state.SetQueueAttempt(0);

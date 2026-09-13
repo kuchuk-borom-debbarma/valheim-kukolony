@@ -80,10 +80,9 @@ namespace Kukolony.Jobs
         ///     stated on <see cref="Running" />: a wait that cannot make progress is not one.
         /// </remarks>
         internal static JobResult? GiveUpIfStuck(Villager villager, VillagerState state,
-            float stalledFor, System.Func<string> naming, out string activity, out ZDOID abandoned)
+            float stalledFor, ZDOID abandoned, System.Func<string> naming, out string activity)
         {
             activity = null;
-            abandoned = ZDOID.None;
             if (stalledFor < AbandonAfterSeconds) return null;
 
             // Named only once it matters. Working out what a villager was walking to means
@@ -91,12 +90,6 @@ namespace Kukolony.Jobs
             // every walking tick - twenty times a second per villager - for a string thrown
             // away unless the bound trips.
             string what = naming != null ? naming() : "that";
-
-            // Read before the ending clears it. Failed resets the whole trip, so a caller
-            // asking afterwards which target was abandoned is told "none" - which is how a
-            // refusal list built from it stayed permanently empty and the next choice was
-            // the same unreachable thing.
-            abandoned = state.Target;
 
             // Said out loud, and keyed per villager. A villager that quietly stops working
             // looks identical to one with nothing to do, and this is the case a player most
@@ -110,7 +103,10 @@ namespace Kukolony.Jobs
             // two different unreachable oaks are two problems, and by name they were one
             // tally reporting "2 times in the last 2 minutes" about nothing.
             string name = villager != null ? villager.State.Name : "Somebody";
+            // One name for both the chat line and the villager's own activity text, because
+            // an empty one reads as "cannot reach  - gave up after 120s" in the hover.
             string said = string.IsNullOrEmpty(what) ? "something" : what;
+            what = said;
             Core.Chatter.Say($"stuck {(villager == null ? "?" : villager.Id.ToString())} {abandoned}",
                 $"{name} cannot reach {said} and has given up on it for now.");
 

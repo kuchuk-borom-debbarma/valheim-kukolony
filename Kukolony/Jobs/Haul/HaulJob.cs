@@ -141,7 +141,6 @@ namespace Kukolony.Jobs.Haul
                     {
                         state.SetTarget(reaching.GetZDO().m_uid);
                         context.Walk.Forget();
-                        context.Walk.BeginTrip();
                         activity = "fetching";
                         return JobResult.Running;
                     }
@@ -173,7 +172,6 @@ namespace Kukolony.Jobs.Haul
 
                 state.SetDestination(home.Id);
                 context.Walk.Forget();
-                context.Walk.BeginTrip();
                 activity = "carrying";
                 return JobResult.Running;
             }
@@ -194,8 +192,7 @@ namespace Kukolony.Jobs.Haul
                 state.SetTarget(view.GetZDO().m_uid);
                 state.SetDestination(destination.Id);
                 context.Walk.Forget();
-                context.Walk.BeginTrip();
-                activity = "fetching";
+                                activity = "fetching";
                 return JobResult.Running;
             }
 
@@ -213,7 +210,6 @@ namespace Kukolony.Jobs.Haul
                 state.SetTarget(holding.GetZDO().m_uid);
                 state.SetDestination(shouldBe.Id);
                 context.Walk.Forget();
-                context.Walk.BeginTrip();
                 activity = "tidying up";
                 return JobResult.Running;
             }
@@ -269,8 +265,8 @@ namespace Kukolony.Jobs.Haul
                     // cannot reach a chest holds its job open and the rest of its queue never
                     // runs.
                     JobResult? stuck = JobOutcomes.GiveUpIfStuck(context.Villager, context.State,
-                        context.Walk.TripStalledFor, () => Named(context, target),
-                        out string gaveUp, out ZDOID _);
+                        context.Walk.TripStalledFor, Walked(target),
+                        () => Named(context, target), out string gaveUp);
                     if (stuck.HasValue)
                     {
                         // Refused for a while, or Choose re-derives the same answer from the
@@ -303,13 +299,18 @@ namespace Kukolony.Jobs.Haul
                     return JobResult.Running;
 
                 default:
-                    // Refused as well as failed. Without this the trip is released, Choose
-                    // re-derives the same answer from the same world, the target has not moved
-                    // so the walk does not even count it as new, and the same failure lands on
-                    // the next tick - forty failures a minute until the villager tires itself
-                    // out and goes to bed, which is a symptom this project has already paid for
-                    // once.
-                    Unreachable.Refuse(context.Villager.Id, Walked(target));
+                    // Refused as well as failed, but briefly. Without any refusal the trip is
+                    // released, Choose re-derives the same answer from the same world, and the
+                    // same failure lands on the next tick - forty failures a minute until the
+                    // villager tires itself out and goes to bed. With the full refusal it is
+                    // worse the other way: inside a settlement this verdict is reached after
+                    // four seconds of no progress, so somebody standing in a doorway would
+                    // blacklist a perfectly good chest for five minutes, and the villager
+                    // would then report there is nowhere to put what it is carrying and drop
+                    // it on the floor. Long enough to break the loop, short enough to forgive
+                    // a doorway.
+                    Unreachable.Refuse(context.Villager.Id, Walked(target),
+                        Unreachable.BlockedForSeconds);
 
                     // Says how far short it stopped and what it was asked for. "Cannot get
                     // there" is the same sentence whether the target is unreachable, the stop

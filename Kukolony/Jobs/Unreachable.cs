@@ -38,6 +38,17 @@ namespace Kukolony.Jobs
         /// </remarks>
         private const float RefusedForSeconds = 300f;
 
+        /// <summary>
+        ///     How long something merely blocked is refused.
+        /// </summary>
+        /// <remarks>
+        ///     Much shorter, because the verdict behind it is much weaker: inside a settlement
+        ///     a path is given up on after four seconds of no progress, which is as easily
+        ///     another villager standing in the doorway as it is a wall. Long enough to break
+        ///     a tick-rate retry loop, short enough that a doorway is forgiven.
+        /// </remarks>
+        internal const float BlockedForSeconds = 20f;
+
         private static readonly Dictionary<ZDOID, Dictionary<ZDOID, float>> Refused =
             new Dictionary<ZDOID, Dictionary<ZDOID, float>>();
 
@@ -50,7 +61,7 @@ namespace Kukolony.Jobs
             if (!villager.IsNone()) Refused.Remove(villager);
         }
 
-        internal static void Refuse(ZDOID villager, ZDOID target)
+        internal static void Refuse(ZDOID villager, ZDOID target, float seconds = RefusedForSeconds)
         {
             if (villager.IsNone() || target.IsNone()) return;
 
@@ -60,7 +71,12 @@ namespace Kukolony.Jobs
                 Refused[villager] = mine;
             }
 
-            mine[target] = Time.time + RefusedForSeconds;
+            // The longest standing refusal wins. A brief block arriving after a hard give-up
+            // must not shorten it.
+            float until = Time.time + seconds;
+            if (mine.TryGetValue(target, out float already) && already > until) return;
+
+            mine[target] = until;
         }
 
         /// <summary>Whether this villager has given up on reaching this, recently enough to count.</summary>

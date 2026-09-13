@@ -163,10 +163,10 @@ namespace Kukolony.Villagers.Navigation
         ///         covering ground unseen is exactly as good as walking.
         ///     </para>
         /// </remarks>
-        private float _tripProgress;
-
+        private float _tripStalled;
         private float _tripClosest;
-        private bool _onTrip;
+        private float _tripSeen;
+        private Vector3 _tripTarget = new Vector3(float.MaxValue, 0f, float.MaxValue);
         private bool _reckoning;
         private float _reckonUntil;
         private int _rescues;
@@ -201,27 +201,71 @@ namespace Kukolony.Villagers.Navigation
         ///     ladder's and is cleared every time the ladder tries something, so a job reading
         ///     it is told about the last rung rather than about the trip.
         /// </remarks>
-        internal float TripStalledFor => _onTrip ? Mathf.Max(0f, Time.time - _tripProgress) : 0f;
+        internal float TripStalledFor => _tripStalled;
 
         /// <summary>
-        ///     Starts the trip clock. Every job must call this when it takes a new target.
+        ///     Keeps the trip clock, from the leg being walked.
         /// </summary>
         /// <remarks>
-        ///     Told rather than inferred. A target change was being guessed at from distance
-        ///     comparisons inside the move, which the rescue branches return before ever
-        ///     reaching - so a villager that gave up on one thing carried its whole stalled
-        ///     total onto the next and gave up on that immediately, and on the one after, at
-        ///     tick rate. The job knows when it chose something; nothing else reliably does.
+        ///     <para>
+        ///         Two rules, and between them they are the whole of it. <b>A different place
+        ///         is a different trip</b>, so the clock starts again - which covers every leg
+        ///         without anybody having to remember to say so, including the ones that never
+        ///         pass through choosing: a delivery that follows a collection, a walk back to
+        ///         a trunk that rolled away, a trip resumed after a reload or handed to
+        ///         another peer.
+        ///     </para>
+        ///     <para>
+        ///         <b>Only time spent walking counts.</b> The clock is asked while walking and
+        ///         advanced while walking, so anything else the villager does between two
+        ///         walking ticks - felling a tree for three minutes, sleeping off a night -
+        ///         is not time this trip spent getting nowhere. Told to count it, the villager
+        ///         woke up and abandoned the target it was standing next to.
+        ///     </para>
+        ///     <para>
+        ///         Owned here rather than by the jobs. As a thing jobs announced it was reset
+        ///         in one place that most walking ticks never reach, which is the same fault
+        ///         as the clock it replaced, in the other direction.
+        ///     </para>
         /// </remarks>
-        internal void BeginTrip()
+        private void KeepTripClock(Vector3 target, float distance)
         {
-            _onTrip = true;
-            _tripProgress = Time.time;
-            _tripClosest = float.MaxValue;
+            if (Utils.DistanceXZ(_tripTarget, target) > NewLegDistance)
+            {
+                _tripTarget = target;
+                _tripClosest = distance;
+                _tripStalled = 0f;
+                _tripSeen = Time.time;
+                return;
+            }
+
+            float since = Time.time - _tripSeen;
+            _tripSeen = Time.time;
+
+            // A gap means the villager was doing something other than walking here, and that
+            // is not this trip failing to get anywhere.
+            if (since <= WalkingGapSeconds) _tripStalled += since;
+
+            if (distance >= _tripClosest - ProgressStep) return;
+
+            _tripClosest = distance;
+            _tripStalled = 0f;
         }
 
-        /// <summary>Ends the trip clock, so an idle villager is not accruing a stall.</summary>
-        internal void EndTrip() => _onTrip = false;
+        /// <summary>How far a leg's destination must move to count as a different trip.</summary>
+        /// <remarks>
+        ///     Small, because a job nudging its target by centimetres as it re-reads the world
+        ///     is the same leg, and walking to a different chest is not.
+        /// </remarks>
+        private const float NewLegDistance = 2f;
+
+        /// <summary>
+        ///     How long a break between walking ticks before the gap stops counting.
+        /// </summary>
+        /// <remarks>
+        ///     Longer than a tick and far shorter than any work a villager stands still to do.
+        /// </remarks>
+        private const float WalkingGapSeconds = 1f;
 
         /// <summary>The closest it has managed to get to the current target.</summary>
         internal float Closest => _nearest;
@@ -329,19 +373,17 @@ namespace Kukolony.Villagers.Navigation
                     //
                     // The ladders are deliberately not reset either way. Gliding is the
                     // rescue, and a rescue that cleared its own counters could rescue for ever.
-                    float glided = Utils.DistanceXZ(target, _ai.transform.position);
-
-                    // The trip's clock counts this however short the errand. Covering ground
-                    // is getting closer, and the job's question is only ever whether the trip
-                    // is getting anywhere.
-                    NoteTripProgress(glided);
-
-                    // The ladder's clock counts it only on a real journey. On a settlement
-                    // errand the glide *is* the rescue, and this clock is the only thing
-                    // telling the locomotor a rescue is under way - clearing it three metres
-                    // in says the journey is over, which lands on back-on-foot, which forgets
-                    // the route and starts the whole thing again three metres further on.
-                    if (_journey.Travelling) NoteProgress(glided, climbDown: false);
+                    // The ladder's clock counts a glide only on a real journey. On a
+                    // settlement errand the glide *is* the rescue, and this clock is the only
+                    // thing telling the locomotor a rescue is under way - clearing it three
+                    // metres in says the journey is over, which lands on back-on-foot, which
+                    // forgets the route and starts the whole thing again three metres further
+                    // on. The trip's own clock is kept above and needs no help here.
+                    if (_journey.Travelling)
+                    {
+                        NoteProgress(Utils.DistanceXZ(target, _ai.transform.position),
+                            climbDown: false);
+                    }
 
                     return _journey.Advance(_ai.m_character, target,
                         deltaTime > 0f ? deltaTime : Time.deltaTime)
@@ -368,7 +410,6 @@ namespace Kukolony.Villagers.Navigation
             Retarget(target);
 
             float distance = Utils.DistanceXZ(target, _ai.transform.position);
-            NoteTripProgress(distance);
 
             // Tracked separately from progress: the nearest it has been is useful for reporting
             // and costs nothing, while what resets the clock has to be a real advance.
@@ -480,15 +521,6 @@ namespace Kukolony.Villagers.Navigation
             // Both ladders start from the bottom next time.
             _rescues = 0;
             _bursts = 0;
-        }
-
-        /// <summary>Records that the trip got closer, whatever moved the villager.</summary>
-        private void NoteTripProgress(float distance)
-        {
-            if (!_onTrip || distance >= _tripClosest - ProgressStep) return;
-
-            _tripClosest = distance;
-            _tripProgress = Time.time;
         }
 
         private void BeginReckoning()

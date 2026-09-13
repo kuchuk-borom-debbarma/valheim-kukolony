@@ -70,7 +70,7 @@ namespace Kukolony.Jobs
                 float distance = Utils.DistanceXZ(drop.transform.position, from);
                 if (distance >= best) continue;
 
-                List<StructureRecord> homes = SettlementIndex.WhereDoesItGo(colony, prefab, from);
+                List<StructureRecord> homes = SettlementIndex.WhereDoesItGo(colony, prefab, from, asker.Id);
                 if (homes.Count == 0) continue;
 
                 // Topping up a load already bound somewhere: only things going to that same

@@ -245,6 +245,22 @@ namespace Kukolony.Villagers
             _animation?.Hold(null);
         }
 
+        /// <summary>How long this villager's current trip has gone without getting closer.</summary>
+        internal float TripStalledFor => _walk != null ? _walk.TripStalledFor : 0f;
+
+        /// <summary>
+        ///     Drives one walking tick at a destination, for checks about the trip clock.
+        /// </summary>
+        /// <remarks>
+        ///     The clock is kept by the walk from the leg it is given, so the only honest way
+        ///     to ask whether it starts, advances and resets is to walk somewhere.
+        /// </remarks>
+        internal void WalkForTest(Vector3 destination)
+        {
+            if (!Bind()) return;
+            _walk.MoveTowards(destination, Navigation.Approach.ToStructure, deltaTime: .05f);
+        }
+
         /// <summary>Turns to face something, for work done standing still.</summary>
         internal void FaceTowards(Vector3 target, float deltaTime) =>
             VillagerMovement.FaceTowards(_ai, target, deltaTime);
