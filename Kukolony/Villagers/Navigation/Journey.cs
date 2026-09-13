@@ -116,6 +116,36 @@ namespace Kukolony.Villagers.Navigation
         private const float ShortestLeg = 8f;
 
         /// <summary>
+        ///     How long a villager may push at a leg without closing on it before that leg is
+        ///     treated as a wall.
+        /// </summary>
+        /// <remarks>
+        ///     Three seconds, against the rescue ladder's forty-five. They are answers to
+        ///     different questions: the ladder asks "is this villager stranded", which wants
+        ///     patience, and this asks "is this way blocked", which wants none - a villager
+        ///     walking into a hillside is not going to start climbing it on the fortieth second.
+        /// </remarks>
+        private const float LegStuckSeconds = 3f;
+
+        /// <summary>Closing this much counts as getting somewhere.</summary>
+        private const float LegProgress = 1.5f;
+
+        /// <summary>How long a direction that failed is left alone.</summary>
+        private const float BlockedSeconds = 25f;
+
+        /// <summary>How wide an arc a failed direction closes off.</summary>
+        /// <remarks>
+        ///     Forty degrees either side, which is wide enough that the next candidate is a
+        ///     genuinely different way round rather than the same hillside half a step over,
+        ///     and narrow enough that a villager blocked in one direction has not talked itself
+        ///     out of most of the compass.
+        /// </remarks>
+        private const float BlockedArc = 40f;
+
+        /// <summary>How many failed directions are remembered at once.</summary>
+        private const int BlockedKept = 3;
+
+        /// <summary>
         ///     How near standable ground must be to count as a stride away - close enough
         ///     that putting a villager there reads as stepping onto it.
         /// </summary>
@@ -297,11 +327,24 @@ namespace Kukolony.Villagers.Navigation
             // of those per tick per villager is twenty a second for an answer that changes on
             // the scale of seconds. Two seconds of walking is the resolution this needs.
             bool reached = Utils.DistanceXZ(here, _waypoint) <= LegReached;
-            if (_legChosen && !reached && Time.time < _legUntil)
+
+            // Whether the leg is being walked or merely leaned on. A body pressed against a
+            // slope it cannot climb reports every sign of walking - the legs move, the
+            // pathfinder is happy, the leg is reachable on the mesh - and closes no distance at
+            // all, because Unity's idea of a walkable incline and what a Valheim body can climb
+            // are two different numbers.
+            bool blocked = _legChosen && !reached && Pushing(here);
+
+            if (_legChosen && !reached && !blocked && Time.time < _legUntil)
             {
                 PokeAhead(here, destination);
                 return;
             }
+
+            // That way is a wall. Refusing the direction rather than the point matters: the
+            // point a step to its left is the same hillside, and a villager that re-chose it
+            // would lean on the hill again three seconds later, for ever.
+            if (blocked) Block(here, _waypoint);
 
             if (!TryChooseLeg(here, destination, remaining, bearing.normalized, out Vector3 leg))
             {
@@ -319,6 +362,8 @@ namespace Kukolony.Villagers.Navigation
             _legChosen = true;
             _legUntil = Time.time + LegSeconds;
             _lookingUntil = Time.time + LegSeconds + LookingSeconds;
+            _legClosest = Utils.DistanceXZ(here, leg);
+            _legPushingSince = Time.time;
 
             PokeAhead(here, destination);
         }
@@ -385,6 +430,8 @@ namespace Kukolony.Villagers.Navigation
             foreach (float angle in Fan)
             {
                 Vector3 aimed = Quaternion.Euler(0f, angle, 0f) * bearing;
+                if (Refused(aimed)) continue;
+
                 Vector3 candidate = Ahead(here, aimed, reach);
 
                 // No FindValidPoint here any more: it is the engine's broken sampler, and
@@ -424,6 +471,67 @@ namespace Kukolony.Villagers.Navigation
             return false;
         }
 
+        /// <summary>
+        ///     Whether the villager is leaning on its leg rather than walking it.
+        /// </summary>
+        /// <remarks>
+        ///     Measured as distance to the leg, not distance travelled: a villager grinding
+        ///     along the foot of a slope is moving, sometimes briskly, and getting no nearer to
+        ///     where it was going. The clock resets on every real gain, so a slow climb that is
+        ///     working is never mistaken for a wall.
+        /// </remarks>
+        private bool Pushing(Vector3 here)
+        {
+            float distance = Utils.DistanceXZ(here, _waypoint);
+
+            if (distance < _legClosest - LegProgress)
+            {
+                _legClosest = distance;
+                _legPushingSince = Time.time;
+                return false;
+            }
+
+            return Time.time - _legPushingSince > LegStuckSeconds;
+        }
+
+        /// <summary>Refuses the direction a leg was in, for a while.</summary>
+        private void Block(Vector3 here, Vector3 leg)
+        {
+            Vector3 bearing = leg - here;
+            bearing.y = 0f;
+            if (bearing.sqrMagnitude < .01f) return;
+
+            bearing = bearing.normalized;
+
+            // Oldest out. A villager in a dead end can refuse its way out of every direction it
+            // has, and then it has nothing to try - three is enough to walk round a hill and
+            // few enough that the compass reopens behind it.
+            if (_blocked.Count >= BlockedKept) _blocked.RemoveAt(0);
+
+            _blocked.Add(new Vector4(bearing.x, bearing.z, 0f, Time.time + BlockedSeconds));
+        }
+
+        /// <summary>Whether this direction is one that has just failed.</summary>
+        private bool Refused(Vector3 bearing)
+        {
+            float now = Time.time;
+
+            for (int i = _blocked.Count - 1; i >= 0; i--)
+            {
+                Vector4 wall = _blocked[i];
+                if (now > wall.w)
+                {
+                    _blocked.RemoveAt(i);
+                    continue;
+                }
+
+                Vector3 was = new Vector3(wall.x, 0f, wall.y);
+                if (Vector3.Angle(was, bearing) <= BlockedArc) return true;
+            }
+
+            return false;
+        }
+
         /// <summary>A point one hop along a bearing, put on the ground.</summary>
         private static Vector3 Ahead(Vector3 here, Vector3 bearing, float remaining)
         {
@@ -439,10 +547,19 @@ namespace Kukolony.Villagers.Navigation
         /// <summary>The corners of the last path asked for, reused so choosing allocates nothing.</summary>
         private readonly List<Vector3> _corners = new List<Vector3>();
 
+        /// <summary>Directions that turned out to be walls, and when they stop being refused.</summary>
+        private readonly List<Vector4> _blocked = new List<Vector4>();
+
+        private float _legClosest = float.MaxValue;
+
+        private float _legPushingSince;
+
         internal void Forget()
         {
             _travelling = false;
             _legChosen = false;
+            _blocked.Clear();
+            _legClosest = float.MaxValue;
 
             // The probe caches for a second, so a water flag latched at the end of one
             // errand survived into the next one started within it - and a villager on dry
