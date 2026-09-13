@@ -80,11 +80,25 @@ it stands in plus a ring of neighbours — it cannot path into unloaded ground �
 villagers working one settlement share those nine zones rather than paying nine each. Only
 villagers genuinely spread across the map cost what they look like they cost.
 
-**The ceiling is a budget, not a rule.** Every object in a held zone is instantiated and ticking,
-so `KeepAliveMaxZones` bounds what a settlement can ask of the machine; villagers are taken before
-the circles, so what a bound cap drops is an outpost's far edge rather than somebody's legs. Set
-it to **0** for no ceiling — a promise about your machine rather than about the mod — and reaching
-a ceiling is logged rather than passed over in silence.
+**The ceiling is a budget, not a rule, and it ships off.** Every object in a held zone is
+instantiated and ticking, so `KeepAliveMaxZones` bounds what a settlement can ask of the machine —
+and it defaults to **0**, meaning no ceiling, because a settlement quietly losing an outpost is a
+worse failure than a machine working hard. Villagers are taken before the circles, so what a bound
+ceiling drops is an outpost's far edge rather than somebody's legs, and reaching one is logged
+rather than passed over in silence.
+
+**Both numbers are settings, and both live in `BepInEx/config/com.kuku.kukolony.cfg`** — read at
+startup, with the values below as the fallback when the file says nothing.
+
+| Setting | Default | What it costs |
+|---|---|---|
+| `KeepAliveHaloRings` | `5` | 121 zones, ~704 m across, per villager — minus whatever a neighbour already holds |
+| `KeepAliveMaxZones` | `0` | no ceiling |
+
+**Said plainly: only one of these numbers has ever been measured.** The gate that proved this
+system works recorded *"2/2 wood in 26 s holding **9 zones**"*, which is one ring. Five rings is
+thirteen times that ground and has been measured by nobody. The defaults are a judgement that a
+settlement should keep working rather than a finding that this is what it costs.
 
 Three facts make it work, all read from the game:
 

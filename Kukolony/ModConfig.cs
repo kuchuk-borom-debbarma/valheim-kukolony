@@ -180,7 +180,7 @@ namespace Kukolony
             KeepAliveHaloRings = config.Bind(
                 "3 - Off-screen simulation",
                 nameof(KeepAliveHaloRings),
-                1,
+                5,
                 new ConfigDescription(
                     "Rings of zones held open around each villager. 1 is a 3x3 block of 64m zones, "
                     + "2 is 5x5, and so on - (2r+1) squared, so it grows fast: 5 is 121 zones and "
@@ -192,15 +192,16 @@ namespace Kukolony
             KeepAliveMaxZones = config.Bind(
                 "3 - Off-screen simulation",
                 nameof(KeepAliveMaxZones),
-                96,
+                0,
                 new ConfigDescription(
-                    "Hard ceiling on zones held open at once, or 0 for no ceiling. Reaching it is "
-                    + "logged rather than silently dropping anything. Each villager holds a 3x3 "
-                    + "block and a hearth or flag holds every zone its radius touches plus a "
-                    + "ring - but the zones are a set, so villagers working the same settlement "
-                    + "share theirs and cost nothing extra. A held zone is every object in it "
-                    + "alive and ticking, so 0 is a promise about your machine rather than about "
-                    + "the mod.",
+                    "Hard ceiling on zones held open at once. 0 means no ceiling, and is the "
+                    + "default. Reaching a ceiling is logged rather than passed over in silence, "
+                    + "and villagers are held before hearths and flags, so what a bound ceiling "
+                    + "drops is an outpost's far edge rather than somebody's legs. The zones are "
+                    + "a set, so villagers working the same settlement share theirs and cost "
+                    + "nothing extra; it is villagers spread across the map that multiply. Every "
+                    + "held zone is every object in it alive and ticking, so 0 is a promise "
+                    + "about your machine rather than about the mod.",
                     new AcceptableValueRange<int>(0, 1024)));
 
             KeepAliveScanSeconds = config.Bind(
