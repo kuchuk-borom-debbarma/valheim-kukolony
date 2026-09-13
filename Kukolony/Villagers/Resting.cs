@@ -70,7 +70,7 @@ namespace Kukolony.Villagers
         /// </summary>
         /// <returns>True when the villager is resting and must not be given work.</returns>
         internal static bool Tick(Villager villager, Colony colony, VillagerState state,
-            VillagerWalk walk, VillagerAnimation animation, out string doing)
+            VillagerWalk walk, VillagerAnimation animation, float deltaTime, out string doing)
         {
             doing = string.Empty;
 
@@ -99,14 +99,14 @@ namespace Kukolony.Villagers
             if (bed != null)
             {
                 doing = Settle(villager, state, walk, animation, bed.transform, bed,
-                    ModConfig.BedHoursToRest.Value, "sleeping", "going to bed", energy);
+                    ModConfig.BedHoursToRest.Value, "sleeping", "going to bed", energy, deltaTime);
                 return true;
             }
 
             // No bed, or its zone is not loaded. The hearth is the settlement's fallback and it
             // is slower, which is what makes building a bed worth doing.
             doing = Settle(villager, state, walk, animation, colony.transform, null,
-                ModConfig.HearthHoursToRest.Value, "resting", "going to rest", energy);
+                ModConfig.HearthHoursToRest.Value, "resting", "going to rest", energy, deltaTime);
             return true;
         }
 
@@ -123,7 +123,7 @@ namespace Kukolony.Villagers
         /// <summary>Walks somewhere to rest, and rests once it is there.</summary>
         private static string Settle(Villager villager, VillagerState state, VillagerWalk walk,
             VillagerAnimation animation, Transform target, Bed bed, float hoursToRest,
-            string resting, string walking, float energy)
+            string resting, string walking, float energy, float deltaTime)
         {
             // The walk decides whether it got there, because it already knows how close a
             // villager can actually get to a solid thing - which varies with the terrain and has
@@ -131,7 +131,8 @@ namespace Kukolony.Villagers
             // of my own is how a villager comes to stand beside its bed insisting it is still on
             // its way, and it is the fourth time in this codebase that two notions of "arrived"
             // have disagreed.
-            MoveResult moved = walk.MoveTowards(target.position, Approach.ToStructure);
+            MoveResult moved = walk.MoveTowards(target.position, Approach.ToStructure,
+                deltaTime: deltaTime);
             bool arrived = moved == MoveResult.Arrived ||
                            Utils.DistanceXZ(villager.transform.position, target.position) <= CloseEnough;
 

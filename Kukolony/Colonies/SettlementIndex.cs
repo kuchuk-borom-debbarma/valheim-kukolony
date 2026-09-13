@@ -45,7 +45,8 @@ namespace Kukolony.Colonies
         ///     out - counts as room rather than as none: refusing to answer would cost the
         ///     settlement a destination it really had.
         /// </remarks>
-        internal static List<StructureRecord> WhereDoesItGo(Colony colony, string itemPrefab, Vector3 from)
+        internal static List<StructureRecord> WhereDoesItGo(Colony colony, string itemPrefab, Vector3 from,
+            ZDOID asker = default)
         {
             List<StructureRecord> answers = new List<StructureRecord>();
             if (colony == null || string.IsNullOrEmpty(itemPrefab)) return answers;
@@ -54,6 +55,12 @@ namespace Kukolony.Colonies
             foreach (StructureRecord record in Current(colony).Storage)
             {
                 if (record.StatusIn(colony) != StructureStatus.Ready) continue;
+
+                // Not somewhere this villager has just spent two minutes failing to reach.
+                // A destination is chosen afresh from the same world every tick, so without
+                // this a villager that gave up on a walled-in chest sets straight off to it
+                // again, and again, burning a repetition each time.
+                if (Jobs.Unreachable.Refuses(asker, record.Id)) continue;
                 if (!StructureInventory.HasRoomFor(record.Id, itemPrefab)) continue;
 
                 int score = ScoreOf(record, itemPrefab);

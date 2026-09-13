@@ -141,6 +141,32 @@ namespace Kukolony.Villagers.Navigation
         private float _closest;
         private float _nearest;
         private float _lastProgress;
+
+        /// <summary>
+        ///     The trip's own clock, which belongs to the job rather than to the ladder.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Separate because three things were reading one field and wanting different
+        ///         answers from it. The rescue ladder asks "has walking stopped working" and
+        ///         wants its clock cleared every time it tries something; the locomotor asks
+        ///         "is this a journey"; the job asks "should this trip be given up on". Three
+        ///         rounds of review went on that field, each fixing one reader and breaking
+        ///         another - and the last of them left the abandon bound measuring time since
+        ///         the last rescue rung rather than time the trip had been failing, then
+        ///         handing that inherited total to the next target and condemning it on sight.
+        ///     </para>
+        ///     <para>
+        ///         So the trip keeps its own. It starts when a job takes a target, it is reset
+        ///         by nothing else - not by a rescue rung, not by forgetting a route - and any
+        ///         way of getting closer counts, gliding included, because for this question
+        ///         covering ground unseen is exactly as good as walking.
+        ///     </para>
+        /// </remarks>
+        private float _tripProgress;
+
+        private float _tripClosest;
+        private bool _onTrip;
         private bool _reckoning;
         private float _reckonUntil;
         private int _rescues;
@@ -166,6 +192,36 @@ namespace Kukolony.Villagers.Navigation
 
         /// <summary>How long the villager has been trying without getting closer.</summary>
         internal float StalledFor => _hasTarget ? Mathf.Max(0f, Time.time - _lastProgress) : 0f;
+
+        /// <summary>
+        ///     How long this trip has gone without getting any closer, by any means.
+        /// </summary>
+        /// <remarks>
+        ///     What a job should read before giving up. <see cref="StalledFor" /> is the
+        ///     ladder's and is cleared every time the ladder tries something, so a job reading
+        ///     it is told about the last rung rather than about the trip.
+        /// </remarks>
+        internal float TripStalledFor => _onTrip ? Mathf.Max(0f, Time.time - _tripProgress) : 0f;
+
+        /// <summary>
+        ///     Starts the trip clock. Every job must call this when it takes a new target.
+        /// </summary>
+        /// <remarks>
+        ///     Told rather than inferred. A target change was being guessed at from distance
+        ///     comparisons inside the move, which the rescue branches return before ever
+        ///     reaching - so a villager that gave up on one thing carried its whole stalled
+        ///     total onto the next and gave up on that immediately, and on the one after, at
+        ///     tick rate. The job knows when it chose something; nothing else reliably does.
+        /// </remarks>
+        internal void BeginTrip()
+        {
+            _onTrip = true;
+            _tripProgress = Time.time;
+            _tripClosest = float.MaxValue;
+        }
+
+        /// <summary>Ends the trip clock, so an idle villager is not accruing a stall.</summary>
+        internal void EndTrip() => _onTrip = false;
 
         /// <summary>The closest it has managed to get to the current target.</summary>
         internal float Closest => _nearest;
@@ -273,11 +329,19 @@ namespace Kukolony.Villagers.Navigation
                     //
                     // The ladders are deliberately not reset either way. Gliding is the
                     // rescue, and a rescue that cleared its own counters could rescue for ever.
-                    if (_journey.Travelling)
-                    {
-                        NoteProgress(Utils.DistanceXZ(target, _ai.transform.position),
-                            climbDown: false);
-                    }
+                    float glided = Utils.DistanceXZ(target, _ai.transform.position);
+
+                    // The trip's clock counts this however short the errand. Covering ground
+                    // is getting closer, and the job's question is only ever whether the trip
+                    // is getting anywhere.
+                    NoteTripProgress(glided);
+
+                    // The ladder's clock counts it only on a real journey. On a settlement
+                    // errand the glide *is* the rescue, and this clock is the only thing
+                    // telling the locomotor a rescue is under way - clearing it three metres
+                    // in says the journey is over, which lands on back-on-foot, which forgets
+                    // the route and starts the whole thing again three metres further on.
+                    if (_journey.Travelling) NoteProgress(glided, climbDown: false);
 
                     return _journey.Advance(_ai.m_character, target,
                         deltaTime > 0f ? deltaTime : Time.deltaTime)
@@ -304,6 +368,7 @@ namespace Kukolony.Villagers.Navigation
             Retarget(target);
 
             float distance = Utils.DistanceXZ(target, _ai.transform.position);
+            NoteTripProgress(distance);
 
             // Tracked separately from progress: the nearest it has been is useful for reporting
             // and costs nothing, while what resets the clock has to be a real advance.
@@ -415,6 +480,15 @@ namespace Kukolony.Villagers.Navigation
             // Both ladders start from the bottom next time.
             _rescues = 0;
             _bursts = 0;
+        }
+
+        /// <summary>Records that the trip got closer, whatever moved the villager.</summary>
+        private void NoteTripProgress(float distance)
+        {
+            if (!_onTrip || distance >= _tripClosest - ProgressStep) return;
+
+            _tripClosest = distance;
+            _tripProgress = Time.time;
         }
 
         private void BeginReckoning()

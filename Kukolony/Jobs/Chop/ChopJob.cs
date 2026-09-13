@@ -434,6 +434,7 @@ namespace Kukolony.Jobs.Chop
             // of this one as already stuck; without the tolerance being reset, a run of
             // refusals from the last target is spent against this one.
             context.Walk.Forget();
+            context.Walk.BeginTrip();
             Settled.Remove(context.Villager.Id);
             Reset(context, best);
 
@@ -474,7 +475,7 @@ namespace Kukolony.Jobs.Chop
                     // cannot get up a hillside would hold its job open and the next entry in
                     // its queue would never run.
                     JobResult? stuck = JobOutcomes.GiveUpIfStuck(context.Villager, context.State,
-                        context.Walk.StalledFor, () => StructureRegistry.DisplayName(target),
+                        context.Walk.TripStalledFor, () => StructureRegistry.DisplayName(target),
                         out string gaveUp, out ZDOID abandoned);
                     if (stuck.HasValue)
                     {

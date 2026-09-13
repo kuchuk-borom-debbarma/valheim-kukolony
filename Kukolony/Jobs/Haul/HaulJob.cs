@@ -140,6 +140,8 @@ namespace Kukolony.Jobs.Haul
                         more.TryGetComponent(out ZNetView reaching) && reaching.IsValid())
                     {
                         state.SetTarget(reaching.GetZDO().m_uid);
+                        context.Walk.Forget();
+                        context.Walk.BeginTrip();
                         activity = "fetching";
                         return JobResult.Running;
                     }
@@ -149,7 +151,8 @@ namespace Kukolony.Jobs.Haul
                 // Everything else is delivered on a later pass, which keeps one destination per
                 // trip, and an oddment nothing claims does not hold the rest of the load hostage.
                 if (!Selection.FirstDeliverable(context.Colony, carried,
-                        context.Villager.transform.position, out ItemDrop.ItemData _, out StructureRecord home))
+                        context.Villager.transform.position, context.Villager.Id,
+                        out ItemDrop.ItemData _, out StructureRecord home))
                 {
                     // Nothing it holds has anywhere to go. Put one down each pass rather than
                     // carrying them about: the bag is the villager's working space, and a load
@@ -169,6 +172,8 @@ namespace Kukolony.Jobs.Haul
                 }
 
                 state.SetDestination(home.Id);
+                context.Walk.Forget();
+                context.Walk.BeginTrip();
                 activity = "carrying";
                 return JobResult.Running;
             }
@@ -188,6 +193,8 @@ namespace Kukolony.Jobs.Haul
                 // Taking the target is also taking the claim, so no other villager walks here.
                 state.SetTarget(view.GetZDO().m_uid);
                 state.SetDestination(destination.Id);
+                context.Walk.Forget();
+                context.Walk.BeginTrip();
                 activity = "fetching";
                 return JobResult.Running;
             }
@@ -205,6 +212,8 @@ namespace Kukolony.Jobs.Haul
 
                 state.SetTarget(holding.GetZDO().m_uid);
                 state.SetDestination(shouldBe.Id);
+                context.Walk.Forget();
+                context.Walk.BeginTrip();
                 activity = "tidying up";
                 return JobResult.Running;
             }
@@ -260,7 +269,7 @@ namespace Kukolony.Jobs.Haul
                     // cannot reach a chest holds its job open and the rest of its queue never
                     // runs.
                     JobResult? stuck = JobOutcomes.GiveUpIfStuck(context.Villager, context.State,
-                        context.Walk.StalledFor, () => StructureRegistry.DisplayName(target),
+                        context.Walk.TripStalledFor, () => Named(context, target),
                         out string gaveUp, out ZDOID _);
                     if (stuck.HasValue)
                     {
@@ -294,6 +303,14 @@ namespace Kukolony.Jobs.Haul
                     return JobResult.Running;
 
                 default:
+                    // Refused as well as failed. Without this the trip is released, Choose
+                    // re-derives the same answer from the same world, the target has not moved
+                    // so the walk does not even count it as new, and the same failure lands on
+                    // the next tick - forty failures a minute until the villager tires itself
+                    // out and goes to bed, which is a symptom this project has already paid for
+                    // once.
+                    Unreachable.Refuse(context.Villager.Id, Walked(target));
+
                     // Says how far short it stopped and what it was asked for. "Cannot get
                     // there" is the same sentence whether the target is unreachable, the stop
                     // distance is smaller than the thing being walked to, or the villager never
@@ -304,6 +321,20 @@ namespace Kukolony.Jobs.Haul
                         $"cannot get there (stopped {gap:0.0}m away, needed {Approach.DistanceTo(target):0.0}m, " +
                         $"{context.Villager.Explain(target.transform.position)})", out activity);
             }
+        }
+
+        /// <summary>
+        ///     What to call the thing being walked to, preferring the player's own name.
+        /// </summary>
+        /// <remarks>
+        ///     A structure the player renamed "Ore stash" should be reported as that rather
+        ///     than as "Chest". Computed only once the bound has tripped, so looking it up
+        ///     costs nothing on an ordinary walking tick.
+        /// </remarks>
+        private static string Named(HaulContext context, GameObject target)
+        {
+            StructureRecord record = SettlementIndex.Find(context.Colony, Walked(target));
+            return record != null ? record.Name : StructureRegistry.DisplayName(target);
         }
 
         /// <summary>The id of the thing actually being walked to, or none.</summary>
@@ -444,7 +475,7 @@ namespace Kukolony.Jobs.Haul
             // it back to choosing rather than forcing flint into the wood shed, and is also how
             // a chest that filled up mid-trip is noticed.
             if (!Selection.FirstDeliverable(context.Colony, carried, context.Villager.transform.position,
-                    out ItemDrop.ItemData load, out StructureRecord belongs))
+                    context.Villager.Id, out ItemDrop.ItemData load, out StructureRecord belongs))
             {
                 context.State.SetDestination(ZDOID.None);
                 activity = "nowhere to put what I am carrying";

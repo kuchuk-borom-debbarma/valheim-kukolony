@@ -88,9 +88,10 @@ namespace Kukolony.Jobs
         /// <summary>
         ///     Where a carried item should go, or null if nothing will take it.
         /// </summary>
-        internal static StructureRecord WhereFor(Colony colony, string itemPrefab, Vector3 from)
+        internal static StructureRecord WhereFor(Colony colony, string itemPrefab, Vector3 from,
+            ZDOID asker = default)
         {
-            List<StructureRecord> homes = SettlementIndex.WhereDoesItGo(colony, itemPrefab, from);
+            List<StructureRecord> homes = SettlementIndex.WhereDoesItGo(colony, itemPrefab, from, asker);
             return homes.Count == 0 ? null : homes[0];
         }
 
@@ -230,6 +231,7 @@ namespace Kukolony.Jobs
         ///     load that is at most a bag deep.
         /// </remarks>
         internal static bool FirstDeliverable(Colony colony, List<ItemDrop.ItemData> carried, Vector3 from,
+            ZDOID asker,
             out ItemDrop.ItemData item, out StructureRecord home)
         {
             item = null;
@@ -238,7 +240,7 @@ namespace Kukolony.Jobs
 
             foreach (ItemDrop.ItemData held in carried)
             {
-                StructureRecord where = WhereFor(colony, Carrying.NameOf(held), from);
+                StructureRecord where = WhereFor(colony, Carrying.NameOf(held), from, asker);
                 if (where == null) continue;
 
                 item = held;

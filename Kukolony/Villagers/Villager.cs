@@ -649,7 +649,7 @@ namespace Kukolony.Villagers
             // Rest comes before work, and before the queue is even consulted. A tired villager
             // has nothing useful to offer any job, and asking one for work it cannot do would
             // burn a repetition to discover that.
-            if (Resting.Tick(this, colony, state, _walk, _animation, out string resting))
+            if (Resting.Tick(this, colony, state, _walk, _animation, deltaTime, out string resting))
             {
                 SetActivity(resting);
                 _working = true;

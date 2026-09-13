@@ -106,9 +106,13 @@ namespace Kukolony.Jobs
             // Keyed by both. By the thing alone, two villagers stuck on different problems
             // were one tally; by the villager alone, one villager's two unrelated problems
             // became "2 times in the last 2 minutes", which is a count of nothing.
+            // Keyed by who and by which thing, using the thing's id rather than its name:
+            // two different unreachable oaks are two problems, and by name they were one
+            // tally reporting "2 times in the last 2 minutes" about nothing.
             string name = villager != null ? villager.State.Name : "Somebody";
-            Core.Chatter.Say($"stuck {(villager == null ? "?" : villager.Id.ToString())} {what}",
-                $"{name} cannot reach {what} and has given up on it for now.");
+            string said = string.IsNullOrEmpty(what) ? "something" : what;
+            Core.Chatter.Say($"stuck {(villager == null ? "?" : villager.Id.ToString())} {abandoned}",
+                $"{name} cannot reach {said} and has given up on it for now.");
 
             return Failed(state, $"cannot reach {what} - gave up after {stalledFor:0}s", out activity);
         }
