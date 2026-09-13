@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Kukolony.Colonies;
 using Kukolony.Core;
 using UnityEngine;
@@ -14,6 +15,12 @@ namespace Kukolony.Jobs
     ///         one, which means work areas inherit registration, durable tokens, the structures
     ///         screen and the reaper for free, and a player defines one by pointing at a chest or
     ///         a kiln they have already built.
+    ///     </para>
+    ///     <para>
+    ///         <b>A job may have several, tried in order.</b> One area is the common case and
+    ///         this type describes one - the list of them lives on the job, and the rule for
+    ///         working it is that the first area with anything to do is the one that gets
+    ///         worked. See <see cref="AllFor" />.
     ///     </para>
     ///     <para>
     ///         <b>It bounds where work is found, not where it goes.</b> A villager assigned to the
@@ -71,29 +78,96 @@ namespace Kukolony.Jobs
             limit > 0f && limit < Radius ? new WorkArea(Centre, limit, Name) : this;
 
         /// <summary>
-        ///     The area a job works in, falling back to the whole settlement.
+        ///     The first area a job works in, falling back to the whole settlement.
         /// </summary>
         /// <remarks>
-        ///     A job whose work area has been destroyed or unregistered works the settlement
-        ///     rather than stopping. Silently doing nothing is the failure mode a colony sim can
-        ///     least afford - a villager that has quietly had no valid place to work for an hour
-        ///     looks exactly like one with nothing to do.
+        ///     For callers that want one answer - a screen stating a reach, a check naming a
+        ///     place. Work itself asks <see cref="AllFor" />, because a job may be pointed at
+        ///     several places and answering with the first one would quietly work one of them.
         /// </remarks>
         internal static WorkArea For(Colony colony, JobDefinition job)
         {
-            if (colony == null) return new WorkArea(Vector3.zero, 0f, "nowhere");
+            List<WorkArea> areas = new List<WorkArea>();
+            AllFor(colony, job, areas);
+            return areas[0];
+        }
+
+        /// <summary>
+        ///     Every area a job works, in the order it should try them.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Never empty. A job whose areas have all been destroyed or unregistered works
+        ///         the settlement rather than stopping, and so does one that was never pointed
+        ///         anywhere. Silently doing nothing is the failure mode a colony sim can least
+        ///         afford - a villager that has quietly had no valid place to work for an hour
+        ///         looks exactly like one with nothing to do.
+        ///     </para>
+        ///     <para>
+        ///         The caller supplies the list so a hot path may reuse a buffer. None does
+        ///         yet - every caller hands in a fresh one - which is fine at the rate work is
+        ///         chosen, and leaves the door open without pretending it has been walked
+        ///         through.
+        ///     </para>
+        /// </remarks>
+        internal static void AllFor(Colony colony, JobDefinition job, List<WorkArea> into)
+        {
+            if (into == null) return;
+            into.Clear();
+
+            if (colony == null)
+            {
+                into.Add(new WorkArea(Vector3.zero, 0f, "nowhere"));
+                return;
+            }
 
             WorkArea settlement = new WorkArea(colony.transform.position, colony.EffectiveRadius,
                 colony.State.Name);
 
-            if (job == null || string.IsNullOrEmpty(job.WorkArea)) return settlement;
-
-            foreach (StructureRecord record in colony.State.GetStructures())
+            List<string> tokens = job?.Areas;
+            if (tokens == null || tokens.Count == 0)
             {
-                if (record.PersistentId != job.WorkArea) continue;
+                into.Add(settlement);
+                return;
+            }
+
+            List<StructureRecord> records = colony.State.GetStructures();
+            bool settlementAdded = false;
+
+            foreach (string token in tokens)
+            {
+                if (string.IsNullOrEmpty(token))
+                {
+                    // The settlement itself, chosen alongside outposts. Once only: a list is
+                    // worked in order, and the same ground twice is a second fruitless sweep
+                    // between two places that do have work.
+                    if (settlementAdded) continue;
+
+                    settlementAdded = true;
+                    into.Add(settlement);
+                    continue;
+                }
+
+                if (TryResolve(records, job, token, out WorkArea area)) into.Add(area);
+            }
+
+            // Every place named is gone. Falls back rather than leaving an empty list, which
+            // no caller checks for and every caller would read as "nothing to do here".
+            if (into.Count == 0) into.Add(settlement);
+        }
+
+        /// <summary>One named place, if it is still registered and still exists.</summary>
+        private static bool TryResolve(List<StructureRecord> records, JobDefinition job,
+            string token, out WorkArea area)
+        {
+            area = default;
+
+            foreach (StructureRecord record in records)
+            {
+                if (record.PersistentId != token) continue;
 
                 ZDO zdo = ZDOMan.instance?.GetZDO(record.Id);
-                if (zdo == null) break;
+                if (zdo == null) return false;
 
                 // A flag brings its own reach - its screen says how far, and a job pointed
                 // at it working a default-sized patch of a larger outpost contradicted the
@@ -108,14 +182,15 @@ namespace Kukolony.Jobs
                 // hearth's reach together with every flag's, so a job pointed at one flag was
                 // refused work that sat plainly inside the settlement. What bounds the search
                 // is the config ceiling, and what narrows it is this radius. Nothing else.
-                float radius = job.WorkRadius > 0f ? job.WorkRadius
+                float radius = job != null && job.WorkRadius > 0f ? job.WorkRadius
                     : (record.Capabilities & StructureCapability.WorkArea) != 0
                         ? WorkFlag.RadiusOf(zdo)
                         : DefaultRadius;
-                return new WorkArea(zdo.GetPosition(), radius, record.Name);
+                area = new WorkArea(zdo.GetPosition(), radius, record.Name);
+                return true;
             }
 
-            return settlement;
+            return false;
         }
 
         /// <summary>How far a work area reaches when the job has not said.</summary>

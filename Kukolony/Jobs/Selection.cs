@@ -30,6 +30,13 @@ namespace Kukolony.Jobs
         ///         item and discovering on arrival that nothing wants it fails the job after a
         ///         walk, which is a worse answer than choosing something else.
         ///     </para>
+        ///     <para>
+        ///         <b>The areas are tried in the order the job lists them.</b> Nearest wins
+        ///         within an area, and a later area is only looked at once the ones before it
+        ///         have nothing - which is what makes "here first, then the outpost" mean
+        ///         something. Pooling them and taking the globally nearest would make the
+        ///         order on screen decorative.
+        ///     </para>
         /// </remarks>
         internal static bool TryFindGroundWork(Colony colony, JobDefinition job, Villager asker,
             out ItemDrop item, out StructureRecord destination, StructureRecord boundFor = null)
@@ -38,7 +45,55 @@ namespace Kukolony.Jobs
             destination = null;
             if (colony == null || asker == null) return false;
 
-            WorkArea area = WorkArea.For(colony, job);
+            List<WorkArea> areas = new List<WorkArea>();
+            WorkArea.AllFor(colony, job, areas);
+
+            ItemDrop nearestItem = null;
+            StructureRecord nearestHome = null;
+            float nearest = float.MaxValue;
+
+            foreach (WorkArea area in areas)
+            {
+                if (!TryFindGroundWorkIn(colony, job, asker, area, boundFor, out ItemDrop found,
+                        out StructureRecord home, out float distance))
+                {
+                    continue;
+                }
+
+                // Choosing fresh: the first area with anything wins, which is what the order
+                // on the screen promises.
+                if (boundFor == null)
+                {
+                    item = found;
+                    destination = home;
+                    return true;
+                }
+
+                // Topping up a load already bound somewhere is the exception, and it takes
+                // the nearest across every area. Area order here retargeted a villager
+                // standing in the far quarry with a half-full bag to a single item that had
+                // just dropped at home, then back again - a hundred and fifty metres each
+                // way for one ore.
+                if (distance >= nearest) continue;
+
+                nearest = distance;
+                nearestItem = found;
+                nearestHome = home;
+            }
+
+            item = nearestItem;
+            destination = nearestHome;
+            return item != null;
+        }
+
+        /// <summary>The nearest thing worth hauling inside one area, and how far off it is.</summary>
+        private static bool TryFindGroundWorkIn(Colony colony, JobDefinition job, Villager asker,
+            WorkArea area, StructureRecord boundFor, out ItemDrop item, out StructureRecord destination,
+            out float away)
+        {
+            item = null;
+            destination = null;
+
             Vector3 from = asker.transform.position;
             float best = float.MaxValue;
 
@@ -82,6 +137,7 @@ namespace Kukolony.Jobs
                 destination = homes[0];
             }
 
+            away = best;
             return item != null;
         }
 
@@ -126,11 +182,32 @@ namespace Kukolony.Jobs
             destination = null;
             if (colony == null || asker == null || job == null || !job.TidyContainers) return false;
 
+            // In the job's own order, as loose items are: a settlement that keeps its
+            // outpost's chests tidy only once its own are is the same promise the row makes.
+            List<WorkArea> areas = new List<WorkArea>();
+            WorkArea.AllFor(colony, job, areas);
+
+            foreach (WorkArea area in areas)
+            {
+                if (TryFindContainerWorkIn(colony, job, asker, area, out source, out destination))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>The worst-placed item in one area's containers.</summary>
+        private static bool TryFindContainerWorkIn(Colony colony, JobDefinition job, Villager asker,
+            WorkArea area, out GameObject source, out StructureRecord destination)
+        {
+            source = null;
+            destination = null;
+
             Vector3 from = asker.transform.position;
             int bestImprovement = 0;
             float bestDistance = float.MaxValue;
-
-            WorkArea area = WorkArea.For(colony, job);
 
             foreach (StructureRecord record in SettlementIndex.WhatMayBeTidied(colony))
             {

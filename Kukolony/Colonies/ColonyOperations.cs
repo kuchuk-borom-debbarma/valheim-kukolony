@@ -71,18 +71,45 @@ namespace Kukolony.Colonies
         }
 
         /// <summary>Renames a registered structure. The record keeps its identity and targets.</summary>
-        internal static bool RenameStructure(Colony colony, ZDOID id, string name)
+        internal static bool RenameStructure(Colony colony, ZDOID id, string name) =>
+            colony != null && RenameStructure(colony.Id, id, name);
+
+        /// <summary>
+        ///     Renames a registered structure through the Kolony's ZDO.
+        /// </summary>
+        /// <remarks>
+        ///     By ZDO rather than by component, so a rename works at an outpost where the
+        ///     hearth three hundred metres away is not instantiated. AssignFlag reaches the
+        ///     same record the same way.
+        /// </remarks>
+        internal static bool RenameStructure(ZDOID colonyId, ZDOID id, string name)
         {
-            if (colony == null || string.IsNullOrWhiteSpace(name)) return false;
-            List<StructureRecord> records = colony.State.GetStructures();
+            if (colonyId.IsNone() || string.IsNullOrWhiteSpace(name)) return false;
+
+            ZDO colonyZdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(colonyId) : null;
+            if (colonyZdo == null || !colonyZdo.IsValid()) return false;
+
+            ColonyState state = new ColonyState(colonyZdo);
+            List<StructureRecord> records = state.GetStructures();
             StructureRecord record = records.Find(r => r.Id == id);
             if (record == null) return false;
+
             record.Name = name.Trim();
+
             // The list lives on the hearth, so the hearth must be ours to write. Registering
             // and removing both claim it; renaming did not, which made a non-owner's rename
             // land locally and vanish on the next sync.
-            if (colony.TryGetComponent(out ZNetView view) && view.IsValid()) view.ClaimOwnership();
-            colony.State.SetStructures(records);
+            colonyZdo.SetOwner(ZDOMan.GetSessionID());
+            state.SetStructures(records);
+
+            // A flag carries its own name, because it is read at the flag by people standing
+            // at it. Renaming it from the Kolony's side has to reach that too, or the two
+            // disagree.
+            if ((record.Capabilities & StructureCapability.WorkArea) != 0)
+            {
+                WorkFlag.WriteName(record.Id, record.Name);
+            }
+
             return true;
         }
 
@@ -229,7 +256,7 @@ namespace Kukolony.Colonies
                 PersistentId = token,
                 // A flag the player has named keeps that name in the list it joins; an
                 // unnamed one falls back to the prefab's, which is what it has always used.
-                Name = WorkFlag.GivenName(flagZdo) is string given && given.Length > 0
+                Name = WorkFlag.GivenNameOf(flagZdo) is string given && given.Length > 0
                     ? given
                     : StructureRegistry.DisplayName(flag.gameObject),
                 Prefab = Utils.GetPrefabName(flag.gameObject),

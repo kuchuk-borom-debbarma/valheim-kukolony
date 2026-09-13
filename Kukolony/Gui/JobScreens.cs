@@ -98,19 +98,57 @@ namespace Kukolony.Gui
         }
 
         /// <summary>A short answer to "where does this happen", for the list.</summary>
+        /// <remarks>
+        ///     Several places are summarised by the first and a count, rather than listed:
+        ///     the row is one line beside a label, and the order is what the first one says.
+        /// </remarks>
         internal static string Where(Colony colony, JobDefinition job)
         {
-            if (string.IsNullOrEmpty(job.WorkArea)) return WholeKolony;
+            List<string> tokens = job.Areas ?? new List<string>();
+            if (tokens.Count == 0) return WholeKolony;
+
+            // Counted over the whole list rather than the one named. A second area that has
+            // been destroyed hid behind the "+1", so the row went on promising two places
+            // while the job worked one - the same silence the single-area message exists to
+            // break.
+            int gone = 0;
+            foreach (string token in tokens)
+            {
+                if (!TryPlaceName(colony, token, out string _)) gone++;
+            }
+
+            string first = PlaceName(colony, tokens[0]);
+            string summary = tokens.Count == 1 ? first : $"{first} +{tokens.Count - 1}";
+
+            // The first one saying so already covers itself.
+            return gone > 0 && tokens.Count > 1 ? $"{summary} ({gone} gone)" : summary;
+        }
+
+        /// <summary>What one place token is called.</summary>
+        internal static string PlaceName(Colony colony, string token) =>
+            TryPlaceName(colony, token, out string name) ? name : GonePlace;
+
+        /// <summary>
+        ///     The area was destroyed or unregistered. Said plainly, because the job still
+        ///     runs - it falls back to the settlement - and a player should know why it
+        ///     suddenly ranges further than they told it to.
+        /// </summary>
+        private const string GonePlace = "a place that is gone";
+
+        private static bool TryPlaceName(Colony colony, string token, out string name)
+        {
+            name = WholeKolony;
+            if (string.IsNullOrEmpty(token)) return true;
 
             foreach (StructureRecord record in colony.State.GetStructures())
             {
-                if (record.PersistentId == job.WorkArea) return record.Name;
+                if (record.PersistentId != token) continue;
+
+                name = record.Name;
+                return true;
             }
 
-            // The area was destroyed or unregistered. Said plainly, because the job still runs -
-            // it falls back to the settlement - and a player should know why it suddenly ranges
-            // further than they told it to.
-            return "a place that is gone";
+            return false;
         }
     }
 
@@ -172,27 +210,43 @@ namespace Kukolony.Gui
             if (job.Kind == JobKind.Haul) BuildHaul(host, column, job);
             if (job.Kind == JobKind.Chop) BuildChop(host, column, job);
 
-            // Where it works. Anything registered can be the centre of a work area, and the
-            // empty choice is the settlement itself - which is a real answer rather than an
-            // unset one, so it is offered first and named.
+            // Where it works. The Kolony itself and its work-area flags, and nothing else:
+            // any registered thing can still serve as a centre, but offering every chest and
+            // kiln in the settlement made a list nobody could find an outpost in. The empty
+            // choice is the settlement itself - a real answer rather than an unset one, so it
+            // is offered first and named.
+            //
+            // Several may be chosen, and the order is kept: a job works the first place with
+            // anything to do and moves on when it is done.
             if (column.TryRow(out Row where))
             {
                 Widgets.Choice(where, "Where it works", JobListScreen.Where(colony, job),
-                    () => host.Push(new PickerScreen("Where it works", filter => Places(colony, filter),
-                        new List<string> { job.WorkArea }, false,
+                    () => host.Push(new PickerScreen("Where it works",
+                        filter => Places(colony, job, filter),
+                        // An unpointed job works the settlement, so that is what the picker
+                        // opens showing as chosen - the alternative shows nothing selected
+                        // for a job that is plainly working somewhere.
+                        job.Areas.Count == 0 ? new List<string> { string.Empty } : job.Areas, true,
                         chosen =>
                         {
-                            Edit(host, j => j.WorkArea = chosen.Count == 0 ? string.Empty : chosen[0]);
+                            Edit(host, j => j.Areas = chosen);
                             host.Refresh();
                         })), 260f);
             }
 
-            if (!string.IsNullOrEmpty(job.WorkArea) && column.TryRow(out Row radius))
+            // Asked of the first place the job names, never of the whole list. The reach is
+            // one number applied to every named place, and the settlement's own reach is set
+            // on the hearth - so a job working "the Kolony, then the north copse" must state
+            // the copse's reach here, not the Kolony's, which is what reading the first entry
+            // of the list would have given.
+            JobDefinition place = NamedPlace(job);
+
+            if (place != null && column.TryRow(out Row radius))
             {
                 // Asked of the job itself, so the row states the radius actually in force
                 // rather than re-deriving one. For chopping that is already held to the
                 // search radius, which is why the bound below can never contradict it.
-                float shown = Effective(colony, job);
+                float shown = Effective(colony, place);
 
                 // The bound comes from the place, never from the current value.
                 //
@@ -211,8 +265,12 @@ namespace Kukolony.Gui
                 // displayed makes the first tap jump the value *down* to it, which is what
                 // happens the moment a flag is shrunk or the work area re-pointed after a
                 // reach was set against the old one.
+                // Over every named place, not just the one shown. The reach is one number
+                // applied to all of them, so a bound taken from the first meant a second,
+                // wider flag could never be given more than the default ceiling from this
+                // screen - and which flag you had picked first decided it.
                 float most = job.Kind == JobKind.Chop ? Resources.ChoppingGround.SearchRadius : 128f;
-                float bound = Mathf.Max(shown, Mathf.Max(most, Effective(colony, Unbounded(job))));
+                float bound = Mathf.Max(shown, Mathf.Max(most, WidestNamedPlace(colony, job)));
 
                 Widgets.Number(radius, "How far it reaches", shown, 8f, bound, 4f,
                     value => $"{value:F0} m",
@@ -363,15 +421,59 @@ namespace Kukolony.Gui
                 : WorkArea.For(colony, job).Radius;
 
         /// <summary>
-        ///     The same job with no reach of its own, for asking what its place reaches.
+        ///     The widest reach any of this job's named places has of its own.
         /// </summary>
         /// <remarks>
-        ///     Only the kind and the place matter to that question, and a copy is used rather
-        ///     than clearing and restoring the real one - a screen that mutated the record to
-        ///     read from it would write that mutation to the colony if anything threw between.
+        ///     Asked with no reach of its own, so it answers what the places reach rather than
+        ///     what the job has already been set to - a bound that followed the current value
+        ///     could only ever shrink, and one tap down on a wide flag would lose the rest of
+        ///     it for good. Copies are used rather than clearing and restoring the real
+        ///     record, because a screen that mutated the job to read from it would write that
+        ///     mutation to the colony if anything threw between.
         /// </remarks>
-        private static JobDefinition Unbounded(JobDefinition job) =>
-            new JobDefinition { Kind = job.Kind, WorkArea = job.WorkArea };
+        private static float WidestNamedPlace(Colony colony, JobDefinition job)
+        {
+            float widest = 0f;
+
+            foreach (string token in job.Areas)
+            {
+                if (string.IsNullOrEmpty(token)) continue;
+
+                widest = Mathf.Max(widest, Effective(colony, new JobDefinition
+                {
+                    Kind = job.Kind,
+                    Areas = new List<string> { token }
+                }));
+            }
+
+            return widest;
+        }
+
+        /// <summary>
+        ///     This job reduced to the first place it names, or null if it names none.
+        /// </summary>
+        /// <remarks>
+        ///     The reach row's subject. A job that only works the settlement has no reach of
+        ///     its own to set - that is the hearth's - and showing the row there would be a
+        ///     control that changes nothing, which is the shape of setting this codebase has
+        ///     already been burned by.
+        /// </remarks>
+        private static JobDefinition NamedPlace(JobDefinition job)
+        {
+            foreach (string token in job.Areas)
+            {
+                if (string.IsNullOrEmpty(token)) continue;
+
+                return new JobDefinition
+                {
+                    Kind = job.Kind,
+                    WorkRadius = job.WorkRadius,
+                    Areas = new List<string> { token }
+                };
+            }
+
+            return null;
+        }
 
         private JobDefinition Find(Colony colony) => colony.State.GetJobs().Find(j => j.Id == _id);
 
@@ -396,8 +498,21 @@ namespace Kukolony.Gui
             colony.State.SetJobs(jobs);
         }
 
-        /// <summary>The settlement, then everything registered to it.</summary>
-        private static List<PickerScreen.Option> Places(Colony colony, string filter)
+        /// <summary>
+        ///     The settlement, then its work-area flags.
+        /// </summary>
+        /// <remarks>
+        ///     Not every registered structure. A work area can still be centred on anything
+        ///     registered - resolution is by token and knows nothing of this list - but a
+        ///     player choosing where a job works is choosing between the Kolony and the places
+        ///     they planted flags for, and burying those among every chest, kiln and bed made
+        ///     the choice unusable in a settlement of any size.
+        ///
+        ///     A place the job already names is listed whatever it is, so a job pointed at a
+        ///     chest by an older build can still be seen and unpicked rather than being stuck
+        ///     with a setting no screen offers a way to change.
+        /// </remarks>
+        private static List<PickerScreen.Option> Places(Colony colony, JobDefinition job, string filter)
         {
             List<PickerScreen.Option> options = new List<PickerScreen.Option>
             {
@@ -406,6 +521,9 @@ namespace Kukolony.Gui
 
             foreach (StructureRecord record in colony.State.GetStructures())
             {
+                bool flag = (record.Capabilities & StructureCapability.WorkArea) != 0;
+                if (!flag && !job.Areas.Contains(record.PersistentId)) continue;
+
                 if (!string.IsNullOrEmpty(filter) &&
                     record.Name.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0)
                 {

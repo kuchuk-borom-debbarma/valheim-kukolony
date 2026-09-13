@@ -134,7 +134,7 @@ namespace Kukolony.Gui
                 string worker = null;
                 foreach (JobDefinition job in jobs)
                 {
-                    if (job.WorkArea != record.PersistentId) continue;
+                    if (job.Areas == null || !job.Areas.Contains(record.PersistentId)) continue;
 
                     // Named after the first job that works here. A second job on the same spot is
                     // a detail the structure's own screen can tell them.

@@ -363,11 +363,44 @@ namespace Kukolony.Jobs.Chop
             // below is merely asserted: a colony radius of 128 against the default 96 m scan,
             // or a flag set to 200, gives a work area wider than the scan that feeds it, and
             // the band between them is ground the job lists as in range and can never act on.
-            WorkArea area = Area(context.Colony, context.Job);
+            List<WorkArea> areas = Areas(context.Colony, context.Job);
             List<ZDOID> candidates = ChoppingGround.Near(context.Colony);
 
             Vector3 here = context.Villager.transform.position;
             HashSet<ZDOID> refused = Refused(context);
+
+            // In the job's own order: the first wood with anything left in it is the one
+            // that gets worked, and the next is only looked at once this one is done. The
+            // sparing rule is asked per area for the same reason - "leave ten standing" is a
+            // promise about a place, and counting across two woods would let one be stripped
+            // because the other is thick.
+            // Every area, not any: the conservation message is only the truth when it is the
+            // reason everywhere. One thick wood beside a wood of the wrong species reported
+            // "that is enough felled here", which reads as the anti-clear-cut rule having
+            // fired for a job that simply found nothing it wanted.
+            bool allSparing = true;
+
+            foreach (WorkArea area in areas)
+            {
+                JobResult chosen = ChooseIn(context, area, candidates, refused, here, out bool sparing,
+                    out activity);
+                if (chosen != JobResult.Skipped) return chosen;
+
+                allSparing &= sparing;
+            }
+
+            return JobOutcomes.Skipped(context.State,
+                allSparing ? "that is enough felled here" : "nothing to chop", out activity);
+        }
+
+        /// <summary>
+        ///     Takes the nearest thing worth chopping inside one area, or reports nothing here.
+        /// </summary>
+        /// <returns>Skipped when this area has nothing, so the caller may try the next.</returns>
+        private static JobResult ChooseIn(ChopContext context, WorkArea area, List<ZDOID> candidates,
+            HashSet<ZDOID> refused, Vector3 here, out bool sparingOut, out string activity)
+        {
+            activity = string.Empty;
 
             // Counted first, over the whole area, before anything is picked. "How much forest
             // is left here" is a fact about the place rather than about who is asking, so it
@@ -388,6 +421,7 @@ namespace Kukolony.Jobs.Chop
             // so it stopped producing while sounding like conservation.
             bool sparing = context.Job != null && context.Job.LeaveStanding > 0 &&
                            standing <= context.Job.LeaveStanding;
+            sparingOut = sparing;
 
             ZDOID best = ZDOID.None;
             float nearest = float.MaxValue;
@@ -423,11 +457,10 @@ namespace Kukolony.Jobs.Chop
                 best = id;
             }
 
-            if (best.IsNone())
-            {
-                return JobOutcomes.Skipped(context.State,
-                    sparing ? "that is enough felled here" : "nothing to chop", out activity);
-            }
+            // Nothing here. Reported without touching the villager's own state, because the
+            // caller may yet find work in the next area and a "nothing to chop" written now
+            // would be overwritten by "off to chop" a moment later - or, worse, kept.
+            if (best.IsNone()) return JobResult.Skipped;
 
             // A new target is a new walk and a new tolerance. Without the walk being told,
             // its stall clock still holds the last target's timings and judges the first step
@@ -761,6 +794,20 @@ namespace Kukolony.Jobs.Chop
         /// </remarks>
         internal static WorkArea Area(Colony colony, JobDefinition job) =>
             WorkArea.For(colony, job).NoWiderThan(ChoppingGround.SearchRadius);
+
+        /// <summary>Every place this job works, each held to what the search can reach.</summary>
+        internal static List<WorkArea> Areas(Colony colony, JobDefinition job)
+        {
+            List<WorkArea> areas = new List<WorkArea>();
+            WorkArea.AllFor(colony, job, areas);
+
+            for (int i = 0; i < areas.Count; i++)
+            {
+                areas[i] = areas[i].NoWiderThan(ChoppingGround.SearchRadius);
+            }
+
+            return areas;
+        }
 
         /// <summary>How many standing trees an area still has.</summary>
         private static int StandingIn(Colony colony, WorkArea area)

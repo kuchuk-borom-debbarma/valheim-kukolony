@@ -43,8 +43,20 @@ namespace Kukolony.Colonies
 
         private static readonly int NameKey = "kukolony.flag.name.v1".GetStableHashCode();
 
-        /// <summary>What a flag nobody has named is called.</summary>
-        internal const string UnnamedLabel = "Kolony Flag";
+        /// <summary>The prefab's own name, which is what an unnamed flag is called.</summary>
+        /// <remarks>
+        ///     A token rather than a word, because the game translates it - the hover header
+        ///     and the structures list both go through the localiser, and a hard-coded English
+        ///     default would have shown a translated name in one place and "Kolony Flag" in the
+        ///     other for the same unnamed flag.
+        /// </remarks>
+        internal const string UnnamedToken = "$kukolony_flag";
+
+        /// <summary>What a flag nobody has named is called, in the player's language.</summary>
+        internal static string UnnamedLabel =>
+            Localization.instance != null
+                ? Localization.instance.Localize(UnnamedToken)
+                : "Kolony Flag";
 
         private ZNetView _nview;
 
@@ -90,13 +102,17 @@ namespace Kukolony.Colonies
         ///     "named the same thing the default says" - registration needs that distinction
         ///     to decide whether it may use the prefab's display name instead.
         /// </remarks>
-        internal static string GivenName(ZDO zdo) =>
+        internal static string GivenNameOf(ZDO zdo) =>
             (zdo?.GetString(NameKey, string.Empty) ?? string.Empty).Trim();
+
+        /// <summary>What the player typed, or empty - for a screen that must not offer a default
+        /// as though it were already the name.</summary>
+        internal string GivenName => Bind() ? GivenNameOf(_nview.GetZDO()) : string.Empty;
 
         /// <summary>The name off a bare ZDO, for callers with no instance.</summary>
         internal static string NameOf(ZDO zdo)
         {
-            string given = GivenName(zdo);
+            string given = GivenNameOf(zdo);
             return given.Length == 0 ? UnnamedLabel : given;
         }
 
@@ -120,12 +136,36 @@ namespace Kukolony.Colonies
             ZDO zdo = _nview.GetZDO();
             zdo.Set(NameKey, (name ?? string.Empty).Trim());
 
-            // Best effort by design. A flag is planted three hundred metres out, where its
-            // hearth is usually not loaded, so the record cannot always be reached from
-            // here - and the name on the flag is the one the player is looking at. The
-            // record catches up the next time the flag is assigned.
-            Colony colony = Colony.FindFor(zdo);
-            if (colony != null) ColonyOperations.RenameStructure(colony, zdo.m_uid, NameOf(zdo));
+            // And the Kolony's own record, through its ZDO rather than through a loaded
+            // hearth. A flag is planted three hundred metres out and a hearth that far away
+            // is usually not instantiated - asking for the component found nothing and the
+            // structures list, the map pin and the job screen kept the old name for good,
+            // with no way to put it right. AssignFlag reaches the same record the same way.
+            ColonyOperations.RenameStructure(ColonyMembership.GetColony(zdo), zdo.m_uid, NameOf(zdo));
+        }
+
+        /// <summary>
+        ///     Writes a name onto a flag's ZDO, for a rename that came from the Kolony's side.
+        /// </summary>
+        /// <remarks>
+        ///     The other half of the agreement. Renaming from the structures list wrote the
+        ///     record alone, so walking up to the flag afterwards showed the old name - the
+        ///     same "two names for one thing" this feature exists to prevent, entered by the
+        ///     other door.
+        /// </remarks>
+        internal static void WriteName(ZDOID id, string name)
+        {
+            ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(id) : null;
+            if (zdo == null || !zdo.IsValid()) return;
+
+            // The default is absence, not a name. Storing it would make an untouched flag
+            // indistinguishable from one deliberately named after the default, which is the
+            // distinction registration reads to decide whether it may use the prefab's name.
+            string given = (name ?? string.Empty).Trim();
+            if (given == UnnamedLabel) given = string.Empty;
+
+            zdo.SetOwner(ZDOMan.GetSessionID());
+            zdo.Set(NameKey, given);
         }
 
         internal void SetRadius(float radius)
@@ -146,16 +186,21 @@ namespace Kukolony.Colonies
 
         public string GetHoverText()
         {
-            if (!Bind()) return Localization.instance.Localize("$kukolony_flag");
+            if (!Bind()) return UnnamedLabel;
 
             ZDOID owner = Owner;
             string whose = owner.IsNone()
                 ? "<color=grey>claimed by nobody</color>"
                 : $"<color=orange>{OwnerName(owner)}</color>";
 
-            return Localization.instance.Localize(
-                $"{Name}\n{whose}\n<color=grey>reaches {Radius:0} m</color>"
-                + "\n[<color=yellow><b>$KEY_Use</b></color>] assign");
+            // Only the prompt is localised, and the name is put in afterwards. Running the
+            // whole line through the localiser feeds it whatever the player typed, and '$'
+            // is how a token starts - a flag called "Odin's $tash" came out mangled. The
+            // villager hover already had this discipline; the flag now keeps it too.
+            string prompt = "[<color=yellow><b>$KEY_Use</b></color>] assign";
+            if (Localization.instance != null) prompt = Localization.instance.Localize(prompt);
+
+            return $"{Name}\n{whose}\n<color=grey>reaches {Radius:0} m</color>\n{prompt}";
         }
 
         /// <summary>

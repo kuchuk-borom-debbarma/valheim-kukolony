@@ -176,7 +176,7 @@ namespace Kukolony.Debug
                 {
                     Id = "screenshot-haul", Name = "Haul to the shed", Kind = JobKind.Haul,
                     Repeat = 4, Items = new List<string> { "Wood" },
-                    WorkArea = subject.PersistentId, WorkRadius = 24f
+                    Areas = new List<string> { subject.PersistentId }, WorkRadius = 24f
                 });
                 colony.State.SetJobs(jobs);
             }

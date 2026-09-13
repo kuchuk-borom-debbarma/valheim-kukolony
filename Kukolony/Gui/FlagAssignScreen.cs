@@ -133,8 +133,12 @@ namespace Kukolony.Gui
 
         private void Close()
         {
-            if (_root != null) _root.SetActive(false);
+            // Cleared first, then hidden. Hiding the panel disables the name field, which
+            // Unity treats as the end of an edit and announces to its listeners - so with
+            // these the other way round, pressing Escape with the cursor in the box renamed
+            // the flag, reported it after the screen had gone, and rebuilt a hidden panel.
             _flag = null;
+            if (_root != null) _root.SetActive(false);
             Block(false);
         }
 
@@ -154,21 +158,27 @@ namespace Kukolony.Gui
 
             if (column.TryRow(out Row naming))
             {
-                Widgets.Text(naming, "Name", _flag.Name, value =>
+                // What the player typed, not what the flag is called. Pre-filling with the
+                // default made merely clicking into the box and out again store "Kolony
+                // Flag" as a deliberate name - which is exactly the distinction the flag
+                // keeps in order to know whether it may use the prefab's name.
+                Widgets.Text(naming, "Name", _flag.GivenName, value =>
                 {
-                    string trimmed = (value ?? string.Empty).Trim();
-                    if (trimmed.Length == 0)
-                    {
-                        // Refused rather than silently cleared, the same way a structure's
-                        // name is: a flag with no name is one you cannot pick out of a list
-                        // of three outposts, which is the whole reason to name it.
-                        Report.Say("A flag needs a name.");
-                        Refresh();
-                        return;
-                    }
+                    // Hiding the panel disables the input, and Unity ends an edit by telling
+                    // its listeners - so this fires on Escape and on the flag being broken
+                    // under the open screen, with whatever was in the box. Close clears the
+                    // flag before hiding anything, and that is what tells those apart from a
+                    // commit the player meant.
+                    if (_flag == null) return;
 
+                    // Blank clears it rather than being refused. A flag always has something
+                    // to be called, so there is no empty state to fall into - and without
+                    // this a flag named by accident could never be put back.
+                    string trimmed = (value ?? string.Empty).Trim();
                     _flag.SetName(trimmed);
-                    Report.Say($"Named {trimmed}.");
+                    Report.Say(trimmed.Length == 0
+                        ? $"Name cleared - it is a {WorkFlag.UnnamedLabel} again."
+                        : $"Named {trimmed}.");
                     Refresh();
                 });
             }

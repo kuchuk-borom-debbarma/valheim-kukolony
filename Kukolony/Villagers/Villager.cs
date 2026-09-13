@@ -931,7 +931,7 @@ namespace Kukolony.Villagers
             float rested = ModConfig.RestedAbove != null ? ModConfig.RestedAbove.Value : 70f;
 
             string word = state.Resting ? "resting"
-                : energy <= tired ? "tired"
+                : energy < tired ? "tired"
                 : energy >= rested ? "rested"
                 : "working";
 

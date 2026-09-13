@@ -129,10 +129,20 @@ settlement's record every time somebody is reassigned.
   handles, whether it tidies containers, whether it fills the bag before setting out, and
   **where it works**.
 
-"Where it works" offers the whole settlement first, then anything registered to the colony. That
-is what a work area is: a registered structure used as a centre, plus a radius. There is nothing
-new to place, and a job pointed at a structure that has since been destroyed reads *"a place that
-is gone"* rather than silently ranging over the whole settlement without saying why.
+"Where it works" offers the whole settlement first, then the colony's work-area flags. A work
+area is still a registered structure used as a centre plus a radius — any registered thing can
+serve, and older jobs pointed at a chest keep working — but the picker lists only the Kolony and
+the flags, because burying the outposts among every chest, kiln and bed made the list unusable.
+
+**Several may be chosen, and the order is kept.** The job works the first place that has anything
+to do and only moves on when that place is done, so *"the near copse, then the far one"* is a
+thing you can say. The whole Kolony is one of the choices and is what an unpointed job shows as
+chosen, so a haul job starts out working the settlement and you add outposts to it. A job pointed
+at a structure that has since been destroyed reads *"a place that is gone"* rather than silently
+ranging over the whole settlement without saying why.
+
+The reach row belongs to the named places. It is one number applied to each of them, and it is
+hidden for a job that only works the Kolony — that reach is the hearth's, set on the hearth.
 
 Deleting a job leaves villagers' queues alone. `QueueRunner` already bypasses a job that is no
 longer defined, so a deleted job strands nobody, and rewriting every villager to remove one entry

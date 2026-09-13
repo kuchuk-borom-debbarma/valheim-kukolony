@@ -501,7 +501,9 @@ Settled, with the reason.
   and expensive to add later; it is neither promised nor tested until someone asks.
 - **No defence.** A settlement that cannot survive a boar is accepted, deliberately.
 - **Overlapping work areas are a union** — what a player drawing two circles most likely
-  means.
+  means. Coverage is the union; *choice* is ordered, because a list the player arranged that
+  the work ignores is a lie on the screen. A job tries its areas in turn and works the first
+  one with anything to do.
 - **Energy degrades rather than blocks**: slower, then unwilling, always saying why. Coming
   home to a stalled village is a story; coming home to corpses is a bug report.
 - **A job refuses to start rather than stranding its result**, falls back to a junk area, and
@@ -510,8 +512,10 @@ Settled, with the reason.
   outpost costs a round trip: a legible price the player chose.
 - **A bed is an upgrade, not a requirement.** No bed means slow recovery idling by the colony
   piece, so a settlement cannot deadlock for want of furniture.
-- **Areas are neutral places; jobs point at them, and may point at several.** The colony is
-  always included, so no job can be configured into having nowhere to work.
+- **Areas are neutral places; jobs point at them, and may point at several, in order.** The
+  colony is one of the choices and the one an unpointed job starts with, so no job is ever
+  accidentally configured into having nowhere to work — and a job whose every named place has
+  been destroyed falls back to the colony rather than standing still.
 - **Jobs choose where work happens; structures choose where results go.**
 - **Reach is placed, not raised.** The colony radius stays modest so the settlement remains a
   place; a **work area** is a separate placed structure with its own radius, anywhere, that

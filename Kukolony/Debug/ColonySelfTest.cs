@@ -1215,7 +1215,7 @@ namespace Kukolony.Debug
                     new JobDefinition
                     {
                         Id = "pin-job", Name = "Quarry haul", Kind = JobKind.Haul,
-                        WorkArea = marked.PersistentId
+                        Areas = new List<string> { marked.PersistentId }
                     }
                 });
 
@@ -1467,15 +1467,93 @@ namespace Kukolony.Debug
                 new JobDefinition
                 {
                     Id = "outpost", Name = "Outpost haul", Kind = JobKind.Haul, Repeat = 20,
-                    WorkArea = outpost.PersistentId, WorkRadius = 12f
+                    Areas = new List<string> { outpost.PersistentId }, WorkRadius = 12f
                 }
             });
 
             JobDefinition stored = colony.State.GetJobs().Find(j => j.Id == "outpost");
-            report.Check(stored != null && stored.WorkArea == outpost.PersistentId &&
+            report.Check(stored != null && stored.Areas.Count == 1 &&
+                         stored.Areas[0] == outpost.PersistentId &&
                          Mathf.Approximately(stored.WorkRadius, 12f),
                 "a job's work area survives being written to the colony record",
-                $"area='{(stored == null ? "none" : stored.WorkArea)}' radius={stored?.WorkRadius ?? -1f}");
+                $"areas='{(stored == null ? "none" : string.Join(",", stored.Areas))}' " +
+                $"radius={stored?.WorkRadius ?? -1f}");
+
+            // Several places, in the order they were given. The order is the feature - a job
+            // works the first place with anything to do - so a codec that kept the set and
+            // lost the sequence would pass "the areas survived" and still work the wrong wood
+            // first.
+            List<JobDefinition> ordered = colony.State.GetJobs();
+            JobDefinition editing = ordered.Find(j => j.Id == "outpost");
+            if (editing == null)
+            {
+                report.Check(false, "work area check could re-read the job it just wrote");
+                yield break;
+            }
+
+            editing.Areas = new List<string> { store.PersistentId, outpost.PersistentId };
+            colony.State.SetJobs(ordered);
+
+            JobDefinition twice = colony.State.GetJobs().Find(j => j.Id == "outpost");
+            report.Check(twice != null && twice.Areas.Count == 2 &&
+                         twice.Areas[0] == store.PersistentId &&
+                         twice.Areas[1] == outpost.PersistentId,
+                "a job keeps several work areas, in the order they were given",
+                $"areas='{(twice == null ? "none" : string.Join(",", twice.Areas))}'");
+
+            // And the one-answer form reads the first of them, which is what the reach row
+            // and the map pins are told.
+            report.Check(twice != null && WorkArea.For(colony, twice).Name == store.Name,
+                "the first of a job's work areas is the one a single answer names",
+                $"first='{(twice == null ? "none" : WorkArea.For(colony, twice).Name)}'");
+
+            // A record written by the build that kept one work area, decoded against the
+            // layout that keeps a list. This is the one branch that can fail silently rather
+            // than loudly: a misread here does not throw, it produces a job full of
+            // plausible nonsense, so it is worth building the old bytes by hand.
+            ZPackage legacy = new ZPackage();
+            legacy.Write("legacy");
+            legacy.Write("Old haul");
+            legacy.Write((int)JobKind.Haul);
+            legacy.Write(7);
+            legacy.Write(true);
+            legacy.Write(false);
+            legacy.Write(outpost.PersistentId);
+            legacy.Write(19f);
+            legacy.Write(true);
+            legacy.Write(true);
+            legacy.Write(false);
+            legacy.Write(3);
+            legacy.Write("Wood");
+            legacy.Write(40);
+            legacy.Write(1);
+            legacy.Write("Stone");
+            legacy.Write(1);
+            legacy.Write("Birch");
+
+            JobDefinition old = JobDefinition.Read(new ZPackage(legacy.GetArray()), 3);
+            bool decoded = old.Areas.Count == 1 && old.Areas[0] == outpost.PersistentId &&
+                           Mathf.Approximately(old.WorkRadius, 19f) && old.Repeat == 7 &&
+                           old.LeaveStanding == 3 && old.StockItem == "Wood" && old.StockTarget == 40 &&
+                           old.Items.Count == 1 && old.Items[0] == "Stone" &&
+                           old.Species.Count == 1 && old.Species[0] == "Birch";
+            report.Check(decoded,
+                "a job written before work areas became a list still decodes, every field in place",
+                $"areas={old.Areas.Count} radius={old.WorkRadius} repeat={old.Repeat} " +
+                $"leave={old.LeaveStanding} stock='{old.StockItem}'x{old.StockTarget} " +
+                $"items={old.Items.Count} species={old.Species.Count}");
+
+            // Put back to the single outpost the behavioural half of this check relies on.
+            ordered = colony.State.GetJobs();
+            JobDefinition restoring = ordered.Find(j => j.Id == "outpost");
+            if (restoring == null)
+            {
+                report.Check(false, "work area check could restore the job it had been editing");
+                yield break;
+            }
+
+            restoring.Areas = new List<string> { outpost.PersistentId };
+            colony.State.SetJobs(ordered);
 
             // One log inside the area, one well outside it but comfortably inside the settlement.
             ItemDrop inside = DropItem("Wood", origin + new Vector3(27f, 0f, 3f), 3);
@@ -5304,7 +5382,8 @@ namespace Kukolony.Debug
                 new JobDefinition
                 {
                     Id = "chop", Name = "Chop", Kind = JobKind.Chop, Repeat = 30,
-                    WorkArea = flagRecord?.PersistentId ?? string.Empty, WorkRadius = 32f
+                    Areas = new List<string> { flagRecord?.PersistentId ?? string.Empty },
+                    WorkRadius = 32f
                 }
             });
 

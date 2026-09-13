@@ -59,7 +59,7 @@ left alone.
 | Setting | Meaning |
 |---|---|
 | **Which items** | An allow-list; empty means everything. One villager can haul only ore while another tidies generally. |
-| **Where it works** | The colony radius by default, plus any work areas registered to the colony. |
+| **Where it works** | The colony radius by default; several work areas may be chosen and are tried in order, the Kolony among them. |
 | **What it tidies** | The ground only, or the ground and containers. Lets you run a pure sweeper. |
 | **Load before delivering** | Fill the bag, or set out as soon as it has something. Full loads are efficient; eager delivery looks more alive. |
 
@@ -388,7 +388,7 @@ around and then walked into anyway.
 | **Which trees** — species allow-list, empty means all | Mirrors hauling's item list exactly, including that empty means everything. *Leave the birches* is a real thing people want. |
 | **Leave standing** — a count, default 0 | The anti-clear-cut rule. The scan already counts what it found, so below the threshold there is simply no work. This is what makes a woodcutter a forester. |
 | **Stop when we have** — an item and a count, 0 meaning never | The terminus the job otherwise lacks. Above the line the job returns **Skipped**, consuming no repetition and yielding to the next queue entry. |
-| **Where it works** | Not new — `WorkArea` and `WorkRadius` on `JobDefinition`, reused unchanged. |
+| **Where it works** | Not new — `Areas` and `WorkRadius` on `JobDefinition`, reused unchanged. Several areas are tried in order: the first wood with anything left in it is the one that gets cut, and *leave standing* is counted per area so one copse is not stripped because another is thick. |
 | **Repeat** | Not new — the queue already counts targets before yielding. |
 
 **Two stopping rules, deliberately, because they answer different questions.** *Leave standing*

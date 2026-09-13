@@ -51,16 +51,37 @@ namespace Kukolony.Jobs
         internal bool FillBagFirst = true;
 
         /// <summary>
-        ///     The registered structure this job works around, by durable token. Empty means the
-        ///     whole settlement.
+        ///     The places this job works, in the order it should try them, by durable token.
+        ///     An empty list - or an empty token within it - means the whole settlement.
         /// </summary>
         /// <remarks>
-        ///     A token rather than an address, for the reason every other reference here is:
-        ///     loading renumbers every ZDOID, so an address alone points at whatever later
-        ///     occupies that slot - and a job pointed at the wrong place is a villager working
-        ///     somewhere nobody asked it to.
+        ///     <para>
+        ///         Tokens rather than addresses, for the reason every other reference here is:
+        ///         loading renumbers every ZDOID, so an address alone points at whatever later
+        ///         occupies that slot - and a job pointed at the wrong place is a villager
+        ///         working somewhere nobody asked it to.
+        ///     </para>
+        ///     <para>
+        ///         <b>Ordered, and tried in order.</b> A job works the first place that has
+        ///         anything for it and only moves on when that place is done - so "the near
+        ///         copse, then the far one" is a thing a player can say, and a woodcutter
+        ///         clears one wood at a time instead of walking between two half-cut ones.
+        ///         The alternative, pooling every area and taking whatever is nearest, cannot
+        ///         express that and makes the order on screen a lie.
+        ///     </para>
         /// </remarks>
-        internal string WorkArea = string.Empty;
+        internal List<string> Areas = new List<string>();
+
+        /// <summary>
+        ///     How many areas a job may carry.
+        /// </summary>
+        /// <remarks>
+        ///     Enforced when writing as well as when reading. The count is the first
+        ///     length-prefixed field in the record, so a reader that refuses one the writer
+        ///     was willing to produce does not merely lose that job - it loses its place in
+        ///     the stream and every job after it decodes from the wrong offset.
+        /// </remarks>
+        internal const int MaxAreas = 64;
 
         /// <summary>How far that reaches. Zero means the default.</summary>
         internal float WorkRadius;
@@ -122,7 +143,16 @@ namespace Kukolony.Jobs
             package.Write(Repeat);
             package.Write(TidyContainers);
             package.Write(FillBagFirst);
-            package.Write(WorkArea ?? string.Empty);
+            List<string> areas = Areas ?? new List<string>();
+            if (areas.Count > MaxAreas)
+            {
+                Log.Warning($"[job] '{Name}' has {areas.Count} work areas - keeping the first {MaxAreas}.");
+                areas = areas.GetRange(0, MaxAreas);
+            }
+
+            package.Write(areas.Count);
+            foreach (string area in areas) package.Write(area ?? string.Empty);
+
             package.Write(WorkRadius);
 
             package.Write(ChopTrees);
@@ -158,15 +188,40 @@ namespace Kukolony.Jobs
                 Kind = (JobKind)package.ReadInt(),
                 Repeat = package.ReadInt(),
                 TidyContainers = package.ReadBool(),
-                FillBagFirst = package.ReadBool(),
 
                 // Read in the order Write wrote them. An object initializer runs its assignments
                 // top to bottom, so this is safe - but it is safe by a language guarantee rather
                 // than by anything visible here, which is worth a line of warning to whoever adds
                 // the next field.
-                WorkArea = package.ReadString(),
-                WorkRadius = package.ReadSingle()
+                FillBagFirst = package.ReadBool()
             };
+
+            // Version 3 and below kept a single place; version 4 keeps an ordered list. The
+            // old field is read into the list rather than dropped, so a job somebody pointed
+            // at their quarry last week still works the quarry.
+            if (version >= 4)
+            {
+                int areas = package.ReadInt();
+                if (areas < 0 || areas > MaxAreas)
+                {
+                    // Thrown, not skipped past, exactly as JobPreset does: every job after
+                    // this one is read from the same stream, so a count this wrong means the
+                    // position is already lost and carrying on decodes plausible nonsense.
+                    // The writer caps at the same number, so reaching here means the blob is
+                    // corrupt rather than merely old.
+                    throw new System.IO.InvalidDataException(
+                        $"job '{job.Name}' claims {areas} work areas");
+                }
+
+                for (int i = 0; i < areas; i++) job.Areas.Add(package.ReadString());
+            }
+            else
+            {
+                string single = package.ReadString();
+                if (!string.IsNullOrEmpty(single)) job.Areas.Add(single);
+            }
+
+            job.WorkRadius = package.ReadSingle();
 
             if (version >= 3)
             {

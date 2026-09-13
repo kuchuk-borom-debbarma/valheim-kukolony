@@ -116,17 +116,19 @@ namespace Kukolony.Colonies
             {
                 ZPackage p = new ZPackage(encoded);
 
-                // Both versions are decoded, which every other format in this file refuses to
-                // do on purpose - a blob written by an older build is normally discarded rather
-                // than read against the wrong layout, because that does not fail, it produces
-                // records full of plausible nonsense.
+                // Every version this mod has written is decoded, which every other format in
+                // this file refuses to do on purpose - a blob written by an older build is
+                // normally discarded rather than read against the wrong layout, because that
+                // does not fail, it produces records full of plausible nonsense.
                 //
                 // That trade is right when nobody is playing. It is wrong here: chopping added
                 // settings to a job while the mod was in use, and discarding would have thrown
                 // away a player's configured work to make room for a feature they could not use
-                // yet. Version 2 stops after the item list; the new fields keep their defaults.
+                // yet. Version 2 stops after the item list; version 3 keeps one work area where
+                // 4 keeps an ordered list; the fields a version does not carry keep their
+                // defaults, and JobDefinition.Read is the one place that knows which those are.
                 int version = p.ReadInt();
-                if (version != 2 && version != 3) return result;
+                if (version < 2 || version > 4) return result;
 
                 int count = p.ReadInt();
                 if (count < 0 || count > 256) return result;
@@ -181,7 +183,7 @@ namespace Kukolony.Colonies
         internal void SetJobs(List<Jobs.JobDefinition> jobs)
         {
             ZPackage p = new ZPackage();
-            p.Write(3);
+            p.Write(4);
             p.Write(jobs.Count);
             foreach (Jobs.JobDefinition job in jobs) job.Write(p);
             _zdo.Set(JobsKey, p.GetBase64());
