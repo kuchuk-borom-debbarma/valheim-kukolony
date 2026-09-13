@@ -297,6 +297,10 @@ namespace Kukolony.Debug
                     yield return CheckChoppingFellsATree(report, colony, origin);
                     break;
 
+                case "swing":
+                    yield return CheckTheAxeSwingIsSeen(report, colony, origin);
+                    break;
+
                 case "tend":
                     yield return CheckTheStationContract(report, origin);
                     yield return CheckAnIdleSmelterIsNotStoked(report, colony, origin);
@@ -318,7 +322,7 @@ namespace Kukolony.Debug
                     // Named but unknown. Failing beats running everything under a name that
                     // says otherwise, or running nothing and reporting a pass.
                     report.Check(false, $"'{wanted}' is not a slice this run knows",
-                        "known: chop, travel, queue, tend");
+                        "known: chop, travel, queue, tend, swing");
                     break;
             }
 
@@ -6408,6 +6412,14 @@ namespace Kukolony.Debug
 
                 ItemDrop.ItemData.SharedData shared = drop.m_itemData?.m_shared;
                 if (shared == null || shared.m_damages.m_chop <= 0f) continue;
+
+                // Chop damage alone is not an axe. The first item in the database that can chop
+                // is Abomination_attack1 - a creature's attack, and every villager this suite
+                // ever armed was carrying one: it fells trees perfectly well and answers for
+                // none of the things an axe answers for, so the chop checks passed while the
+                // villager chopped with an invisible gesture. The skill is what says "a thing a
+                // person swings", and it is asset data rather than a name.
+                if (shared.m_skillType != Skills.SkillType.Axes) continue;
                 if (shared.m_toolTier < lowestTier || shared.m_toolTier > highestTier) continue;
 
                 best = candidate;
@@ -6546,6 +6558,242 @@ namespace Kukolony.Debug
         ///     decompiled reference and its findings document disagree about whether AddOre takes
         ///     two arguments or three, so the live station is asked rather than either of them.
         /// </remarks>
+        /// <summary>
+        ///     That an axe swing is actually seen, rather than merely asked for.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>Asserting that we called the setter proves nothing.</b> Every part of this
+        ///         can be right - the rig has the trigger, the trigger fires, the RPC lands - and
+        ///         the villager still chops invisibly, because an animator only leaves its
+        ///         current state if some transition out of it accepts the parameters as they
+        ///         stand. So this watches the animator itself: what state each layer is in before
+        ///         the swing, and whether any of them moved.
+        ///     </para>
+        ///     <para>
+        ///         The control is the same window with no swing in it. Without that, a villager
+        ///         that happened to be drifting between idle states would pass this for ever.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckTheAxeSwingIsSeen(TestReport report, Colony colony, Vector3 origin)
+        {
+            Villager villager = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.5f);
+
+            if (villager == null || !villager.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "control: the swing check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            Animator animator = villager.GetComponentInChildren<Animator>();
+            VillagerAnimation rig = villager.AnimationForTest;
+
+            if (animator == null || rig == null)
+            {
+                report.Check(false, "control: the villager has an animator to watch",
+                    $"animator={(animator != null)} rig={(rig != null)}");
+                VillagerLifecycle.Remove(colony, who);
+                yield break;
+            }
+
+            report.Check(rig.CanSwing, "the rig has an axe swing to play",
+                $"swing='{rig.SwingName}' layers={animator.layerCount}");
+
+            Container bag = villager.GetComponentInChildren<Container>(true);
+            bool armed = bag != null && GiveAxe(bag, view, 0, 99);
+            report.Check(armed, "control: the villager was given an axe to swing");
+            if (!armed)
+            {
+                VillagerLifecycle.Remove(colony, who);
+                yield break;
+            }
+
+            ItemDrop.ItemData axe = Wielded(bag, FindAxe(0, 99));
+
+            // What standing still looks like, sampled rather than assumed - every state the rig
+            // visits while doing nothing. Comparing against a single instant instead let a
+            // villager drifting between two idle states pass this check while swinging nothing:
+            // any change counted, including a change straight back.
+            // By the name of the clip actually playing, not by a state hash. A hash tells you
+            // something changed; it does not tell you into what, and this rig's layer 0 drifts
+            // between several resting states on its own - which passed an earlier version of
+            // this check while the photograph showed a villager standing perfectly still.
+            HashSet<string> quiet = new HashSet<string>();
+            for (int frame = 0; frame < 90; frame++)
+            {
+                yield return null;
+                Collect(animator, quiet);
+            }
+
+            List<string> resting = new List<string>(quiet);
+            string idle = string.Join(", ", resting.ToArray());
+
+            // Held and swung in the same frame, with nothing yielded between. A villager whose
+            // current job is not chopping puts its axe away every tick - rig included - so a
+            // hold asserted a moment earlier is tidied away before the swing can use it. That
+            // is why the production swing reasserts the hold itself rather than trusting one
+            // set earlier, and this has to do the same or it would be testing something the
+            // game never does.
+            rig.Hold(axe);
+            bool held = rig.Holding != 0;
+            rig.Swing();
+
+            report.Check(held,
+                "the rig is told it is holding something in the same breath as the swing",
+                $"statei={rig.Holding} axe='{(axe == null ? "none" : Carrying.NameOf(axe))}' " +
+                $"layers={Weights(animator)}");
+
+            // Whatever it plays over the next few seconds, named. Not "something changed":
+            // this rig settles out of Standing Up into IdleTweaked on its own, and a check
+            // that accepted any new clip called that a swing while the photograph showed a
+            // villager standing still.
+            HashSet<string> afterSwing = new HashSet<string>();
+            for (int frame = 0; frame < 90; frame++)
+            {
+                yield return null;
+
+                // Held again on every frame, because a chopping villager does: the job takes up
+                // its axe each time it resolves one, so the rig stays told. This villager has no
+                // job, and its own tick puts the axe away twenty times a second - so without
+                // this the state is cleared out from under the swing a frame after it fires.
+                rig.Hold(axe);
+                Collect(animator, afterSwing);
+
+                if (Swung(afterSwing))
+                {
+                    yield return BenchmarkUiScenario.PhotographAtWork("swing-axe.png",
+                        villager.transform.position, "a villager mid axe-swing");
+                    break;
+                }
+            }
+
+            // The same request again, put straight to the animator rather than through the
+            // synced wrapper. This is a diagnosis and not a fix: if the clip plays here and not
+            // above, the controller is fine and the replication is not; if it plays in neither,
+            // the trigger has no transition to take and no amount of firing it will help.
+            HashSet<string> direct = new HashSet<string>();
+            animator.SetTrigger(rig.SwingName);
+            for (int frame = 0; frame < 60; frame++)
+            {
+                yield return null;
+                rig.Hold(axe);
+                Collect(animator, direct);
+                if (Swung(direct)) break;
+            }
+
+            report.Check(quiet.Count > 0,
+                "control: standing still was sampled, so there is something to compare against",
+                $"clips while idle={quiet.Count} ({idle})");
+
+            report.Check(Swung(afterSwing),
+                "swinging an axe plays a swing",
+                $"after the swing it played: {Join(afterSwing)}. idle was: {idle}. " +
+                $"statei={rig.Holding} trigger='{rig.SwingName}' layers={Weights(animator)}");
+
+            report.Check(!Swung(direct) || Swung(afterSwing),
+                "diagnosis: if the rig can swing at all, the synced path is what asks it to",
+                $"straight at the animator it played: {Join(direct)}");
+
+            // Which of the rig's attack triggers is actually wired to a transition. Having a
+            // parameter and having a state machine that listens to it are different things, and
+            // this rig carries the player's entire parameter list - a hundred and fifty names,
+            // most of which belong to weapons it will never hold. Asked rather than assumed,
+            // once, so the answer comes from the rig.
+            System.Text.StringBuilder wired = new System.Text.StringBuilder();
+            foreach (string candidate in new[]
+                     {
+                         "swing_axe", "swing_axe0", "swing_axe1", "swing_axe2", "axe_secondary",
+                         "swing_pickaxe", "swing_hammer", "unarmed_attack0", "interact"
+                     })
+            {
+                if (!rig.Has(candidate, AnimatorControllerParameterType.Trigger)) continue;
+
+                HashSet<string> played = new HashSet<string>();
+                animator.SetTrigger(candidate);
+                for (int frame = 0; frame < 45; frame++)
+                {
+                    yield return null;
+                    rig.Hold(axe);
+                    Collect(animator, played);
+                }
+
+                played.ExceptWith(quiet);
+                wired.Append(candidate).Append("->")
+                    .Append(played.Count == 0 ? "nothing" : Join(played)).Append("  ");
+            }
+
+            report.Check(Swung(afterSwing),
+                "diagnosis: what each of this rig's attack triggers plays, for when this breaks again",
+                wired.ToString());
+
+            VillagerLifecycle.Remove(colony, who);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>Whether any of these clips is an attack rather than a way of standing.</summary>
+        /// <remarks>
+        ///     By name, because the names are the only thing here a person can check against the
+        ///     photograph beside them. Valheim's own clips for this are "Axe swing" and its
+        ///     numbered variants; matching loosely is right for a rig that may carry a modded
+        ///     controller, and a false match would be visible in the report next to the frame.
+        /// </remarks>
+        private static bool Swung(HashSet<string> clips)
+        {
+            foreach (string clip in clips)
+            {
+                string name = clip.ToLowerInvariant();
+                if (name.Contains("swing") || name.Contains("attack") || name.Contains("chop")) return true;
+            }
+
+            return false;
+        }
+
+        private static string Join(HashSet<string> clips) =>
+            clips.Count == 0 ? "nothing" : string.Join(", ", new List<string>(clips).ToArray());
+
+        /// <summary>Adds the name of every clip playing right now to a set.</summary>
+        private static void Collect(Animator animator, HashSet<string> into)
+        {
+            for (int layer = 0; layer < animator.layerCount; layer++)
+            {
+                foreach (AnimatorClipInfo playing in animator.GetCurrentAnimatorClipInfo(layer))
+                {
+                    if (playing.clip != null) into.Add(playing.clip.name);
+                }
+            }
+        }
+
+        /// <summary>
+        ///     Each layer's weight, because a clip on a layer weighted zero plays invisibly.
+        /// </summary>
+        private static string Weights(Animator animator)
+        {
+            System.Text.StringBuilder weights = new System.Text.StringBuilder();
+            for (int layer = 0; layer < animator.layerCount; layer++)
+            {
+                weights.Append(layer).Append('=').Append(animator.GetLayerWeight(layer)).Append(' ');
+            }
+
+            return weights.ToString();
+        }
+
+        /// <summary>The axe this check put in the bag, found by the prefab it was made from.</summary>
+        private static ItemDrop.ItemData Wielded(Container bag, GameObject axe)
+        {
+            Inventory inventory = bag != null ? bag.GetInventory() : null;
+            if (inventory == null || axe == null) return null;
+
+            string wanted = Utils.GetPrefabName(axe);
+            foreach (ItemDrop.ItemData item in inventory.GetAllItems())
+            {
+                if (item != null && Carrying.NameOf(item) == wanted) return item;
+            }
+
+            return null;
+        }
+
         private static IEnumerator CheckTheStationContract(TestReport report, Vector3 origin)
         {
             GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(6f, 0f, -6f));
@@ -6609,7 +6857,7 @@ namespace Kukolony.Debug
                 yield break;
             }
 
-            ItemDrop.ItemData item = bag.GetInventory().GetItem(material);
+            ItemDrop.ItemData item = bag.GetInventory().GetItem(material, isPrefabName: true);
             Colonies.Stations.FeedResult result = item == null
                 ? Colonies.Stations.FeedResult.Unavailable
                 : protocol.Give(bag.GetInventory(), item, false);
@@ -6619,7 +6867,7 @@ namespace Kukolony.Debug
             if (result == Colonies.Stations.FeedResult.Waiting)
             {
                 yield return new WaitForSecondsRealtime(.6f);
-                item = bag.GetInventory().GetItem(material);
+                item = bag.GetInventory().GetItem(material, isPrefabName: true);
                 if (item != null) result = protocol.Give(bag.GetInventory(), item, false);
             }
 
@@ -6855,10 +7103,23 @@ namespace Kukolony.Debug
                 "and stops there rather than filling it to the top",
                 $"highest={highest} target={target} capacity={smelter.m_maxOre}");
 
+            // Not "exactly the target", which was the first shape of this check and was simply
+            // wrong: a working kiln *consumes* its queue while it is being watched, so topping
+            // it back up is the job doing what "keep it half full" asks rather than the job
+            // over-fetching. What is worth asserting is that it filled the thing and that the
+            // chest paid for what the kiln holds - the ceiling is the check above, which
+            // watched the queue and saw it never pass the target.
             int taken = before - CountIn(box, material);
-            report.Check(taken > 0 && taken <= target,
-                "it took from the chest exactly what it put in the kiln",
-                $"taken={taken} target={target}");
+            int held = smelter.GetQueueSize();
+
+            // Three things, each of which can fail on its own: it filled the kiln to the line;
+            // it is not over-filled now; and nothing vanished on the way, because a kiln cannot
+            // hold more than the chest gave up. What it cannot assert is equality - a working
+            // kiln burns its queue while it is watched, and topping it back up is the job doing
+            // what "keep it half full" asks rather than the job over-fetching.
+            report.Check(taken >= target && held <= target && taken >= held,
+                "what left the chest is accounted for by what the kiln holds and has burned",
+                $"taken={taken} holding={held} burned={taken - held} target={target}");
 
             VillagerLifecycle.Remove(colony, who.GetZDO().m_uid);
             colony.State.SetJobs(new List<JobDefinition>());

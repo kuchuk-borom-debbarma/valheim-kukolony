@@ -173,12 +173,11 @@ namespace Kukolony.Colonies.Stations
 
             double before = Progress(asFuel);
 
-            // One unit, and gone before the call. Inventory.RemoveItem answers nothing, so the
-            // bag is re-read afterwards rather than trusted - a spend that did not happen is how
-            // a station gets handed a free item, and it would look exactly like success.
-            int held = bag.CountItems(item.m_shared.m_name);
-            bag.RemoveItem(item.m_shared.m_name, 1);
-            if (bag.CountItems(item.m_shared.m_name) >= held) return FeedResult.Unavailable;
+            // One unit, and gone before the call. By the item itself rather than by any name:
+            // an inventory's name-based lookups match the localised display name unless told
+            // otherwise, and a spend that silently matched nothing is how a station gets handed
+            // a free item - which would look exactly like success.
+            if (!bag.RemoveOneItem(item)) return FeedResult.Unavailable;
 
             Submit(prefab, asFuel);
 

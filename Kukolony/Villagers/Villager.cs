@@ -657,6 +657,9 @@ namespace Kukolony.Villagers
         ///         visible steps.
         ///     </para>
         /// </remarks>
+        /// <summary>The rig, for a check that has to watch what it actually does.</summary>
+        internal VillagerAnimation AnimationForTest => _animation;
+
         private bool TryWork(float deltaTime)
         {
             Colonies.Colony colony = Colonies.Colony.FindFor(_nview.GetZDO());

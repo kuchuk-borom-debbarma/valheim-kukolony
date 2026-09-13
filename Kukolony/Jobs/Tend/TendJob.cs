@@ -351,7 +351,13 @@ namespace Kukolony.Jobs.Tend
 
             Container container = chest.GetComponentInChildren<Container>(true);
             Inventory inventory = container != null ? container.GetInventory() : null;
-            ItemDrop.ItemData item = inventory != null ? inventory.GetItem(want.Item) : null;
+            // isPrefabName, or this finds nothing at all: Inventory.GetItem matches the
+            // localised display name by default - "$item_wood", not "Wood" - and a station's
+            // conversion list speaks in prefab names. Without it a villager walks to a full
+            // chest, reports the wood gone, and chooses the same errand again for ever.
+            ItemDrop.ItemData item = inventory != null
+                ? inventory.GetItem(want.Item, isPrefabName: true)
+                : null;
 
             if (item == null)
             {

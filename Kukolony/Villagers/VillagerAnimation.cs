@@ -38,14 +38,24 @@ namespace Kukolony.Villagers
         private static readonly string[] SleepNames = { "sleeping", "sleep", "attach_bed", "sitting" };
 
         /// <summary>
-        ///     Names an axe swing might go by, best first.
+        ///     Names a swing might go by when the tool itself does not say.
         /// </summary>
         /// <remarks>
-        ///     Several, because the rig is a clone of a creature and carries the player's
-        ///     parameter set, and which of these a given build ships is asset data no
-        ///     decompiled assembly can answer.
+        ///     <para>
+        ///         A fallback only. What a tool swings by is written on the tool - see
+        ///         <see cref="Trigger" /> - and this is for the case where it is not.
+        ///     </para>
+        ///     <para>
+        ///         <b>The numbered form comes first, and that ordering is the whole bug this
+        ///         list once caused.</b> The rig carries the player's entire parameter set, so
+        ///         "swing_axe" exists - and the controller listens to no such transition. Asked
+        ///         in game, one trigger at a time, the answer was plain: swing_axe plays nothing
+        ///         at all, and swing_axe0 plays "axe_swing". A parameter existing is not evidence
+        ///         that anything is wired to it, which is a thing HasParameter cannot tell you.
+        ///     </para>
         /// </remarks>
-        private static readonly string[] SwingNames = { "swing_axe", "swing_axe0", "swing_pickaxe", "attack" };
+        private static readonly string[] SwingNames =
+            { "swing_axe0", "swing_axe", "swing_pickaxe", "unarmed_attack0" };
 
         /// <summary>
         ///     The animator's own idea of what is being held.
@@ -59,6 +69,17 @@ namespace Kukolony.Villagers
         /// </remarks>
         private const string WeaponState = "statei";
 
+        /// <summary>
+        ///     The same answer again, as a float.
+        /// </summary>
+        /// <remarks>
+        ///     Vanilla's <c>SetAnimationState</c> writes both on every equipment change, and a
+        ///     controller's transitions are free to read either. Writing only the int is how a
+        ///     villager comes to hold an axe, fire a swing trigger the rig demonstrably has, and
+        ///     play nothing at all - the transition it needed was conditioned on the other one.
+        /// </remarks>
+        private const string WeaponStatef = "statef";
+
         private static bool _describedRig;
 
         private readonly ZSyncAnimation _animation;
@@ -66,6 +87,13 @@ namespace Kukolony.Villagers
         private readonly string _swing;
         private readonly string _sleep;
         private readonly bool _canHold;
+        private readonly bool _canHoldFloat;
+
+        /// <summary>What the rig was last told it is holding, so a swing can reassert it.</summary>
+        private int _holding;
+
+        /// <summary>The trigger the held tool swings by, composed the way the game composes it.</summary>
+        private string _held;
 
         internal VillagerAnimation(GameObject villager)
         {
@@ -117,7 +145,8 @@ namespace Kukolony.Villagers
             // Probed like everything else here. Without it the swing trigger has no state to
             // enter, which looks exactly like the trigger not firing.
             _canHold = _animation.HasParameter(WeaponState, AnimatorControllerParameterType.Int);
-            if (!_canHold)
+            _canHoldFloat = _animation.HasParameter(WeaponStatef, AnimatorControllerParameterType.Float);
+            if (!_canHold && !_canHoldFloat)
             {
                 Log.Info($"[villager] the rig has no '{WeaponState}'; " +
                          "it will swing without appearing to hold anything");
@@ -134,11 +163,37 @@ namespace Kukolony.Villagers
         /// </remarks>
         internal void Hold(ItemDrop.ItemData item)
         {
-            if (_animation == null || !_canHold) return;
+            if (_animation == null) return;
 
-            _animation.SetInt(WeaponState,
-                item?.m_shared == null ? 0 : (int)item.m_shared.m_animationState);
+            // Never null-propagate on a Unity object; ItemData is plain, but the shared half
+            // can be absent on an item that arrived without passing through an inventory.
+            _holding = item == null || item.m_shared == null
+                ? 0
+                : (int)item.m_shared.m_animationState;
+
+            _held = Trigger(item);
+            Apply();
         }
+
+        /// <summary>
+        ///     Tells the rig what it is holding, both ways the game does.
+        /// </summary>
+        /// <remarks>
+        ///     Re-asserted rather than set once, because it is not ours alone to set: the
+        ///     Humanoid rewrites both from its <em>own</em> equipped items whenever it sets its
+        ///     equipment up, and a villager's equipment is a mirror of its bag rather than
+        ///     anything in the creature's hands - so that rewrite says "unarmed" and undoes this.
+        ///     Both setters ignore a value the animator already has, so saying it again between
+        ///     blows costs nothing.
+        /// </remarks>
+        private void Apply()
+        {
+            if (_canHold) _animation.SetInt(WeaponState, _holding);
+            if (_canHoldFloat) _animation.SetFloat(WeaponStatef, _holding);
+        }
+
+        /// <summary>What the rig was last told it is holding. Zero is empty-handed.</summary>
+        internal int Holding => _holding;
 
         /// <summary>
         ///     Swings an axe. Harmless when the rig cannot do it.
@@ -151,8 +206,57 @@ namespace Kukolony.Villagers
         /// </remarks>
         internal void Swing()
         {
-            if (_animation == null || _swing == null) return;
-            _animation.SetTrigger(_swing);
+            string trigger = SwingName;
+            if (_animation == null || trigger == null) return;
+
+            // The hold first, every time. An attack state is reached from the state the weapon
+            // puts the rig in, so a trigger fired while the controller thinks the hands are
+            // empty has nowhere to go - and looks exactly like a trigger that never fired.
+            Apply();
+            _animation.SetTrigger(trigger);
+        }
+
+        /// <summary>The name this rig swings by right now: the tool's own, or the fallback.</summary>
+        internal string SwingName => _held ?? _swing;
+
+        /// <summary>
+        ///     What a tool swings by, composed exactly as the game composes it.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Read off the item rather than guessed, because every weapon in the game
+        ///         answers this for itself and a modded one answers too. An attack names its
+        ///         animation, and a weapon with a combo <b>appends the chain level</b> - so an
+        ///         axe swings by "swing_axe0", never by "swing_axe", and firing the bare name
+        ///         puts a trigger the controller has no transition for. One that picks at random
+        ///         appends an index instead, which is why that branch exists here as well.
+        ///     </para>
+        ///     <para>
+        ///         Level zero, always: the chain is for a player stringing blows together, and a
+        ///         villager chopping a tree is starting a fresh swing every time.
+        ///     </para>
+        /// </remarks>
+        private string Trigger(ItemDrop.ItemData item)
+        {
+            if (item == null || item.m_shared == null || item.m_shared.m_attack == null) return null;
+
+            Attack attack = item.m_shared.m_attack;
+            string named = attack.m_attackAnimation;
+            if (string.IsNullOrEmpty(named)) return null;
+
+            string composed = attack.m_attackChainLevels > 1
+                ? named + "0"
+                : attack.m_attackRandomAnimations >= 2
+                    ? named + Random.Range(0, attack.m_attackRandomAnimations)
+                    : named;
+
+            if (_animation.HasParameter(composed, AnimatorControllerParameterType.Trigger)) return composed;
+
+            // The tool named something this rig does not have. Falls back rather than firing
+            // into nothing, and says so once - a villager that swings invisibly is the failure
+            // this whole class exists to make visible.
+            Log.Info($"[villager] the rig has no '{composed}'; falling back to '{_swing}'");
+            return null;
         }
 
         /// <summary>Whether this rig can be seen to swing at all.</summary>
