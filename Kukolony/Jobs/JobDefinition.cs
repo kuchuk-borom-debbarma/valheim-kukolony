@@ -44,6 +44,17 @@ namespace Kukolony.Jobs
         /// <summary>Items this job handles. Empty means everything.</summary>
         internal List<string> Items = new List<string>();
 
+        /// <summary>
+        ///     How many item or species names a job may carry.
+        /// </summary>
+        /// <remarks>
+        ///     The same agreement <see cref="MaxAreas" /> keeps, for the same reason: both are
+        ///     length-prefixed, and a count the reader refuses but the writer was willing to
+        ///     produce loses the stream's position for every job after this one. Both pickers
+        ///     are multi-select over a whole catalogue, so the limit is reachable by clicking.
+        /// </remarks>
+        internal const int MaxNames = 256;
+
         /// <summary>Whether it tidies containers as well as the ground.</summary>
         internal bool TidyContainers = true;
 
@@ -163,10 +174,22 @@ namespace Kukolony.Jobs
             package.Write(StockTarget);
 
             List<string> items = Items ?? new List<string>();
+            if (items.Count > MaxNames)
+            {
+                Log.Warning($"[job] '{Name}' handles {items.Count} items - keeping the first {MaxNames}.");
+                items = items.GetRange(0, MaxNames);
+            }
+
             package.Write(items.Count);
             foreach (string item in items) package.Write(item ?? string.Empty);
 
             List<string> species = Species ?? new List<string>();
+            if (species.Count > MaxNames)
+            {
+                Log.Warning($"[job] '{Name}' names {species.Count} species - keeping the first {MaxNames}.");
+                species = species.GetRange(0, MaxNames);
+            }
+
             package.Write(species.Count);
             foreach (string name in species) package.Write(name ?? string.Empty);
         }
@@ -234,10 +257,12 @@ namespace Kukolony.Jobs
             }
 
             int count = package.ReadInt();
-            if (count < 0 || count > 256)
+            if (count < 0 || count > MaxNames)
             {
-                Log.Warning($"[job] '{job.Name}' claims {count} items - ignoring them.");
-                return job;
+                // Thrown rather than skipped, as the areas count is: the position in the
+                // stream is already lost, and reading the next job from the middle of this
+                // one decodes item names as job ids.
+                throw new System.IO.InvalidDataException($"job '{job.Name}' claims {count} items");
             }
 
             for (int i = 0; i < count; i++) job.Items.Add(package.ReadString());
@@ -245,10 +270,9 @@ namespace Kukolony.Jobs
             if (version < 3) return job;
 
             int species = package.ReadInt();
-            if (species < 0 || species > 256)
+            if (species < 0 || species > MaxNames)
             {
-                Log.Warning($"[job] '{job.Name}' claims {species} species - ignoring them.");
-                return job;
+                throw new System.IO.InvalidDataException($"job '{job.Name}' claims {species} species");
             }
 
             for (int i = 0; i < species; i++) job.Species.Add(package.ReadString());

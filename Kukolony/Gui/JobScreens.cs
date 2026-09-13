@@ -107,26 +107,40 @@ namespace Kukolony.Gui
             List<string> tokens = job.Areas ?? new List<string>();
             if (tokens.Count == 0) return WholeKolony;
 
-            // Counted over the whole list rather than the one named. A second area that has
-            // been destroyed hid behind the "+1", so the row went on promising two places
-            // while the job worked one - the same silence the single-area message exists to
-            // break.
+            // The registry is decoded once for the whole row. GetStructures base64-decodes a
+            // package and allocates every record in it, and asking per token - and once more
+            // for the name - meant a screen listing forty jobs decoded the settlement's
+            // structures a hundred and sixty times, on every refresh, which is once per click
+            // in a multi-select picker.
+            List<StructureRecord> records = colony.State.GetStructures();
+
+            // The first two are named, not counted. "The whole Kolony +1" was accurate and
+            // read as "and the copse as well" rather than "the copse after this one" - and
+            // the order is the whole point of the list.
+            string first = PlaceName(records, tokens[0]);
+            if (tokens.Count == 1) return first;
+
+            string summary = tokens.Count == 2
+                ? $"{first} then {PlaceName(records, tokens[1])}"
+                : $"{first} then {PlaceName(records, tokens[1])} +{tokens.Count - 2}";
+
+            // Counted over the whole list rather than the ones named. An area further down
+            // that has been destroyed hid behind the count, so the row went on promising
+            // places the job no longer works - the same silence the single-area message
+            // exists to break.
             int gone = 0;
             foreach (string token in tokens)
             {
-                if (!TryPlaceName(colony, token, out string _)) gone++;
+                if (!TryPlaceName(records, token, out string _)) gone++;
             }
 
-            string first = PlaceName(colony, tokens[0]);
-            string summary = tokens.Count == 1 ? first : $"{first} +{tokens.Count - 1}";
-
-            // The first one saying so already covers itself.
-            return gone > 0 && tokens.Count > 1 ? $"{summary} ({gone} gone)" : summary;
+            // A named one saying so already covers itself.
+            return gone > 0 ? $"{summary} ({gone} gone)" : summary;
         }
 
         /// <summary>What one place token is called.</summary>
-        internal static string PlaceName(Colony colony, string token) =>
-            TryPlaceName(colony, token, out string name) ? name : GonePlace;
+        private static string PlaceName(List<StructureRecord> records, string token) =>
+            TryPlaceName(records, token, out string name) ? name : GonePlace;
 
         /// <summary>
         ///     The area was destroyed or unregistered. Said plainly, because the job still
@@ -135,12 +149,12 @@ namespace Kukolony.Gui
         /// </summary>
         private const string GonePlace = "a place that is gone";
 
-        private static bool TryPlaceName(Colony colony, string token, out string name)
+        private static bool TryPlaceName(List<StructureRecord> records, string token, out string name)
         {
             name = WholeKolony;
             if (string.IsNullOrEmpty(token)) return true;
 
-            foreach (StructureRecord record in colony.State.GetStructures())
+            foreach (StructureRecord record in records)
             {
                 if (record.PersistentId != token) continue;
 
