@@ -297,6 +297,12 @@ namespace Kukolony.Debug
                     yield return CheckChoppingFellsATree(report, colony, origin);
                     break;
 
+                case "tend":
+                    yield return CheckTheStationContract(report, origin);
+                    yield return CheckAnIdleSmelterIsNotStoked(report, colony, origin);
+                    yield return CheckAKilnIsKeptHalfFullAndStops(report, colony, origin);
+                    break;
+
                 case "queue":
                     yield return CheckAStuckTripEndsAndTheQueueMovesOn(report, colony);
                     yield return CheckAPresetKeepsItsOrder(report, colony);
@@ -312,7 +318,7 @@ namespace Kukolony.Debug
                     // Named but unknown. Failing beats running everything under a name that
                     // says otherwise, or running nothing and reporting a pass.
                     report.Check(false, $"'{wanted}' is not a slice this run knows",
-                        "known: chop, travel, queue");
+                        "known: chop, travel, queue, tend");
                     break;
             }
 
@@ -6530,6 +6536,275 @@ namespace Kukolony.Debug
         ///     and the durable token, so the benchmark would exercise a path no player can take
         ///     and would prove persistence for records that are not the ones the game creates.
         /// </remarks>
+        /// <summary>
+        ///     That the station contracts this mod calls are the ones the game registered.
+        /// </summary>
+        /// <remarks>
+        ///     The signature failure of tending is a call that silently does nothing: an RPC
+        ///     invoked with the wrong argument list throws inside the <em>owner's</em> handler,
+        ///     which on a remote peer is an exception nobody here ever sees. The repo's own
+        ///     decompiled reference and its findings document disagree about whether AddOre takes
+        ///     two arguments or three, so the live station is asked rather than either of them.
+        /// </remarks>
+        private static IEnumerator CheckTheStationContract(TestReport report, Vector3 origin)
+        {
+            GameObject kiln = SpawnFirst(origin + Vector3.right * 6f, "smelter", "charcoal_kiln");
+            yield return new WaitForSecondsRealtime(.4f);
+
+            report.Check(kiln != null, "control: a smelter could be placed for the contract check");
+            if (kiln == null) yield break;
+
+            report.Check(Colonies.Stations.StationProbe.Is(kiln),
+                "a smelter is recognised as a station by its component",
+                $"prefab={Utils.GetPrefabName(kiln)}");
+
+            if (kiln.TryGetComponent(out ZNetView view) && view.IsValid())
+            {
+                // Registered handlers live on the placed object - a prefab's Awake never ran, so
+                // its function table is empty and asking it would prove nothing.
+                bool ore = view.m_functions.ContainsKey("RPC_AddOre".GetStableHashCode());
+                bool fuel = view.m_functions.ContainsKey("RPC_AddFuel".GetStableHashCode());
+                report.Check(ore && fuel,
+                    "a placed smelter has registered the handlers this mod invokes",
+                    $"addOre={ore} addFuel={fuel} handlers={view.m_functions.Count}");
+            }
+
+            Release(kiln);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     The claim this whole job is arranged around: a station with nothing to do is not
+        ///     fed.
+        /// </summary>
+        /// <remarks>
+        ///     In two rounds against one fixture, because the first round alone passes for a
+        ///     villager that never found the station at all. Round two queues ore into the same
+        ///     smelter and runs the same villager for the same time; the fuel must move then.
+        /// </remarks>
+        private static IEnumerator CheckAnIdleSmelterIsNotStoked(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject furnace = SpawnFirst(origin + new Vector3(8f, 0f, 4f), "smelter");
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(5f, 0f, 7f));
+            yield return new WaitForSecondsRealtime(.4f);
+
+            StructureRecord station = Register(colony, furnace, "Furnace");
+            StructureRecord store = Register(colony, chest, "Coal store");
+            if (station == null || store == null || furnace == null)
+            {
+                report.Check(false, "control: the idle-smelter check could place and register its fixtures");
+                yield break;
+            }
+
+            Smelter smelter = furnace.GetComponentInChildren<Smelter>(true);
+            string fuel = ProcessingOptions.Fuel(station.Prefab);
+            if (smelter == null || fuel.Length == 0)
+            {
+                report.Check(false, "control: the fixture is a station that burns something",
+                    $"smelter={(smelter != null)} fuel='{fuel}'");
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, station.Id, s => s.Fuel = new List<string> { fuel });
+            Container box = chest.GetComponentInChildren<Container>(true);
+            int seeded = PutIn(box, fuel, 40);
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition
+                {
+                    Id = "tend", Name = "Tend", Kind = JobKind.Tend, Repeat = 30,
+                    Carries = TendCargo.Fuel
+                }
+            });
+
+            Villager hand = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (hand == null || !hand.TryGetComponent(out ZNetView who) || !who.IsValid() || seeded <= 0)
+            {
+                report.Check(false, "control: the idle-smelter check could spawn a villager with fuel to carry",
+                    $"villager={(hand != null)} seeded={seeded}");
+                yield break;
+            }
+
+            SendRested(who);
+            new VillagerState(who.GetZDO()).SetQueue(new List<string> { "tend" });
+
+            // The fixtures answer before anything is timed. A control that found nothing to do
+            // is not a control.
+            bool offered = SettlementIndex.WhatWantsFeeding(colony, hand.transform.position)
+                .Exists(r => r.Id == station.Id);
+            bool stocked = SettlementIndex.WhereIsItKept(colony, fuel, hand.transform.position)
+                .Exists(r => r.Id == store.Id);
+            report.Check(offered && stocked,
+                "control: the settlement offers this station and knows where its fuel is",
+                $"offered={offered} stocked={stocked}");
+
+            int coalBefore = CountIn(box, fuel);
+            float fuelBefore = smelter.GetFuel();
+
+            for (int attempt = 0; attempt < 60; attempt++) yield return new WaitForSecondsRealtime(.5f);
+
+            int coalIdle = CountIn(box, fuel);
+            float fuelIdle = smelter.GetFuel();
+            report.Check(coalIdle == coalBefore && fuelIdle <= fuelBefore,
+                "a smelter with nothing to smelt is not stoked",
+                $"coal {coalBefore}->{coalIdle} fuel {fuelBefore:0.#}->{fuelIdle:0.#} did='{hand.Activity}'");
+
+            // The control. The same station, the same villager, the same half minute - and now
+            // there is something to burn for.
+            List<string> inputs = ProcessingOptions.Inputs(station.Prefab);
+            string ore = inputs.Count > 0 ? inputs[0] : string.Empty;
+            if (ore.Length == 0)
+            {
+                report.Check(false, "control: the fixture smelter converts something");
+                yield break;
+            }
+
+            if (furnace.TryGetComponent(out ZNetView furnaceView) && furnaceView.IsValid())
+            {
+                furnaceView.ClaimOwnership();
+                yield return new WaitForSecondsRealtime(.3f);
+                for (int i = 0; i < 3; i++) furnaceView.InvokeRPC("RPC_AddOre", ore, false);
+            }
+
+            yield return new WaitForSecondsRealtime(1f);
+            int queued = smelter.GetQueueSize();
+
+            for (int attempt = 0; attempt < 60; attempt++) yield return new WaitForSecondsRealtime(.5f);
+
+            int coalWorking = CountIn(box, fuel);
+            report.Check(queued > 0 && coalWorking < coalIdle,
+                "control: the same villager does stoke the same smelter once it has ore",
+                $"queued={queued} coal {coalIdle}->{coalWorking} fuel={smelter.GetFuel():0.#} " +
+                $"did='{hand.Activity}'");
+
+            yield return BenchmarkUiScenario.PhotographAtWork("tend-stoking.png", furnace.transform.position,
+                "a villager keeping a working smelter fuelled", hand.transform.position);
+
+            VillagerLifecycle.Remove(colony, who.GetZDO().m_uid);
+            colony.State.SetJobs(new List<JobDefinition>());
+            colony.RemoveStructure(station.Id);
+            colony.RemoveStructure(store.Id);
+            Release(furnace);
+            Release(chest);
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     The spec's "done when": a kiln is filled to the line and then left alone.
+        /// </summary>
+        /// <remarks>
+        ///     "It stops" is the claim, and the only way to test a stop is to keep watching after
+        ///     it should have happened - so the villager runs on for a further quarter minute and
+        ///     the queue is asserted not to have moved past the target.
+        /// </remarks>
+        private static IEnumerator CheckAKilnIsKeptHalfFullAndStops(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject kiln = SpawnFirst(origin + new Vector3(-8f, 0f, 4f), "charcoal_kiln", "smelter");
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(-5f, 0f, 7f));
+            yield return new WaitForSecondsRealtime(.4f);
+
+            StructureRecord station = Register(colony, kiln, "Kiln");
+            StructureRecord store = Register(colony, chest, "Wood store");
+            if (station == null || store == null || kiln == null)
+            {
+                report.Check(false, "control: the kiln check could place and register its fixtures");
+                yield break;
+            }
+
+            Smelter smelter = kiln.GetComponentInChildren<Smelter>(true);
+            List<string> inputs = ProcessingOptions.Inputs(station.Prefab);
+            string material = inputs.Count > 0 ? inputs[0] : string.Empty;
+            if (smelter == null || material.Length == 0)
+            {
+                report.Check(false, "control: the fixture kiln converts something",
+                    $"smelter={(smelter != null)} material='{material}'");
+                yield break;
+            }
+
+            int target = StationAppetite.TargetQueue(smelter.m_maxOre, .5f);
+            ColonyOperations.EditSettings(colony, station.Id, s =>
+            {
+                s.Input = new List<string> { material };
+                s.KeepFull = .5f;
+            });
+
+            Container box = chest.GetComponentInChildren<Container>(true);
+            int seeded = PutIn(box, material, smelter.m_maxOre * 2);
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "tend", Name = "Tend", Kind = JobKind.Tend, Repeat = 30 }
+            });
+
+            Villager hand = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (hand == null || !hand.TryGetComponent(out ZNetView who) || !who.IsValid() ||
+                seeded <= 0 || target <= 0)
+            {
+                report.Check(false, "control: the kiln check could spawn a villager with material to carry",
+                    $"villager={(hand != null)} seeded={seeded} target={target}");
+                yield break;
+            }
+
+            SendRested(who);
+            new VillagerState(who.GetZDO()).SetQueue(new List<string> { "tend" });
+
+            int before = CountIn(box, material);
+            int highest = 0;
+            List<string> story = new List<string>();
+
+            for (int attempt = 0; attempt < 240 && smelter.GetQueueSize() < target; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                if (smelter.GetQueueSize() > highest) highest = smelter.GetQueueSize();
+                if (story.Count == 0 || story[story.Count - 1] != hand.Activity) story.Add(hand.Activity);
+            }
+
+            report.Check(smelter.GetQueueSize() >= target,
+                "a villager fills a kiln to the level its screen promises",
+                $"queue={smelter.GetQueueSize()}/{target} did='{string.Join(" > ", story.ToArray())}'");
+
+            yield return BenchmarkUiScenario.PhotographAtWork("tend-loading.png", kiln.transform.position,
+                "a villager loading a charcoal kiln", hand.transform.position);
+
+            // The half that proves it stops. Kept watching, because a job that never stopped
+            // would pass every assertion above.
+            for (int attempt = 0; attempt < 30; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                if (smelter.GetQueueSize() > highest) highest = smelter.GetQueueSize();
+            }
+
+            report.Check(highest <= target,
+                "and stops there rather than filling it to the top",
+                $"highest={highest} target={target} capacity={smelter.m_maxOre}");
+
+            int taken = before - CountIn(box, material);
+            report.Check(taken > 0 && taken <= target,
+                "it took from the chest exactly what it put in the kiln",
+                $"taken={taken} target={target}");
+
+            VillagerLifecycle.Remove(colony, who.GetZDO().m_uid);
+            colony.State.SetJobs(new List<JobDefinition>());
+            colony.RemoveStructure(station.Id);
+            colony.RemoveStructure(store.Id);
+            Release(kiln);
+            Release(chest);
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
         private static StructureRecord Register(Colony colony, GameObject target, string name)
         {
             RegisterOutcome outcome = ColonyOperations.Register(colony, target);

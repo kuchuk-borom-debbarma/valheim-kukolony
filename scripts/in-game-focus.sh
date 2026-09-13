@@ -9,6 +9,7 @@
 #
 #   scripts/in-game-focus.sh chop
 #   scripts/in-game-focus.sh travel
+#   scripts/in-game-focus.sh tend
 #
 # The checks themselves are shared with the full run rather than copied, so a focused
 # pass means the same thing the full one would mean about those checks.
