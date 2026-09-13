@@ -151,44 +151,19 @@ namespace Kukolony.Gui
                         bed == null ? null : new[] { bed.PersistentId }, false, chosen => AssignBed(colony, chosen))));
             }
 
-            // The queue is a multi-select whose order is kept, because a queue IS an order: a
-            // villager works the first job its repeats allow, then the next. Storing it on the
-            // villager rather than the colony means reassigning one person does not rewrite the
-            // settlement's record and invalidate every cached answer built from it.
+            // One row, one question: what does this villager do. A single job, or a preset -
+            // which is a named list of jobs in an order somebody already worked out - and never
+            // a mixture of the two. Building an order by hand is what the preset screen is for,
+            // and having built one there it should not also be buildable here by a different
+            // route, because two ways to say the same thing is two things to keep in step and
+            // reads as two settings that might disagree.
             List<string> queue = new VillagerState(zdo).GetQueue();
             if (column.TryRow(out Row jobs))
             {
-                // One row says what this villager does, and the queue is what it says. When
-                // that queue happens to be a preset word for word, it is named - a villager is
-                // never "on" a preset, it was handed one, so the name is a description of the
-                // queue rather than a second setting that could disagree with it.
-                Widgets.Choice(jobs, "Works at", Doing(colony, queue),
-                    () => host.Push(new PickerScreen("Which jobs, in order",
-                        filter => JobOptions(colony, filter), queue, true,
-                        chosen =>
-                        {
-                            zdo.SetOwner(ZDOMan.GetSessionID());
-                            new VillagerState(zdo).SetQueue(chosen);
-                            Report.Say(chosen.Count == 0
-                                ? "Given nothing to do."
-                                : $"Assigned {chosen.Count} job(s).");
-                            host.Refresh();
-                        })), 260f);
-            }
-
-            // A preset fills that queue in one go, and that is all it does. It is a button
-            // rather than a second choice row, because a row with a value beside it reads as a
-            // setting - and this one used to sit there showing "Choose..." after any hand-made
-            // queue, which looks exactly like an option somebody forgot to set. Two rows that
-            // appeared to set the same thing, one of them derived from the other: picking jobs
-            // is the truth, and this is a shortcut to a queue somebody already worked out.
-            if (column.TryRow(out Row preset))
-            {
-                Widgets.Caption(preset, "Presets", 220f);
-                Widgets.Button(preset, "Apply a preset", 260f,
-                    () => host.Push(new PickerScreen("Which preset",
-                        filter => PresetOptions(colony, filter), null, false,
-                        chosen => ApplyPreset(host, colony, chosen))));
+                Widgets.Choice(jobs, "Work", Doing(colony, queue),
+                    () => host.Push(new PickerScreen("What should they do",
+                        filter => WorkOptions(colony, filter), new List<string> { Chosen(colony, queue) },
+                        false, chosen => Assign(host, colony, zdo, chosen))), 260f);
             }
 
             BuildEquipment(host, column, zdo);
@@ -223,6 +198,30 @@ namespace Kukolony.Gui
             return preset.Length > 0
                 ? JobListScreen.Fit(preset, QueueBudget)
                 : DescribeQueue(colony, queue);
+        }
+
+        /// <summary>The id of the preset this queue is, word for word, or empty.</summary>
+        private static string MatchingPresetId(Colony colony, List<string> queue) =>
+            Matching(colony, queue, false);
+
+        private static string Matching(Colony colony, List<string> queue, bool named)
+        {
+            if (queue.Count == 0) return string.Empty;
+
+            foreach (JobPreset preset in colony.State.GetPresets())
+            {
+                if (preset.Jobs.Count != queue.Count) continue;
+
+                bool same = true;
+                for (int i = 0; i < queue.Count && same; i++)
+                {
+                    same = preset.Jobs[i] == queue[i];
+                }
+
+                if (same) return named ? preset.Name : preset.Id;
+            }
+
+            return string.Empty;
         }
 
         /// <summary>
@@ -276,6 +275,105 @@ namespace Kukolony.Gui
         }
 
         /// <summary>Gives this villager a preset's queue, in the preset's own order.</summary>
+        /// <summary>
+        ///     Everything a villager can be given: nothing, a preset, or one job.
+        /// </summary>
+        /// <remarks>
+        ///     Presets first, because a preset is the answer whenever somebody has already
+        ///     decided what a role looks like, and a bare job is the exception. Prefixed ids
+        ///     rather than two lists, so one press means one thing and the villager's orders
+        ///     cannot end up half a preset and half something else.
+        /// </remarks>
+        private static List<PickerScreen.Option> WorkOptions(Colony colony, string filter)
+        {
+            List<PickerScreen.Option> options = new List<PickerScreen.Option>
+            {
+                new PickerScreen.Option(string.Empty, "nothing")
+            };
+
+            foreach (JobPreset preset in colony.State.GetPresets())
+            {
+                if (!Matches(preset.Name, filter)) continue;
+
+                options.Add(new PickerScreen.Option(PresetPrefix + preset.Id,
+                    $"{JobListScreen.Fit(preset.Name, JobListScreen.NameBudget)} " +
+                    $"- {preset.Jobs.Count} job(s)"));
+            }
+
+            List<StructureRecord> records = null;
+            foreach (JobDefinition job in colony.State.GetJobs())
+            {
+                if (!Matches(job.Name, filter)) continue;
+
+                records = records ?? colony.State.GetStructures();
+                options.Add(new PickerScreen.Option(JobPrefix + job.Id,
+                    $"{JobListScreen.Fit(job.Name, JobListScreen.NameBudget)} " +
+                    $"- {JobListScreen.Where(records, job, JobListScreen.PickerBudget)}"));
+            }
+
+            return options;
+        }
+
+        private static bool Matches(string name, string filter) =>
+            string.IsNullOrEmpty(filter) ||
+            name.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) >= 0;
+
+        /// <summary>Which row of the picker this villager's orders are, so it opens on it.</summary>
+        private static string Chosen(Colony colony, List<string> queue)
+        {
+            if (queue.Count == 0) return string.Empty;
+
+            string preset = MatchingPresetId(colony, queue);
+            if (preset.Length > 0) return PresetPrefix + preset;
+
+            // A queue of one is that job; a longer one that matches no preset is left over from
+            // an older build, and matches no row rather than pretending to be one of them.
+            return queue.Count == 1 ? JobPrefix + queue[0] : string.Empty;
+        }
+
+        private const string PresetPrefix = "preset:";
+
+        private const string JobPrefix = "job:";
+
+        /// <summary>
+        ///     Gives a villager its orders, whole.
+        /// </summary>
+        /// <remarks>
+        ///     Whatever was there before is replaced rather than added to - picking a job after
+        ///     a preset means that job and nothing else, which is what "one row, one question"
+        ///     has to mean if the row is to be believed.
+        /// </remarks>
+        private void Assign(ColonyScreen host, Colony colony, ZDO zdo, List<string> chosen)
+        {
+            string id = chosen.Count == 0 ? string.Empty : chosen[0];
+
+            if (id.StartsWith(PresetPrefix, System.StringComparison.Ordinal))
+            {
+                ApplyPreset(host, colony, new List<string> { id.Substring(PresetPrefix.Length) });
+                return;
+            }
+
+            zdo.SetOwner(ZDOMan.GetSessionID());
+
+            if (id.StartsWith(JobPrefix, System.StringComparison.Ordinal))
+            {
+                string job = id.Substring(JobPrefix.Length);
+                new VillagerState(zdo).SetQueue(new List<string> { job });
+
+                JobDefinition definition = colony.State.GetJobs().Find(j => j.Id == job);
+                Report.Say(definition == null
+                    ? "That job is gone."
+                    : $"{VillagerRoster.Name(_villager)} now works {definition.Name}.");
+
+                host.Refresh();
+                return;
+            }
+
+            new VillagerState(zdo).SetQueue(new List<string>());
+            Report.Say($"{VillagerRoster.Name(_villager)} has nothing to do.");
+            host.Refresh();
+        }
+
         private void ApplyPreset(ColonyScreen host, Colony colony, List<string> chosen)
         {
             if (chosen.Count == 0) return;
@@ -506,37 +604,6 @@ namespace Kukolony.Gui
             return JobListScreen.Fit(lead, Mathf.Max(1, QueueBudget - tail.Length)) + tail;
         }
 
-        private static List<PickerScreen.Option> JobOptions(Colony colony, string filter)
-        {
-            List<PickerScreen.Option> options = new List<PickerScreen.Option>();
-
-            // Once for the whole list, and only once something is actually going to be
-            // listed. This picker rebuilds on every click and every keystroke in its search
-            // box; asking per job made each of those decode the settlement's structure
-            // registry once per job, and asking up front made a filter that matches nothing
-            // pay for a list it does not draw.
-            List<StructureRecord> records = null;
-
-            foreach (JobDefinition job in colony.State.GetJobs())
-            {
-                if (!string.IsNullOrEmpty(filter) &&
-                    job.Name.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0)
-                {
-                    continue;
-                }
-
-                records = records ?? colony.State.GetStructures();
-
-                // Both halves are held to the cell, not just the half this screen added. The
-                // job name is refused only when empty, so "Haul everything to the shed by the
-                // docks" was free to run across the Choose button beside it.
-                options.Add(new PickerScreen.Option(job.Id,
-                    $"{JobListScreen.Fit(job.Name, JobListScreen.NameBudget)} - " +
-                    $"{JobListScreen.Where(records, job, JobListScreen.PickerBudget)}"));
-            }
-
-            return options;
-        }
 
         private void AssignBed(Colony colony, List<string> chosen)
         {
