@@ -256,18 +256,28 @@ namespace Kukolony.Villagers.Navigation
 
                     VillagerMovement.Stop(_ai);
 
-                    // Covering ground is progress, and the stall clock has to know it.
+                    // Covering ground counts as progress on a journey, and only on a journey.
                     //
-                    // This branch returns before the walking progress test below, so the clock
-                    // froze for the whole of a glide - while the villager was in fact closing
-                    // on its target the entire time. Anything reading that clock as "getting
-                    // nowhere" is then told a lie about a journey that is working: a water
-                    // crossing covers ground continuously by design and would look stuck for
-                    // every second of it.
+                    // On a real journey the glide is how the villager travels - a water
+                    // crossing covers ground continuously by design - so a clock that called
+                    // that "getting nowhere" would abandon a crossing that was working.
                     //
-                    // The ladders are deliberately not reset here. Gliding is the rescue, and
-                    // a rescue that cleared its own counters could go on rescuing for ever.
-                    NoteProgress(Utils.DistanceXZ(target, _ai.transform.position), climbDown: false);
+                    // On a settlement-scale errand the glide is the rescue, and noting it as
+                    // progress is a trap: `stuck` is recomputed from this clock every tick and
+                    // is the only thing making `travelling` true for a short errand, so
+                    // clearing it three metres into a glide tells Decide the journey is over,
+                    // which lands on BackOnFoot, which forgets the route and resets the clock
+                    // again. The villager creeps three metres per forty-five seconds and the
+                    // abandon bound below it can never be reached - the exact hang this whole
+                    // change exists to end, rebuilt out of its own fix.
+                    //
+                    // The ladders are deliberately not reset either way. Gliding is the
+                    // rescue, and a rescue that cleared its own counters could rescue for ever.
+                    if (_journey.Travelling)
+                    {
+                        NoteProgress(Utils.DistanceXZ(target, _ai.transform.position),
+                            climbDown: false);
+                    }
 
                     return _journey.Advance(_ai.m_character, target,
                         deltaTime > 0f ? deltaTime : Time.deltaTime)

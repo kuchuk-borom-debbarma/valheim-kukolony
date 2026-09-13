@@ -260,14 +260,21 @@ namespace Kukolony.Jobs.Haul
                     // cannot reach a chest holds its job open and the rest of its queue never
                     // runs.
                     JobResult? stuck = JobOutcomes.GiveUpIfStuck(context.Villager, context.State,
-                        context.Walk.StalledFor, Describe(context, target), out string gaveUp,
-                        out ZDOID abandoned);
+                        context.Walk.StalledFor, () => StructureRegistry.DisplayName(target),
+                        out string gaveUp, out ZDOID _);
                     if (stuck.HasValue)
                     {
                         // Refused for a while, or Choose re-derives the same answer from the
                         // same world on the very next tick and the villager walks the same
                         // unreachable route for ever, a repetition at a time.
-                        Unreachable.Refuse(context.Villager.Id, abandoned);
+                        //
+                        // The leg actually being walked, not the trip's recorded target. This
+                        // method walks to a source and to a destination, and on the delivery
+                        // leg the recorded target is either nothing at all - so the refusal
+                        // was a no-op and the villager set straight off again - or, when
+                        // tidying, the source chest, so failing to reach a destination
+                        // refused a perfectly reachable chest somewhere else entirely.
+                        Unreachable.Refuse(context.Villager.Id, Walked(target));
                         activity = gaveUp;
                         return stuck.Value;
                     }
@@ -299,17 +306,11 @@ namespace Kukolony.Jobs.Haul
             }
         }
 
-        /// <summary>What the villager was heading for, for a message a player can act on.</summary>
-        private static string Describe(HaulContext context, GameObject target)
-        {
-            StructureRecord record = SettlementIndex.Find(context.Colony, context.State.Target);
-            if (record != null) return record.Name;
-
-            record = SettlementIndex.Find(context.Colony, context.State.Destination);
-            if (record != null) return record.Name;
-
-            return target != null ? StructureRegistry.DisplayName(target) : "that";
-        }
+        /// <summary>The id of the thing actually being walked to, or none.</summary>
+        private static ZDOID Walked(GameObject target) =>
+            target != null && target.TryGetComponent(out ZNetView view) && view.IsValid()
+                ? view.GetZDO().m_uid
+                : ZDOID.None;
 
         private static JobResult Collect(HaulContext context, GameObject source, out string activity)
         {

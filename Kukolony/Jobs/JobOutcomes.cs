@@ -80,11 +80,17 @@ namespace Kukolony.Jobs
         ///     stated on <see cref="Running" />: a wait that cannot make progress is not one.
         /// </remarks>
         internal static JobResult? GiveUpIfStuck(Villager villager, VillagerState state,
-            float stalledFor, string what, out string activity, out ZDOID abandoned)
+            float stalledFor, System.Func<string> naming, out string activity, out ZDOID abandoned)
         {
             activity = null;
             abandoned = ZDOID.None;
             if (stalledFor < AbandonAfterSeconds) return null;
+
+            // Named only once it matters. Working out what a villager was walking to means
+            // searching the settlement's records and localising a name, and this is asked on
+            // every walking tick - twenty times a second per villager - for a string thrown
+            // away unless the bound trips.
+            string what = naming != null ? naming() : "that";
 
             // Read before the ending clears it. Failed resets the whole trip, so a caller
             // asking afterwards which target was abandoned is told "none" - which is how a
@@ -97,8 +103,11 @@ namespace Kukolony.Jobs
             // needs told about - it usually means the ground between here and there cannot be
             // walked. Keyed by the thing alone, two villagers stuck on two different problems
             // were folded into one tally and the second was never reported at all.
+            // Keyed by both. By the thing alone, two villagers stuck on different problems
+            // were one tally; by the villager alone, one villager's two unrelated problems
+            // became "2 times in the last 2 minutes", which is a count of nothing.
             string name = villager != null ? villager.State.Name : "Somebody";
-            Core.Chatter.Say($"stuck {(villager == null ? "?" : villager.Id.ToString())}",
+            Core.Chatter.Say($"stuck {(villager == null ? "?" : villager.Id.ToString())} {what}",
                 $"{name} cannot reach {what} and has given up on it for now.");
 
             return Failed(state, $"cannot reach {what} - gave up after {stalledFor:0}s", out activity);

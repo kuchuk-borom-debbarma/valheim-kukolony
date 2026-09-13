@@ -413,6 +413,7 @@ namespace Kukolony.Jobs.Chop
 
                 if (!Wanted(context.Job, kind, zdo)) continue;
                 if (refused.Contains(id)) continue;
+                if (Unreachable.Refuses(context.Villager.Id, id)) continue;
                 if (TargetClaims.IsClaimedByOther(id, context.Villager)) continue;
 
                 float distance = Utils.DistanceXZ(at, here);
@@ -473,14 +474,17 @@ namespace Kukolony.Jobs.Chop
                     // cannot get up a hillside would hold its job open and the next entry in
                     // its queue would never run.
                     JobResult? stuck = JobOutcomes.GiveUpIfStuck(context.Villager, context.State,
-                        context.Walk.StalledFor, "that tree", out string gaveUp, out ZDOID abandoned);
+                        context.Walk.StalledFor, () => StructureRegistry.DisplayName(target),
+                        out string gaveUp, out ZDOID abandoned);
                     if (stuck.HasValue)
                     {
-                        // Refused for the session, or the next choose picks the same
-                        // unreachable tree and the villager spends its day on it. Taken from
-                        // the ending rather than read back off the trip, which the ending has
-                        // already cleared.
-                        if (!abandoned.IsNone()) Refused(context).Add(abandoned);
+                        // Refused for a while, not for the session. The session-long set means
+                        // "my axe cannot cut this", which stays true until the axe changes;
+                        // not being able to walk somewhere stops being true the moment the
+                        // player bridges the gully, and the settlement should notice without
+                        // being reloaded. Taken from the ending rather than read back off the
+                        // trip, which the ending has already cleared.
+                        Unreachable.Refuse(context.Villager.Id, abandoned);
                         Reset(context, ZDOID.None);
                         Settled.Remove(context.Villager.Id);
                         activity = gaveUp;

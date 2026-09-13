@@ -5714,7 +5714,7 @@ namespace Kukolony.Debug
             // is a check that proves nothing.
             state.SetTarget(who);
             JobResult? gaveUp = JobOutcomes.GiveUpIfStuck(villager, state,
-                JobOutcomes.AbandonAfterSeconds + 1f, "that", out string _, out ZDOID abandoned);
+                JobOutcomes.AbandonAfterSeconds + 1f, () => "that", out string _, out ZDOID abandoned);
 
             report.Check(gaveUp == JobResult.Failed,
                 "a trip that has stopped making progress is given up on",
@@ -5727,12 +5727,12 @@ namespace Kukolony.Debug
             report.Check(state.Target.IsNone(),
                 "control: the trip really is released, not merely reported");
 
-            report.Check(!JobOutcomes.GiveUpIfStuck(villager, state, 0f, "that",
+            report.Check(!JobOutcomes.GiveUpIfStuck(villager, state, 0f, () => "that",
                     out string _, out ZDOID _).HasValue,
                 "control: a trip that is making progress is left alone");
 
             report.Check(!JobOutcomes.GiveUpIfStuck(villager, state,
-                    JobOutcomes.AbandonAfterSeconds - 1f, "that",
+                    JobOutcomes.AbandonAfterSeconds - 1f, () => "that",
                     out string _, out ZDOID _).HasValue,
                 "control: and is left alone right up to the limit",
                 $"limit={JobOutcomes.AbandonAfterSeconds:0}s");
@@ -5750,6 +5750,24 @@ namespace Kukolony.Debug
             report.Check(QueueRunner.Current(state, two)?.Id == "second",
                 "a trip that gave up hands the villager to the next job",
                 $"current={QueueRunner.Current(state, two)?.Id}");
+
+            // And the half that makes giving up worth anything: the villager does not turn
+            // round and choose the same thing again. Without this the bound only unblocks the
+            // queue, and the next lap walks the same impossible route.
+            Unreachable.Clear();
+            report.Check(!Unreachable.Refuses(who, who),
+                "control: nothing is refused before anything has been given up on");
+
+            Unreachable.Refuse(who, who);
+            report.Check(Unreachable.Refuses(who, who),
+                "what a villager gave up reaching is refused to it afterwards");
+
+            report.Check(!Unreachable.Refuses(colony.Id, who),
+                "control: and only to it - another villager stands somewhere else");
+
+            Unreachable.Forget(who);
+            report.Check(!Unreachable.Refuses(who, who),
+                "control: and it is dropped with the villager, not kept for a world");
 
             VillagerLifecycle.Remove(colony, who);
             yield return new WaitForSecondsRealtime(.2f);

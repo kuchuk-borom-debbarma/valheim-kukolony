@@ -57,12 +57,12 @@ namespace Kukolony.Jobs
 
                 string prefab = Utils.GetPrefabName(drop.m_itemData.m_dropPrefab);
                 if (!Wanted(job, prefab)) continue;
-                if (drop.TryGetComponent(out ZNetView dropView) && dropView.IsValid() &&
-                    Unreachable.Refuses(asker.Id, dropView.GetZDO().m_uid))
-                {
-                    // Refused for now: this villager has already failed to walk to it.
-                    continue;
-                }
+
+                // Refused for now: this villager has already failed to walk to it. Read from
+                // the view validated above rather than fetching it again - and skipping the
+                // item rather than the check, so a component that cannot be read is not
+                // quietly treated as reachable.
+                if (Unreachable.Refuses(asker.Id, view.GetZDO().m_uid)) continue;
 
                 ZDOID id = view.GetZDO().m_uid;
                 if (TargetClaims.IsClaimedByOther(id, asker)) continue;
