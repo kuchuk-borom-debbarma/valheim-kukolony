@@ -389,6 +389,12 @@ around and then walked into anyway.
 | **Leave standing** — a count, default 0 | The anti-clear-cut rule. The scan already counts what it found, so below the threshold there is simply no work. This is what makes a woodcutter a forester. |
 | **Stop when we have** — an item and a count, 0 meaning never | The terminus the job otherwise lacks. Above the line the job returns **Skipped**, consuming no repetition and yielding to the next queue entry. |
 | **Where it works** | Not new — `Areas` and `WorkRadius` on `JobDefinition`, reused unchanged. Several areas are tried in order: the first wood with anything left in it is the one that gets cut, and *leave standing* is counted per area so one copse is not stripped because another is thick. |
+
+**The order picks where to start, not where to be.** A villager stays in the wood it is already
+working while that wood has anything left, and only then takes the list from the top again. Asking
+the order afresh every time instead is how a villager working a far flag saw the Kolony — first in
+the list — gain a single fallen branch, walked the whole way home for it, and walked back: every
+decision correct, the settlement spending its day in transit.
 | **Repeat** | Not new — the queue already counts targets before yielding. |
 
 **Two stopping rules, deliberately, because they answer different questions.** *Leave standing*

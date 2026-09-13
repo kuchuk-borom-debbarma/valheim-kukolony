@@ -139,11 +139,22 @@ namespace Kukolony.Jobs.Chop
         /// </remarks>
         private static readonly Dictionary<ZDOID, float> NextBlow = new Dictionary<ZDOID, float>();
 
+        /// <summary>
+        ///     Which area each villager is working, by its centre.
+        /// </summary>
+        /// <remarks>
+        ///     By centre rather than by index, because the list is rebuilt every choose and an
+        ///     index means a different place the moment a player reorders their areas or a flag
+        ///     is destroyed - which would silently move a villager rather than lose its place.
+        /// </remarks>
+        private static readonly Dictionary<ZDOID, Vector3> Working = new Dictionary<ZDOID, Vector3>();
+
         private static readonly Dictionary<ZDOID, ZDOID> Settled = new Dictionary<ZDOID, ZDOID>();
 
         /// <summary>Dropped when a world unloads; none of these identities survive one.</summary>
         internal static void Clear()
         {
+            Working.Clear();
             GivenUp.Clear();
             Fruitless.Clear();
             NextBlow.Clear();
@@ -162,6 +173,7 @@ namespace Kukolony.Jobs.Chop
         {
             if (villager.IsNone()) return;
 
+            Working.Remove(villager);
             GivenUp.Remove(villager);
             Fruitless.Remove(villager);
             NextBlow.Remove(villager);
@@ -380,14 +392,34 @@ namespace Kukolony.Jobs.Chop
             // fired for a job that simply found nothing it wanted.
             bool allSparing = true;
 
-            foreach (WorkArea area in areas)
+            // The wood it is already in comes first, whatever the list says. The order picks
+            // where to *start*; it is not a reason to walk back across the map between trees.
+            //
+            // Strict order re-asked every choose is how that happened: a villager working a far
+            // flag would see the Kolony - first in the list - gain a single fallen branch, walk
+            // the whole way home for it, and walk back. Every decision correct, the settlement
+            // spending its day in transit.
+            int started = Remembered(context, areas);
+
+            for (int step = 0; step < areas.Count; step++)
             {
+                WorkArea area = areas[(started + step) % areas.Count];
+
                 JobResult chosen = ChooseIn(context, area, candidates, refused, here, out bool sparing,
                     out activity);
-                if (chosen != JobResult.Skipped) return chosen;
+                if (chosen != JobResult.Skipped)
+                {
+                    Working[context.Villager.Id] = area.Centre;
+                    return chosen;
+                }
 
                 allSparing &= sparing;
             }
+
+            // Nothing anywhere, so nothing is being worked. Forgetting matters: a remembered
+            // area that has been felled flat would otherwise be asked first for ever, and the
+            // order the player wrote would never get its turn back.
+            Working.Remove(context.Villager.Id);
 
             return JobOutcomes.Skipped(context.State,
                 allSparing ? "that is enough felled here" : "nothing to chop", out activity);
@@ -794,6 +826,28 @@ namespace Kukolony.Jobs.Chop
         /// </remarks>
         internal static WorkArea Area(Colony colony, JobDefinition job) =>
             WorkArea.For(colony, job).NoWiderThan(ChoppingGround.SearchRadius);
+
+        /// <summary>
+        ///     Where in the list to start looking: the area this villager is already working,
+        ///     or the top.
+        /// </summary>
+        private static int Remembered(ChopContext context, List<WorkArea> areas)
+        {
+            if (!Working.TryGetValue(context.Villager.Id, out Vector3 centre)) return 0;
+
+            for (int i = 0; i < areas.Count; i++)
+            {
+                // The same place rather than the same numbers: an area's radius can be edited
+                // between one tree and the next without it becoming somewhere else.
+                if (Utils.DistanceXZ(areas[i].Centre, centre) <= 1f) return i;
+            }
+
+            // The place it was working is not on the list any more - unregistered, or the job
+            // was re-pointed while it worked. Start from the top, which is what the player
+            // asked for.
+            Working.Remove(context.Villager.Id);
+            return 0;
+        }
 
         /// <summary>Every place this job works, each held to what the search can reach.</summary>
         internal static List<WorkArea> Areas(Colony colony, JobDefinition job)
