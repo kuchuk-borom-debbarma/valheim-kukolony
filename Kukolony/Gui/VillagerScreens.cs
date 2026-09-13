@@ -38,9 +38,14 @@ namespace Kukolony.Gui
                 VillagerState state = new VillagerState(zdo);
                 StructureRecord bed = SettlementIndex.BedOf(colony, member);
 
-                Widgets.Caption(row, VillagerRoster.Name(member), 220f);
-                Widgets.Caption(row, Doing(member), 170f, Color.gray);
-                Widgets.Caption(row, bed == null ? "no bed" : bed.Name, 170f,
+                // 220 + 260 + 150 + 110 and three gaps is 764 of the 800 there is. What a
+                // villager is doing gets the wide cell because it is the column that changes,
+                // and all three are held to their cells: names are whatever a player typed and
+                // an activity like "putting Copper ore back" already overran the narrow one it
+                // used to have, drawing itself across the bed beside it.
+                Widgets.Caption(row, JobListScreen.Fit(VillagerRoster.Name(member), 22), 220f);
+                Widgets.Caption(row, JobListScreen.Fit(Doing(member), 26), 260f, Color.gray);
+                Widgets.Caption(row, bed == null ? "no bed" : JobListScreen.Fit(bed.Name, 15), 150f,
                     bed == null ? Color.gray : Color.white);
 
                 ZDOID chosen = member;

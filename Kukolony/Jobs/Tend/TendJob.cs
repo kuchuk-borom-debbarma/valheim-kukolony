@@ -196,6 +196,12 @@ namespace Kukolony.Jobs.Tend
 
             Vector3 here = context.Villager.transform.position;
 
+            // What a station wanted that nowhere had, kept for the villager to say afterwards
+            // rather than announced. A settlement short of ore is a standing state and not an
+            // event, and a message that interrupts is wrong for something that will still be
+            // true in ten minutes.
+            string missing = string.Empty;
+
             foreach (WorkArea area in areas)
             {
                 foreach (StructureRecord record in SettlementIndex.WhatWantsFeeding(context.Colony, here))
@@ -226,16 +232,9 @@ namespace Kukolony.Jobs.Tend
                     StructureRecord from = Holding(context, want.Item, here);
                     if (from == null)
                     {
-                        // Nothing in the settlement has it. Said once rather than every tick,
-                        // and keyed on the item so two stations short of coal say it together.
-                        //
-                        // "No registered chest", not "nothing", because the difference is the
-                        // whole of what a player has to fix: a pile of ore on the ground or in
-                        // their own pockets is not somewhere a villager may take from, and the
-                        // shorter wording sent somebody hunting for ore they were standing on.
-                        Chatter.Say($"no {want.Item} to fetch",
-                            $"No registered chest holds {ItemCatalogue.Label(want.Item)} " +
-                            $"for {record.Name}.");
+                        // Remembered, not announced. The first thing wanted is the one named,
+                        // because it is the one the nearest station is waiting on.
+                        if (missing.Length == 0) missing = want.Item;
                         continue;
                     }
 
@@ -246,9 +245,30 @@ namespace Kukolony.Jobs.Tend
                 }
             }
 
-            return JobOutcomes.Skipped(state,
-                HasEnough(context.Colony, context.Job) ? "we have enough" : "nothing to tend",
-                out activity);
+            return JobOutcomes.Skipped(state, WhyNothing(context, missing), out activity);
+        }
+
+        /// <summary>
+        ///     Why there is nothing to do, said in the villager's own words.
+        /// </summary>
+        /// <remarks>
+        ///     Three different silences reach one yield, and "nothing to tend" for all of them
+        ///     is how a player comes to believe the job is broken when it is waiting on a chest.
+        ///     It goes in the villager's activity rather than on the screen's message line,
+        ///     because it is a standing state rather than an event - it shows on the roster, on
+        ///     the villager's own screen, and in the hover text, which are the three places
+        ///     somebody looks when they wonder why nobody is moving.
+        /// </remarks>
+        private static string WhyNothing(TendContext context, string missing)
+        {
+            if (HasEnough(context.Colony, context.Job)) return "we have enough";
+
+            // Named as a chest and not as an absence: ore on the ground or in a player's own
+            // pockets is not somewhere a villager may take from, and "nothing has copper ore"
+            // sent somebody hunting for ore they were standing on.
+            return missing.Length > 0
+                ? $"no {ItemCatalogue.Label(missing)} in any chest"
+                : "nothing to tend";
         }
 
         /// <summary>
