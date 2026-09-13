@@ -502,7 +502,7 @@ namespace Kukolony.Villagers
             }
 
             _skinRepainted = true;
-            int repainted = VillagerSkin.Repaint(gameObject);
+            int repainted = VillagerSkin.Repaint(gameObject, _visEquipment);
             Log.Info($"[villager] skin set in one pass, {repainted} renderer(s) repainted");
         }
 
