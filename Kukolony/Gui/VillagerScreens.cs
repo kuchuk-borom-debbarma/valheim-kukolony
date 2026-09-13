@@ -166,6 +166,19 @@ namespace Kukolony.Gui
                         })), 260f);
             }
 
+            // ...or hand over a whole preset at once. The same work, said the shorter way: a
+            // preset is a queue somebody has already decided the order of, so giving one is
+            // the common case and picking jobs one at a time is the exception. Offered beside
+            // the job list rather than instead of it, because a villager doing something
+            // nobody wants a template for is a perfectly good reason to build a queue by hand.
+            if (column.TryRow(out Row preset))
+            {
+                Widgets.Choice(preset, "Or use a preset", MatchingPreset(colony, queue),
+                    () => host.Push(new PickerScreen("Which preset",
+                        filter => PresetOptions(colony, filter), null, false,
+                        chosen => ApplyPreset(host, colony, chosen))), 260f);
+            }
+
             BuildEquipment(host, column, zdo);
             BuildCarried(host, column, colony, zdo);
 
@@ -179,6 +192,80 @@ namespace Kukolony.Gui
                     host.Pop();
                 });
             }
+        }
+
+        /// <summary>
+        ///     The preset this villager's queue matches, if one does.
+        /// </summary>
+        /// <remarks>
+        ///     Shown rather than remembered. A villager is not "on" a preset - it was given
+        ///     one, and may have been edited since - so storing which one would be a claim the
+        ///     world is free to falsify. Comparing the queue says what is true now, and says
+        ///     nothing when somebody has departed from the template, which is the honest
+        ///     answer rather than a stale name.
+        /// </remarks>
+        private static string MatchingPreset(Colony colony, List<string> queue)
+        {
+            if (queue.Count == 0) return string.Empty;
+
+            foreach (JobPreset preset in colony.State.GetPresets())
+            {
+                if (preset.Jobs.Count != queue.Count) continue;
+
+                bool same = true;
+                for (int i = 0; i < queue.Count && same; i++)
+                {
+                    same = preset.Jobs[i] == queue[i];
+                }
+
+                if (same) return preset.Name;
+            }
+
+            return string.Empty;
+        }
+
+        private static List<PickerScreen.Option> PresetOptions(Colony colony, string filter)
+        {
+            List<PickerScreen.Option> options = new List<PickerScreen.Option>();
+            foreach (JobPreset preset in colony.State.GetPresets())
+            {
+                if (!string.IsNullOrEmpty(filter) &&
+                    preset.Name.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                // What it does as well as what it is called, because a list of names alone
+                // makes a player open every one of them to find the one they meant.
+                options.Add(new PickerScreen.Option(preset.Id,
+                    $"{preset.Name} - {PresetListScreen.Describe(colony, preset)}"));
+            }
+
+            return options;
+        }
+
+        /// <summary>Gives this villager a preset's queue, in the preset's own order.</summary>
+        private void ApplyPreset(ColonyScreen host, Colony colony, List<string> chosen)
+        {
+            if (chosen.Count == 0) return;
+
+            JobPreset preset = colony.State.GetPresets().Find(p => p.Id == chosen[0]);
+            if (preset == null)
+            {
+                Report.Say("That preset is gone.");
+                host.Refresh();
+                return;
+            }
+
+            // The same call the preset screen makes when it hands work to everybody, so one
+            // villager and a whole settlement cannot come to disagree about what giving a
+            // preset means.
+            int count = Assignment.Apply(new List<ZDOID> { _villager }, preset.Jobs);
+
+            Report.Say(count == 0
+                ? $"Could not give {preset.Name} to {VillagerRoster.Name(_villager)}."
+                : $"{VillagerRoster.Name(_villager)} now works {preset.Name}.");
+            host.Refresh();
         }
 
         /// <summary>
