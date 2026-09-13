@@ -128,7 +128,9 @@ echo
 sed -n '/Colony acceptance run/,$p' "$report" 2>/dev/null || cat "$report"
 
 grep -q "BENCHMARK TERMINAL focus PASS" "$report" || { echo; echo "FOCUSED RUN FAILED"; exit 1; }
-shots="$(ls "$OUTPUT"/*.png 2>/dev/null | wc -l | tr -d ' ')"
+# find rather than ls: a slice that takes no photographs is not a failure, and with
+# pipefail a glob that matches nothing would kill a run that had just passed everything.
+shots="$(find "$OUTPUT" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')"
 if [ "$shots" != "0" ]; then
   mkdir -p /Users/kuku/Desktop/kukolony
   cp -f "$OUTPUT"/*.png /Users/kuku/Desktop/kukolony/ 2>/dev/null || true
