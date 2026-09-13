@@ -616,8 +616,8 @@ namespace Kukolony.Gui
             if (column.TryRow(out Row stock))
             {
                 Widgets.Choice(stock, "Stop when we have",
-                    string.IsNullOrEmpty(job.StockItem) ? "never stop" : ItemCatalogue.Label(job.StockItem),
-                    () => host.Push(new PickerScreen("Stop when we have", SearchItems,
+                    string.IsNullOrEmpty(job.StockItem) ? NeverStop : ItemCatalogue.Label(job.StockItem),
+                    () => host.Push(new PickerScreen("Stop when we have", StopOptions,
                         new List<string> { job.StockItem }, false,
                         chosen =>
                         {
@@ -625,13 +625,15 @@ namespace Kukolony.Gui
                             {
                                 j.StockItem = chosen.Count == 0 ? string.Empty : chosen[0];
 
+                                // Cleared means cleared, on both halves. Leaving the count
+                                // behind would put the job one number away from silently
+                                // stopping again for a reason the row no longer shows.
+                                if (string.IsNullOrEmpty(j.StockItem)) j.StockTarget = 0;
+
                                 // A target of zero means never stop, so choosing an item and
                                 // being left at zero would read as a setting that does
                                 // nothing. Giving it a number is what makes the choice take.
-                                if (!string.IsNullOrEmpty(j.StockItem) && j.StockTarget <= 0)
-                                {
-                                    j.StockTarget = 50;
-                                }
+                                else if (j.StockTarget <= 0) j.StockTarget = 50;
                             });
                             host.Refresh();
                         })));
@@ -784,6 +786,31 @@ namespace Kukolony.Gui
                 options.Add(new PickerScreen.Option(record.PersistentId, record.Name));
             }
 
+            return options;
+        }
+
+        /// <summary>What a job with no stopping rule reads as, on the row and in the picker.</summary>
+        private const string NeverStop = "never stop";
+
+        /// <summary>
+        ///     Items to stop at, and the way back to not stopping at all.
+        /// </summary>
+        /// <remarks>
+        ///     <b>A setting that can be turned on and not off is not a setting.</b> The picker
+        ///     commits whichever row is pressed, and the item catalogue deliberately answers an
+        ///     empty search with nothing - so a job given a stopping rule could never have it
+        ///     taken away again, and the only escape was to close the screen and leave it. The
+        ///     empty choice is offered first and never filtered out, the way the work-area
+        ///     picker offers the whole Kolony.
+        /// </remarks>
+        private static List<PickerScreen.Option> StopOptions(string filter)
+        {
+            List<PickerScreen.Option> options = new List<PickerScreen.Option>
+            {
+                new PickerScreen.Option(string.Empty, NeverStop)
+            };
+
+            options.AddRange(SearchItems(filter));
             return options;
         }
 

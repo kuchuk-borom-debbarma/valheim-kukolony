@@ -31,6 +31,12 @@ namespace Kukolony.Colonies
             List<PickerScreen.Option> options = new List<PickerScreen.Option>();
             if (colony == null) return options;
 
+            // Offered first and never filtered out, because Assign has always understood an
+            // empty choice - it clears the sleeper and says so - and nothing ever gave a player
+            // a way to make one. A bed with somebody in it could not be emptied from the
+            // screen that fills it, which is the same trap the stopping rule had.
+            options.Add(new PickerScreen.Option(string.Empty, "nobody"));
+
             foreach (ZDOID member in colony.State.GetMembers(ColonyMemberKind.Villager))
             {
                 string label = Name(member);
