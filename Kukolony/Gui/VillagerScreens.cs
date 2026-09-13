@@ -476,6 +476,12 @@ namespace Kukolony.Gui
         private static List<PickerScreen.Option> JobOptions(Colony colony, string filter)
         {
             List<PickerScreen.Option> options = new List<PickerScreen.Option>();
+
+            // Once for the whole list. This picker rebuilds on every click and every
+            // keystroke in its search box, and asking per job made each of those decode the
+            // settlement's structure registry once per job.
+            List<StructureRecord> records = colony.State.GetStructures();
+
             foreach (JobDefinition job in colony.State.GetJobs())
             {
                 if (!string.IsNullOrEmpty(filter) &&
@@ -485,7 +491,7 @@ namespace Kukolony.Gui
                 }
 
                 options.Add(new PickerScreen.Option(job.Id,
-                    $"{job.Name} - {JobListScreen.Where(colony, job)}"));
+                    $"{job.Name} - {JobListScreen.Where(records, job, 24)}"));
             }
 
             return options;

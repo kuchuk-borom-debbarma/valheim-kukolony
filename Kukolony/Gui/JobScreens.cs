@@ -38,6 +38,11 @@ namespace Kukolony.Gui
                 Widgets.Label(empty, "This Kolony has no jobs yet.", Color.gray);
             }
 
+            // Decoded once for the whole list rather than once a row. Every caller that
+            // shows more than one job hoists this now; Where's convenience overload is for
+            // the ones that show exactly one.
+            List<StructureRecord> records = colony.State.GetStructures();
+
             foreach (JobDefinition job in jobs)
             {
                 if (!column.TryRow(out Row row)) continue;
@@ -45,7 +50,7 @@ namespace Kukolony.Gui
                 string id = job.Id;
                 Widgets.Caption(row, job.Name, 220f);
                 Widgets.Caption(row, JobDefinition.Describe(job.Kind), 150f, Color.gray);
-                Widgets.Caption(row, Where(colony, job), 190f, Color.gray);
+                Widgets.Caption(row, Where(records, job, RowBudget), 190f, Color.gray);
                 Widgets.Button(row, "Open", 110f, () => host.Push(new JobDetailScreen(id)));
             }
 
@@ -97,46 +102,83 @@ namespace Kukolony.Gui
             });
         }
 
-        /// <summary>A short answer to "where does this happen", for the list.</summary>
+        /// <summary>
+        ///     How much room a job row's "where" cell has, in characters.
+        /// </summary>
         /// <remarks>
-        ///     Several places are summarised by the first and a count, rather than listed:
-        ///     the row is one line beside a label, and the order is what the first one says.
+        ///     The cell is 190 px and the labels overflow rather than clip - they are drawn
+        ///     over whatever is next in the row - so the string has to be held to a length
+        ///     that fits. Measured against the longest text the old single-place row was ever
+        ///     asked to draw, which fitted.
         /// </remarks>
-        internal static string Where(Colony colony, JobDefinition job)
+        private const int RowBudget = 20;
+
+        /// <summary>How much room the job screen's own choice button has.</summary>
+        private const int ChoiceBudget = 26;
+
+        /// <summary>A short answer to "where does this happen", for a screen showing one job.</summary>
+        /// <remarks>
+        ///     Decodes the structure registry itself. Callers listing several jobs must hoist
+        ///     that out and use the overload - GetStructures base64-decodes a package and
+        ///     allocates every record in it, so a forty-job screen decoded it forty times per
+        ///     refresh, and a picker refreshes on every click.
+        /// </remarks>
+        internal static string Where(Colony colony, JobDefinition job, int budget = ChoiceBudget) =>
+            Where(colony.State.GetStructures(), job, budget);
+
+        /// <summary>
+        ///     The same answer, against a registry the caller has already decoded.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The first two places are named rather than counted: "the whole Kolony +1"
+        ///         was accurate and read as "and the copse as well" rather than "the copse
+        ///         after this one", and the order is the whole point of the list.
+        ///     </para>
+        ///     <para>
+        ///         Held to <paramref name="budget" /> characters, because two names and a
+        ///         count is a good deal longer than one name and a count, and these cells do
+        ///         not clip.
+        ///     </para>
+        /// </remarks>
+        internal static string Where(List<StructureRecord> records, JobDefinition job, int budget)
         {
             List<string> tokens = job.Areas ?? new List<string>();
             if (tokens.Count == 0) return WholeKolony;
 
-            // The registry is decoded once for the whole row. GetStructures base64-decodes a
-            // package and allocates every record in it, and asking per token - and once more
-            // for the name - meant a screen listing forty jobs decoded the settlement's
-            // structures a hundred and sixty times, on every refresh, which is once per click
-            // in a multi-select picker.
-            List<StructureRecord> records = colony.State.GetStructures();
-
-            // The first two are named, not counted. "The whole Kolony +1" was accurate and
-            // read as "and the copse as well" rather than "the copse after this one" - and
-            // the order is the whole point of the list.
             string first = PlaceName(records, tokens[0]);
-            if (tokens.Count == 1) return first;
+            if (tokens.Count == 1) return Fit(first, budget);
 
             string summary = tokens.Count == 2
                 ? $"{first} then {PlaceName(records, tokens[1])}"
                 : $"{first} then {PlaceName(records, tokens[1])} +{tokens.Count - 2}";
 
-            // Counted over the whole list rather than the ones named. An area further down
-            // that has been destroyed hid behind the count, so the row went on promising
-            // places the job no longer works - the same silence the single-area message
-            // exists to break.
+            // Counted over the places the row does *not* name. The two it does name say so
+            // themselves, and counting them as well turned "the first of five is gone" into
+            // a row that also claimed one of the hidden three was - two broken areas where
+            // there is one. What this suffix is for is the ones behind the "+N".
             int gone = 0;
-            foreach (string token in tokens)
+            for (int i = 2; i < tokens.Count; i++)
             {
-                if (!TryPlaceName(records, token, out string _)) gone++;
+                if (!TryPlaceName(records, tokens[i], out string _)) gone++;
             }
 
-            // A named one saying so already covers itself.
-            return gone > 0 ? $"{summary} ({gone} gone)" : summary;
+            return Fit(gone > 0 ? $"{summary} ({gone} gone)" : summary, budget);
         }
+
+        /// <summary>
+        ///     Holds a line to a cell it is drawn in.
+        /// </summary>
+        /// <remarks>
+        ///     Characters rather than pixels, which is a proxy - but the alternative is
+        ///     measuring text from a static with no font to hand, and a proxy that keeps the
+        ///     string near the length that already fitted beats a label drawn across the
+        ///     button beside it.
+        /// </remarks>
+        private static string Fit(string text, int budget) =>
+            text != null && budget > 1 && text.Length > budget
+                ? text.Substring(0, budget - 1) + "\u2026"
+                : text;
 
         /// <summary>What one place token is called.</summary>
         private static string PlaceName(List<StructureRecord> records, string token) =>
@@ -234,6 +276,8 @@ namespace Kukolony.Gui
             // anything to do and moves on when it is done.
             if (column.TryRow(out Row where))
             {
+                // One job on this screen, so the registry decode Where does for itself is
+                // the only one - nothing to hoist.
                 Widgets.Choice(where, "Where it works", JobListScreen.Where(colony, job),
                     () => host.Push(new PickerScreen("Where it works",
                         filter => Places(colony, job, filter),
