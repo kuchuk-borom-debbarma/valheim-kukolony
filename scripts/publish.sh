@@ -29,17 +29,41 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-# order of precedence: MOD_DEPLOYPATH > BEPINEX_PATH > VALHEIM_INSTALL > default path
+# This script does NOT build. It copies whatever is already in bin, and the build is
+# what normally calls it, passing --deploy-path from MOD_DEPLOYPATH. Deploy with:
+#
+#     dotnet build Kukolony.sln -c Debug
+#
+# order of precedence: MOD_DEPLOYPATH > BEPINEX_PATH > VALHEIM_INSTALL > Environment.props
 if [ -z "$deployPath" ]; then
-    if [ -z "$bepinexPath" ]; then
-        if [ -z "$valheimPath" ]; then
-            deployPath="$HOME/.local/share/Steam/steamapps/common/Valheim/BepInEx/plugins"
-        else
-            deployPath="$valheimPath/BepInEx/plugins"
-        fi
-    else
+    if [ -n "$bepinexPath" ]; then
         deployPath="$bepinexPath/plugins"
+    elif [ -n "$valheimPath" ]; then
+        deployPath="$valheimPath/BepInEx/plugins"
+    else
+        # Read the path the build itself uses rather than guessing one. This stanza used
+        # to fall back to a hardcoded Linux path, mkdir -p its way into existence, and
+        # report a perfectly successful copy into a directory no game has ever read - so
+        # a fix was diagnosed, written, verified and "deployed" while the running game
+        # kept the previous build. A deploy that cannot fail cannot be trusted.
+        props="$(dirname "$0")/../Environment.props"
+        install=$(sed -n 's:.*<VALHEIM_INSTALL>\(.*\)</VALHEIM_INSTALL>.*:\1:p' "$props" 2>/dev/null \
+                  | sed "s:\$(HOME):$HOME:")
+        [ -n "$install" ] && deployPath="$install/BepInEx/plugins"
     fi
+fi
+
+if [ -z "$deployPath" ]; then
+    echo "publish.sh: no deploy path given and Environment.props has no VALHEIM_INSTALL." >&2
+    exit 1
+fi
+
+# A real BepInEx install keeps core/ beside plugins/. Without this the copy below would
+# happily build whatever tree it was pointed at and call it a deploy.
+if [ ! -d "$deployPath/../core" ]; then
+    echo "publish.sh: $deployPath is not a BepInEx install - no core/ beside plugins/." >&2
+    echo "publish.sh: refusing to create it. Check VALHEIM_INSTALL in Environment.props." >&2
+    exit 1
 fi
 
 # strip .dll extension

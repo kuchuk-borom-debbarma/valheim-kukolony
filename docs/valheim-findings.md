@@ -689,3 +689,36 @@ Two things made this hole invisible for so long. `MonoUpdaters` calls `UpdateAI`
 our tick prefix was running all along and silently returning false. And every travel check
 passed: the villager arrived, on its feet, its record intact. It was owned for all of it,
 because a benchmark villager travels between places a player is standing.
+
+## A deploy that cannot fail cannot be trusted
+
+`scripts/publish.sh` **does not build**. It copies whatever is already in `bin`, and the build
+is what normally calls it, passing `--deploy-path` from `MOD_DEPLOYPATH`. Deploying is:
+
+```sh
+dotnet build Kukolony.sln -c Debug
+```
+
+Run bare, it used to fall back to a hardcoded **Linux** path
+(`$HOME/.local/share/Steam/steamapps/common/Valheim/BepInEx/plugins`), `mkdir -p` its way into
+existence, and print `Copying Kukolony.dll to ...` — a perfectly successful copy into a
+directory no game has ever read. The real install on this machine is
+`~/Library/Application Support/Steam/steamapps/common/Valheim`.
+
+It cost a whole debugging cycle. A fix was diagnosed from the decompile, written, unit-checked,
+"deployed", and played — and the running game kept the previous build. The evidence looked like
+a *refuted hypothesis*: the new log lines were absent, which is exactly what a wrong diagnosis
+looks like. What gave it away was that the absent lines were on a code path a *different*,
+older log line proved had executed. Two statements apart, one printed and one did not, which is
+impossible — so the assumption underneath both had to go.
+
+Now `publish.sh` reads `VALHEIM_INSTALL` out of `Environment.props` when given no path, and
+refuses any target without a `core/` beside `plugins/`, which is what a real BepInEx install
+has and an invented tree never does.
+
+**Where the logs actually are**, since that also cost time:
+
+| File | What it holds |
+|---|---|
+| `~/Library/Logs/IronGate/Valheim/Player.log` | everything — Unity, Valheim and BepInEx interleaved. The one to read. |
+| `<install>/BepInEx/LogOutput.log` | BepInEx's own copy |
