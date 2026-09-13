@@ -182,9 +182,12 @@ namespace Kukolony
                 nameof(KeepAliveHaloRings),
                 1,
                 new ConfigDescription(
-                    "Rings of zones held open around each villager. 1 is a 3x3 block of 64m zones. "
-                    + "Villagers cannot path into unloaded ground, so this needs to be at least 1.",
-                    new AcceptableValueRange<int>(1, 3)));
+                    "Rings of zones held open around each villager. 1 is a 3x3 block of 64m zones, "
+                    + "2 is 5x5, and so on - (2r+1) squared, so it grows fast: 5 is 121 zones and "
+                    + "704m across per villager, minus whatever neighbours already hold. "
+                    + "Villagers cannot path into unloaded ground, so this needs to be at least 1, "
+                    + "and every held zone is every object in it alive and ticking.",
+                    new AcceptableValueRange<int>(1, 8)));
 
             KeepAliveMaxZones = config.Bind(
                 "3 - Off-screen simulation",
