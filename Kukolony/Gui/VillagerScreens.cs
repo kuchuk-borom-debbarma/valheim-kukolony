@@ -158,7 +158,11 @@ namespace Kukolony.Gui
             List<string> queue = new VillagerState(zdo).GetQueue();
             if (column.TryRow(out Row jobs))
             {
-                Widgets.Choice(jobs, "Works at", DescribeQueue(colony, queue),
+                // One row says what this villager does, and the queue is what it says. When
+                // that queue happens to be a preset word for word, it is named - a villager is
+                // never "on" a preset, it was handed one, so the name is a description of the
+                // queue rather than a second setting that could disagree with it.
+                Widgets.Choice(jobs, "Works at", Doing(colony, queue),
                     () => host.Push(new PickerScreen("Which jobs, in order",
                         filter => JobOptions(colony, filter), queue, true,
                         chosen =>
@@ -172,17 +176,19 @@ namespace Kukolony.Gui
                         })), 260f);
             }
 
-            // ...or hand over a whole preset at once. The same work, said the shorter way: a
-            // preset is a queue somebody has already decided the order of, so giving one is
-            // the common case and picking jobs one at a time is the exception. Offered beside
-            // the job list rather than instead of it, because a villager doing something
-            // nobody wants a template for is a perfectly good reason to build a queue by hand.
+            // A preset fills that queue in one go, and that is all it does. It is a button
+            // rather than a second choice row, because a row with a value beside it reads as a
+            // setting - and this one used to sit there showing "Choose..." after any hand-made
+            // queue, which looks exactly like an option somebody forgot to set. Two rows that
+            // appeared to set the same thing, one of them derived from the other: picking jobs
+            // is the truth, and this is a shortcut to a queue somebody already worked out.
             if (column.TryRow(out Row preset))
             {
-                Widgets.Choice(preset, "Or use a preset", MatchingPreset(colony, queue),
+                Widgets.Caption(preset, "Presets", 220f);
+                Widgets.Button(preset, "Apply a preset", 260f,
                     () => host.Push(new PickerScreen("Which preset",
                         filter => PresetOptions(colony, filter), null, false,
-                        chosen => ApplyPreset(host, colony, chosen))), 260f);
+                        chosen => ApplyPreset(host, colony, chosen))));
             }
 
             BuildEquipment(host, column, zdo);
@@ -198,6 +204,25 @@ namespace Kukolony.Gui
                     host.Pop();
                 });
             }
+        }
+
+        /// <summary>
+        ///     What this villager does, in as few words as say it.
+        /// </summary>
+        /// <remarks>
+        ///     The preset's name when the queue is one word for word, and the queue itself
+        ///     otherwise. Naming the preset is shorter and is what a player called it, and
+        ///     falling back to the queue is what keeps the row honest the moment somebody edits
+        ///     away from the template.
+        /// </remarks>
+        private static string Doing(Colony colony, List<string> queue)
+        {
+            // Held to the cell, because a preset's name is whatever a player typed and these
+            // labels overflow rather than clip. DescribeQueue bounds its own.
+            string preset = MatchingPreset(colony, queue);
+            return preset.Length > 0
+                ? JobListScreen.Fit(preset, QueueBudget)
+                : DescribeQueue(colony, queue);
         }
 
         /// <summary>

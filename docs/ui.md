@@ -172,6 +172,13 @@ queue; editing the preset afterwards does not reach back, and deleting it leaves
 orders alone. The alternative is a villager whose orders change because somebody edited a
 template they no longer remember applying.
 
+That is why a villager's own screen has **one** row for what it does, not two. *Works at* is the
+queue, and it names the preset when the queue is one word for word — a description of the orders
+rather than a second setting beside them. Applying a preset is a **button**: it fills that queue in
+one go and then has nothing more to say. It was a second choice row once, showing a value derived
+from the first, and after any hand-built queue it read *"Choose..."* — which looks exactly like an
+option somebody forgot to set, in a place where picking jobs had already decided the answer.
+
 Assignment reaches **villagers that are not loaded**, which is most of the point — a settlement
 worth assigning in bulk is spread over enough ground that some of it is always out of memory.
 Orders are written to the villager's own ZDO after claiming ownership, because `ZDO.Set` ignores
