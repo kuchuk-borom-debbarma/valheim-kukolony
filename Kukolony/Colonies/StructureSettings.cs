@@ -20,6 +20,28 @@ namespace Kukolony.Colonies
     ///         do I use" mistakes.
     ///     </para>
     /// </remarks>
+    /// <summary>Which half of tending a structure wants done to it.</summary>
+    /// <remarks>
+    ///     Moved here from the job. Whether a kiln should be supplied, cleared, or both is a
+    ///     fact about that kiln - a settlement with a furnace it only wants emptied and an oven
+    ///     it only wants filled cannot say so with one setting per job, and needed two jobs to
+    ///     express what is really two structures with different wishes.
+    /// </remarks>
+    internal enum StationWork
+    {
+        Both = 0,
+        Supply = 1,
+        Collect = 2
+    }
+
+    /// <summary>What a structure wants carried to it.</summary>
+    internal enum StationCargo
+    {
+        Both = 0,
+        Fuel = 1,
+        Material = 2
+    }
+
     internal sealed class StructureSettings
     {
         /// <summary>
@@ -106,6 +128,43 @@ namespace Kukolony.Colonies
         /// </remarks>
         internal float KeepFull = 0.5f;
 
+        /// <summary>Whether this structure should be supplied, cleared, or both.</summary>
+        internal StationWork Work = StationWork.Both;
+
+        /// <summary>Whether fuel, material, or both may be carried to it.</summary>
+        internal StationCargo Carries = StationCargo.Both;
+
+        /// <summary>
+        ///     What this structure has been told to produce.
+        /// </summary>
+        /// <remarks>
+        ///     Empty is a real answer and means "produce nothing" rather than "produce
+        ///     anything" - the opposite of <see cref="Accepts" />, and deliberately so. A chest
+        ///     with no preference is an overflow chest, which is useful; a forge with no
+        ///     preference that made whatever it could would empty the settlement's ore into
+        ///     whatever the catalogue happened to list first.
+        /// </remarks>
+        internal readonly List<StructureOrder> Orders = new List<StructureOrder>();
+
+        /// <summary>Whether villagers may repair worn gear here.</summary>
+        internal bool Repairs;
+
+        /// <summary>
+        ///     Whether villagers may use this at all.
+        /// </summary>
+        /// <remarks>
+        ///     One switch for the whole structure rather than one per capability. Almost every
+        ///     structure has a single capability, so per-capability switches would mostly be a
+        ///     second click to reach the same place - and "villagers may use this" is a
+        ///     sentence a player can hold in their head, where "villagers may store here but
+        ///     not process here" is a configuration to be re-learned each time it is read.
+        ///
+        ///     Switching off is not unregistering. The record keeps its name, its orders and
+        ///     everything else it was told, so a station turned off for a night comes back
+        ///     configured rather than blank.
+        /// </remarks>
+        internal bool InService = true;
+
         /// <summary>Who sleeps here. None until assigned.</summary>
         internal ZDOID Sleeper = ZDOID.None;
 
@@ -137,9 +196,27 @@ namespace Kukolony.Colonies
             package.Write(KeepFull);
             package.Write(Sleeper);
             package.Write(SleeperToken ?? string.Empty);
+
+            // Appended, never inserted. Everything above is at the offset an older build wrote
+            // it to, which is what lets version 3 be read by the same code.
+            package.Write(InService);
+            package.Write(Repairs);
+            package.Write((int)Work);
+            package.Write((int)Carries);
+            package.Write(Orders.Count);
+            foreach (StructureOrder order in Orders) order.Write(package);
         }
 
-        internal static StructureSettings Read(ZPackage package)
+        /// <summary>
+        ///     Decodes settings written by this build or an earlier one.
+        /// </summary>
+        /// <param name="version">
+        ///     The enclosing record's version, because these settings carry no version of their
+        ///     own - they are one field of a structure record and share its. Fields a version
+        ///     does not carry keep their defaults, which is how a chest registered last week
+        ///     arrives in service rather than switched off.
+        /// </param>
+        internal static StructureSettings Read(ZPackage package, int version)
         {
             StructureSettings settings = new StructureSettings();
             settings.Accepts = ReadList(package);
@@ -169,6 +246,23 @@ namespace Kukolony.Colonies
             ZDOID saved = package.ReadZDOID();
             settings.SleeperToken = package.ReadString();
             settings.Sleeper = PersistentZdoReference.Resolve(settings.SleeperToken, saved);
+
+            if (version < 4) return settings;
+
+            settings.InService = package.ReadBool();
+            settings.Repairs = package.ReadBool();
+            settings.Work = (StationWork)package.ReadInt();
+            settings.Carries = (StationCargo)package.ReadInt();
+
+            // Thrown for the same reason the cap count is: every record after this one is read
+            // from the same stream, so a count this wrong has already lost the position.
+            int orders = package.ReadInt();
+            if (orders < 0 || orders > MaxEntries)
+            {
+                throw new System.IO.InvalidDataException($"structure settings claim {orders} orders");
+            }
+
+            for (int i = 0; i < orders; i++) settings.Orders.Add(StructureOrder.Read(package));
             return settings;
         }
 

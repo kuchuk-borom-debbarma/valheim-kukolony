@@ -200,6 +200,7 @@ namespace Kukolony.Debug
             yield return CheckWorkAreas(report, colony, origin);
             yield return CheckResting(report, colony, origin);
             CheckSayingThingsOnce(report);
+            CheckStructureRecordsSurviveAVersion(report);
             yield return CheckMapPins(report, colony);
             yield return CheckWalkingUpToAVillager(report, colony);
             yield return ClearTheGround(colony, "CheckWalkingUpToAVillager");
@@ -1302,6 +1303,91 @@ namespace Kukolony.Debug
         ///     roughly two and a half seconds of one villager deciding, which is the rate this
         ///     exists to survive.
         /// </remarks>
+        /// <summary>
+        ///     A structure record written by an older build still decodes, with its new fields
+        ///     at their defaults.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The bytes are built by hand because there is no other way to produce them -
+        ///         the writer only writes the current layout - and because this is the branch
+        ///         that fails silently. A misread does not throw; it yields a chest whose name
+        ///         is a fragment of a token and whose settings are plausible nonsense.
+        ///     </para>
+        ///     <para>
+        ///         It is worth a check of its own because the cost of getting it wrong is not a
+        ///         broken feature. The reader used to accept exactly one version and discard
+        ///         anything else, so adding a field would have deleted every registration in
+        ///         every colony - each chest, kiln and bed with its name and configuration -
+        ///         and shown a settlement that had simply never been set up.
+        ///     </para>
+        /// </remarks>
+        private static void CheckStructureRecordsSurviveAVersion(TestReport report)
+        {
+            // Exactly the bytes version 3 wrote: accepts, may-take-from, take-unclaimed, caps,
+            // fuel, input, keep-full, sleeper, sleeper token. Nothing after.
+            ZPackage old = new ZPackage();
+            old.Write(1);
+            old.Write("Wood");
+            old.Write(true);
+            old.Write(false);
+            old.Write(1);
+            old.Write("Stone");
+            old.Write(40);
+            old.Write(1);
+            old.Write("Coal");
+            old.Write(1);
+            old.Write("CopperOre");
+            old.Write(0.75f);
+            old.Write(ZDOID.None);
+            old.Write(string.Empty);
+
+            StructureSettings read = StructureSettings.Read(new ZPackage(old.GetArray()), 3);
+
+            bool kept = read.Accepts.Count == 1 && read.Accepts[0] == "Wood" && read.MayTakeFrom &&
+                        !read.TakeUnclaimed && read.CapFor("Stone") == 40 &&
+                        read.Fuel.Count == 1 && read.Fuel[0] == "Coal" &&
+                        read.Input.Count == 1 && read.Input[0] == "CopperOre" &&
+                        Mathf.Approximately(read.KeepFull, 0.75f);
+            report.Check(kept,
+                "a structure registered before orders existed keeps everything it was told",
+                $"accepts={read.Accepts.Count} cap={read.CapFor("Stone")} fuel={read.Fuel.Count} " +
+                $"input={read.Input.Count} keepFull={read.KeepFull:0.00}");
+
+            // The half that matters most: a structure from before the switch existed is *in*
+            // service. Defaulting the other way would have silently stopped every settlement.
+            report.Check(read.InService && !read.Repairs && read.Orders.Count == 0 &&
+                         read.Work == StationWork.Both &&
+                         read.Carries == StationCargo.Both,
+                "and arrives in service, with no orders and nothing repaired",
+                $"inService={read.InService} repairs={read.Repairs} orders={read.Orders.Count} " +
+                $"work={read.Work} carries={read.Carries}");
+
+            // The control: today's layout round-trips, so the check above is reading an old
+            // blob rather than passing because the reader ignores its input.
+            StructureSettings written = new StructureSettings { InService = false, Repairs = true,
+                Work = StationWork.Collect,
+                Carries = StationCargo.Fuel };
+            written.Orders.Add(new StructureOrder { Item = "ArrowWood", Count = 50,
+                Mode = OrderMode.Once, Done = true });
+
+            ZPackage now = new ZPackage();
+            written.Write(now);
+            StructureSettings back = StructureSettings.Read(new ZPackage(now.GetArray()),
+                ColonyState.StructureFormat);
+
+            bool round = !back.InService && back.Repairs &&
+                         back.Work == StationWork.Collect &&
+                         back.Carries == StationCargo.Fuel &&
+                         back.Orders.Count == 1 && back.Orders[0].Item == "ArrowWood" &&
+                         back.Orders[0].Count == 50 && back.Orders[0].Mode == OrderMode.Once &&
+                         back.Orders[0].Done;
+            report.Check(round,
+                "control: today's settings write and read back unchanged, orders and all",
+                $"inService={back.InService} repairs={back.Repairs} work={back.Work} " +
+                $"carries={back.Carries} orders={back.Orders.Count}");
+        }
+
         private static void CheckSayingThingsOnce(TestReport report)
         {
             System.Action<string> previous = Core.Report.Listener;

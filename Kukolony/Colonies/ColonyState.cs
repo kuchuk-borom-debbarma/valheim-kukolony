@@ -49,6 +49,11 @@ namespace Kukolony.Colonies
 
         internal void SetName(string name) => _zdo.Set(NameKey, name);
 
+        /// <summary>
+        ///     The structure record format this build writes. Readers accept 3 upwards.
+        /// </summary>
+        internal const int StructureFormat = 4;
+
         internal List<StructureRecord> GetStructures()
         {
             List<StructureRecord> result = new List<StructureRecord>();
@@ -57,11 +62,18 @@ namespace Kukolony.Colonies
             try
             {
                 ZPackage p = new ZPackage(encoded);
-                // The record format's own version, bumped whenever the settings gain a
-                // field. A blob written by an older build is discarded rather than decoded
-                // against the wrong layout, which would not fail - it would produce records
-                // full of plausible nonsense.
-                if (p.ReadInt() != 3) return result;
+                // The record format's own version, bumped whenever the settings gain a field.
+                //
+                // Every version this mod has written is decoded, as the job format already
+                // does. This used to accept one version and discard everything else, which
+                // meant the next field added to a structure would silently delete every
+                // registration in every colony - each chest, kiln and bed, with its name and
+                // its settings - and present it as an empty settlement rather than an error.
+                // Decoding an older layout is safe precisely because new fields are appended
+                // and never inserted: every field an old blob carries is still at the offset
+                // it was written to, and the ones it lacks keep their defaults.
+                int version = p.ReadInt();
+                if (version < 3 || version > StructureFormat) return result;
                 int count = p.ReadInt();
                 if (count < 0 || count > 4096) return result;
                 for (int i = 0; i < count; i++)
@@ -71,7 +83,7 @@ namespace Kukolony.Colonies
                     result.Add(new StructureRecord { Id = PersistentZdoReference.Resolve(persistentId, saved),
                         PersistentId = persistentId, Name = p.ReadString(), Prefab = p.ReadString(),
                         Capabilities = (StructureCapability)p.ReadInt() & StructureCapabilities.Known,
-                        Settings = StructureSettings.Read(p) });
+                        Settings = StructureSettings.Read(p, version) });
                 }
             }
             catch (System.Exception e) { Core.Log.Warning("[colony] invalid structure registry: " + e.Message); }
@@ -80,7 +92,7 @@ namespace Kukolony.Colonies
 
         internal void SetStructures(List<StructureRecord> records)
         {
-            ZPackage p = new ZPackage(); p.Write(3); p.Write(records.Count);
+            ZPackage p = new ZPackage(); p.Write(StructureFormat); p.Write(records.Count);
             foreach (StructureRecord r in records)
             {
                 // Records arrive with their token already minted, by the one path that claims
