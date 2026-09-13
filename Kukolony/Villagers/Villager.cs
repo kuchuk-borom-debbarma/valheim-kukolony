@@ -261,6 +261,12 @@ namespace Kukolony.Villagers
             _walk.MoveTowards(destination, Navigation.Approach.ToStructure, deltaTime: .05f);
         }
 
+        /// <summary>Announces a new leg the way a job does, for checks.</summary>
+        internal void NewLegForTest()
+        {
+            if (Bind()) _walk.NewLeg();
+        }
+
         /// <summary>Turns to face something, for work done standing still.</summary>
         internal void FaceTowards(Vector3 target, float deltaTime) =>
             VillagerMovement.FaceTowards(_ai, target, deltaTime);

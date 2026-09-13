@@ -434,6 +434,7 @@ namespace Kukolony.Jobs.Chop
             // of this one as already stuck; without the tolerance being reset, a run of
             // refusals from the last target is spent against this one.
             context.Walk.Forget();
+            context.Walk.NewLeg();
             Settled.Remove(context.Villager.Id);
             Reset(context, best);
 
@@ -497,6 +498,14 @@ namespace Kukolony.Jobs.Chop
                     return JobResult.Running;
 
                 default:
+                    // Refused briefly as well as failed, as hauling's own path failure is.
+                    // Without it Choose picks the same nearest unreachable tree on the next
+                    // lap and the job spends its repetitions on one thing. Short, because this
+                    // verdict is reached after four seconds of no progress inside a
+                    // settlement, which is as easily somebody in the way as a wall.
+                    Unreachable.Refuse(context.Villager.Id, context.State.Target,
+                        Unreachable.BlockedForSeconds);
+
                     // Says how far short it stopped and what it was asked for, because "cannot
                     // get there" is the same sentence for an unreachable target, a stop
                     // distance smaller than the thing itself, and a villager that never moved.

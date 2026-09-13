@@ -5734,42 +5734,53 @@ namespace Kukolony.Debug
 
             // And the clock the bound reads, which nothing had exercised. A check that feeds
             // the bound a number of its own proves the comparison and nothing about whether
-            // the villager's own trip clock ever starts, advances or resets - which is where
-            // every fault in this area has actually been.
+            // the villager's own trip clock starts, advances or rebaselines - which is where
+            // every fault in this area has actually been, including one round where the
+            // clock was not wired up at all and every check still passed.
+            //
+            // Stilled first. A villager with a queue walks to its work and one away from home
+            // walks home, and either would be handing the walk a different leg between these
+            // calls - which rebaselines the very clock being measured.
+            state.SetQueue(new List<string>());
+            state.SetHome(villager.transform.position);
+            yield return new WaitForSecondsRealtime(.2f);
+
+            Vector3 spot = villager.transform.position + new Vector3(.5f, 0f, 0f);
+            villager.WalkForTest(spot);
             report.Check(villager.TripStalledFor <= 0f,
-                "control: a villager that has not walked anywhere has no stalled trip",
-                $"stalled={villager.TripStalledFor:0.0}s");
+                "control: a leg just begun has nothing on its clock",
+                $"stalled={villager.TripStalledFor:0.00}s");
 
-            Vector3 far = villager.transform.position + new Vector3(0f, 0f, 40f);
-            villager.WalkForTest(far);
-            yield return new WaitForSecondsRealtime(1.2f);
-            villager.WalkForTest(far);
+            // Short enough to count. Only gaps under the walking gap accrue, so a wait longer
+            // than that is a villager that stopped walking and nothing is added at all - which
+            // is how this check first asserted its way into failing on a clock that worked.
+            yield return new WaitForSecondsRealtime(.3f);
+            villager.WalkForTest(spot);
 
-            float afterWalking = villager.TripStalledFor;
-            report.Check(afterWalking > 0f,
-                "a trip that is walking and not arriving accrues a stall",
-                $"stalled={afterWalking:0.0}s");
+            float accrued = villager.TripStalledFor;
+            report.Check(accrued > 0f,
+                "a leg that keeps walking without getting closer accrues a stall",
+                $"stalled={accrued:0.00}s");
 
-            // A different place is a different trip, which is what every leg relies on -
-            // including the ones that never pass through choosing.
-            villager.WalkForTest(villager.transform.position + new Vector3(0f, 0f, -40f));
+            // A different place is a different trip, which is what every unannounced leg
+            // relies on - a delivery after a collection, a walk back to a trunk that rolled.
+            villager.WalkForTest(villager.transform.position + new Vector3(0f, 0f, 40f));
             report.Check(villager.TripStalledFor <= 0f,
-                "walking somewhere else starts the clock again",
-                $"stalled={villager.TripStalledFor:0.0}s");
-            state.SetQueue(new List<string> { "first", "second" });
-            state.SetQueuePosition(0);
-            state.SetQueueAttempt(0);
+                "walking somewhere else begins a new trip",
+                $"stalled={villager.TripStalledFor:0.00}s");
 
-            QueueRunner.Apply(state, two, JobResult.Running);
-            report.Check(QueueRunner.Current(state, two)?.Id == "first",
-                "control: a job still running keeps the villager where it is",
-                $"current={QueueRunner.Current(state, two)?.Id}");
+            // And the second signal, for two targets too close together for the first to see.
+            villager.WalkForTest(spot);
+            yield return new WaitForSecondsRealtime(.3f);
+            villager.WalkForTest(spot);
+            report.Check(villager.TripStalledFor > 0f,
+                "control: and the clock is running again on the new one",
+                $"stalled={villager.TripStalledFor:0.00}s");
 
-            // Failed is what a given-up trip returns, and it is what has to move the queue on.
-            QueueRunner.Apply(state, two, JobResult.Failed);
-            report.Check(QueueRunner.Current(state, two)?.Id == "second",
-                "a trip that gave up hands the villager to the next job",
-                $"current={QueueRunner.Current(state, two)?.Id}");
+            villager.NewLegForTest();
+            report.Check(villager.TripStalledFor <= 0f,
+                "a job that chooses something new says so, for targets a stride apart",
+                $"stalled={villager.TripStalledFor:0.00}s");
 
             // And the half that makes giving up worth anything: the villager does not turn
             // round and choose the same thing again. Without this the bound only unblocks the

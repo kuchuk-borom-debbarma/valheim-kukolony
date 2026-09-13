@@ -141,6 +141,7 @@ namespace Kukolony.Jobs.Haul
                     {
                         state.SetTarget(reaching.GetZDO().m_uid);
                         context.Walk.Forget();
+                        context.Walk.NewLeg();
                         activity = "fetching";
                         return JobResult.Running;
                     }
@@ -172,6 +173,7 @@ namespace Kukolony.Jobs.Haul
 
                 state.SetDestination(home.Id);
                 context.Walk.Forget();
+                context.Walk.NewLeg();
                 activity = "carrying";
                 return JobResult.Running;
             }
@@ -192,7 +194,8 @@ namespace Kukolony.Jobs.Haul
                 state.SetTarget(view.GetZDO().m_uid);
                 state.SetDestination(destination.Id);
                 context.Walk.Forget();
-                                activity = "fetching";
+                context.Walk.NewLeg();
+                activity = "fetching";
                 return JobResult.Running;
             }
 
@@ -210,6 +213,7 @@ namespace Kukolony.Jobs.Haul
                 state.SetTarget(holding.GetZDO().m_uid);
                 state.SetDestination(shouldBe.Id);
                 context.Walk.Forget();
+                context.Walk.NewLeg();
                 activity = "tidying up";
                 return JobResult.Running;
             }
@@ -279,7 +283,14 @@ namespace Kukolony.Jobs.Haul
                         // was a no-op and the villager set straight off again - or, when
                         // tidying, the source chest, so failing to reach a destination
                         // refused a perfectly reachable chest somewhere else entirely.
-                        Unreachable.Refuse(context.Villager.Id, Walked(target));
+                        // The short refusal, as on the path-failure branch below and for
+                        // the same reason: a settlement often has one chest that accepts a
+                        // thing, and refusing it for five minutes makes the very next choice
+                        // announce there is nowhere to put the load and drop it on the floor -
+                        // which is a false statement about a chest that is merely awkward to
+                        // get to. Twenty seconds breaks the loop and forgives a doorway.
+                        Unreachable.Refuse(context.Villager.Id, Walked(target),
+                            Unreachable.BlockedForSeconds);
                         activity = gaveUp;
                         return stuck.Value;
                     }

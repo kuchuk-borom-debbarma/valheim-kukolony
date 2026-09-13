@@ -228,6 +228,24 @@ namespace Kukolony.Villagers.Navigation
         ///         as the clock it replaced, in the other direction.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     Starts the trip clock afresh, for a job that has chosen something new.
+        /// </summary>
+        /// <remarks>
+        ///     A second signal, not the only one. The walk recognises a new leg by where it
+        ///     is being sent, which covers every leg nobody announces - but two trees in a
+        ///     stand can stand a metre apart, and walking to the second after giving up on the
+        ///     first is a new trip that no distance rule can see. Deliberately not folded into
+        ///     <see cref="Forget" />: the rescue ladder calls that, and a ladder rung clearing
+        ///     the trip's clock is how the bound came to mean "time since the last rescue".
+        /// </remarks>
+        internal void NewLeg()
+        {
+            _tripTarget = new Vector3(float.MaxValue, 0f, float.MaxValue);
+            _tripStalled = 0f;
+            _tripClosest = float.MaxValue;
+        }
+
         private void KeepTripClock(Vector3 target, float distance)
         {
             if (Utils.DistanceXZ(_tripTarget, target) > NewLegDistance)
@@ -279,6 +297,11 @@ namespace Kukolony.Villagers.Navigation
         internal MoveResult MoveTowards(Vector3 target, float stopDistance, bool run = false,
             float deltaTime = 0f)
         {
+            // Kept first, before any branch can return. Every path below is a way of
+            // walking this leg and the rescue ones return early, so keeping it further down
+            // stops the clock for exactly the villagers it exists to watch.
+            KeepTripClock(target, Utils.DistanceXZ(target, _ai.transform.position));
+
             // A new errand starts the rescue ladder from the bottom. Without this a villager
             // that needed help getting somewhere arrives with its polite rescues already spent,
             // and covers the whole way back by gliding - which is how one crossed the last
@@ -356,23 +379,6 @@ namespace Kukolony.Villagers.Navigation
 
                     VillagerMovement.Stop(_ai);
 
-                    // Covering ground counts as progress on a journey, and only on a journey.
-                    //
-                    // On a real journey the glide is how the villager travels - a water
-                    // crossing covers ground continuously by design - so a clock that called
-                    // that "getting nowhere" would abandon a crossing that was working.
-                    //
-                    // On a settlement-scale errand the glide is the rescue, and noting it as
-                    // progress is a trap: `stuck` is recomputed from this clock every tick and
-                    // is the only thing making `travelling` true for a short errand, so
-                    // clearing it three metres into a glide tells Decide the journey is over,
-                    // which lands on BackOnFoot, which forgets the route and resets the clock
-                    // again. The villager creeps three metres per forty-five seconds and the
-                    // abandon bound below it can never be reached - the exact hang this whole
-                    // change exists to end, rebuilt out of its own fix.
-                    //
-                    // The ladders are deliberately not reset either way. Gliding is the
-                    // rescue, and a rescue that cleared its own counters could rescue for ever.
                     // The ladder's clock counts a glide only on a real journey. On a
                     // settlement errand the glide *is* the rescue, and this clock is the only
                     // thing telling the locomotor a rescue is under way - clearing it three

@@ -164,7 +164,7 @@ namespace Kukolony.Jobs
                     int here = SettlementIndex.ScoreOf(record, prefab, holding: true);
 
                     foreach (StructureRecord elsewhere in SettlementIndex.WhereDoesItGo(colony, prefab,
-                                 instance.transform.position))
+                                 instance.transform.position, asker.Id))
                     {
                         // A chest is never a move to itself, however well it scores.
                         if (elsewhere.Id == record.Id) continue;
