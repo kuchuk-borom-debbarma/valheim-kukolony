@@ -59,6 +59,7 @@ static class Program
         Arriving();
         Rescuing();
         Locomoting();
+        Legs();
         Tiring();
         Repeating();
         Chopping();
@@ -335,6 +336,41 @@ static class Program
         // Control: and it must actually stop growing.
         Case("control: rescues are bounded however bad the ground is",
             Rescue.BurstSeconds(30) == Rescue.BurstSeconds(4));
+    }
+
+    /// <summary>
+    ///     Which ticks begin a leg, which is what starts the trip's clock afresh.
+    /// </summary>
+    /// <remarks>
+    ///     Pure, and worth having pure: this is the rule a round of review got wrong by
+    ///     announcing the leg at one of the four places a haul can reach its delivery, and
+    ///     the failure it produced - a delivery inheriting the fetch's stall and giving up on
+    ///     a reachable chest - is invisible until a villager does it.
+    /// </remarks>
+    static void Legs()
+    {
+        Console.WriteLine("haul legs");
+
+        // The three routes that never pass through choosing. Each records the leg it was on,
+        // so each is entering a different one.
+        Case("a full bag begins the delivery leg",
+            HaulLegs.Entering(HaulState.Collecting, HaulState.Delivering));
+        Case("a sorted chest begins the delivery leg",
+            HaulLegs.Entering(HaulState.Collecting, HaulState.Delivering));
+        Case("choosing begins the fetch leg",
+            HaulLegs.Entering(HaulState.Choosing, HaulState.Fetching));
+
+        // And the one that must not fire, because a leg announced every tick resets the clock
+        // every tick and the abandon bound can never be reached.
+        Case("control: walking on the leg it is already on begins nothing",
+            !HaulLegs.Entering(HaulState.Delivering, HaulState.Delivering));
+        Case("control: nor on the fetch leg",
+            !HaulLegs.Entering(HaulState.Fetching, HaulState.Fetching));
+
+        // A trip resumed after a reload records where it got to, so it begins nothing either -
+        // it carries on the leg it was on, which is what resuming means.
+        Case("control: a resumed delivery carries on rather than starting again",
+            !HaulLegs.Entering(HaulState.Delivering, HaulState.Delivering));
     }
 
     /// <summary>

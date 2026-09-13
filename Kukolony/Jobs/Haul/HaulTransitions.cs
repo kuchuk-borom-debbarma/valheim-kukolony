@@ -18,6 +18,23 @@ namespace Kukolony.Jobs.Haul
         Depositing = 4
     }
 
+    /// <summary>
+    ///     Whether issuing an action for a leg means the villager is entering that leg.
+    /// </summary>
+    /// <remarks>
+    ///     The recorded state is the leg the villager was on. A haul reaches its delivery by
+    ///     four routes - a full bag, a sorted chest, a source that vanished, a fresh choice -
+    ///     and only one of them passes through choosing, so this is what tells the walk to
+    ///     start the trip's clock afresh on the other three. Getting it wrong in the generous
+    ///     direction is worse than in the mean one: a leg announced every tick resets the
+    ///     clock every tick, and the bound that gives up on an impossible trip can never be
+    ///     reached.
+    /// </remarks>
+    internal static class HaulLegs
+    {
+        internal static bool Entering(HaulState recorded, HaulState leg) => recorded != leg;
+    }
+
     /// <summary>What the engine should do about it.</summary>
     internal enum HaulAction
     {

@@ -82,14 +82,14 @@ namespace Kukolony.Jobs.Haul
 
                 case HaulAction.MoveToSource:
                     BeginLeg(context, HaulState.Fetching);
-                    return Record(state, step, Walk(context, source, "fetching", false, out activity));
+                    return Record(state, step, Walk(context, source, "fetching", out activity));
 
                 case HaulAction.Collect:
                     return Record(state, step, Collect(context, source, out activity));
 
                 case HaulAction.MoveToDestination:
                     BeginLeg(context, HaulState.Delivering);
-                    return Record(state, step, Walk(context, destination, "carrying", true, out activity));
+                    return Record(state, step, Walk(context, destination, "carrying", out activity));
 
                 case HaulAction.Deposit:
                     return Record(state, step, Deposit(context, destination, carried, out activity));
@@ -236,13 +236,13 @@ namespace Kukolony.Jobs.Haul
         /// </remarks>
         private static void BeginLeg(HaulContext context, HaulState leg)
         {
-            if ((HaulState)context.State.WorkState == leg) return;
+            if (!HaulLegs.Entering((HaulState)context.State.WorkState, leg)) return;
 
             context.Walk.NewLeg();
         }
 
         private static JobResult Walk(HaulContext context, GameObject target, string doing,
-            bool toDestination, out string activity)
+            out string activity)
         {
             if (target == null)
             {
@@ -304,16 +304,22 @@ namespace Kukolony.Jobs.Haul
                         // was a no-op and the villager set straight off again - or, when
                         // tidying, the source chest, so failing to reach a destination
                         // refused a perfectly reachable chest somewhere else entirely.
-                        // How long depends on which end of the trip this is, because the two
-                        // cost different things. Refusing something to fetch means working on
-                        // something else, which is cheap and worth holding for a while.
-                        // Refusing somewhere to put a load means the load has nowhere to go:
-                        // the same refusal set filters destinations, so the next choice
-                        // announces there is nowhere to put it, drops it - and then cannot
-                        // pick it up again either, because the only chest that would take it
-                        // is still refused. Short, so the settlement recovers on its own.
+                        // How long depends on what was refused, not on which leg refused it.
+                        //
+                        // Anything registered can be somewhere a load has to go, and the same
+                        // set filters destinations - so refusing a chest for five minutes can
+                        // leave the next load with nowhere to go, announced as such, dropped,
+                        // and then unpickupable because the only home for it is still refused.
+                        // Reaching that through the delivery leg was the obvious way; reaching
+                        // it by stalling on the way to a chest you meant to tidy is the same
+                        // ending by another road, which is why the rule is about the thing.
+                        //
+                        // A loose item on the ground can never be a destination, so refusing
+                        // one only means working on something else for a while, which is
+                        // cheap and worth holding.
+                        bool structure = SettlementIndex.Find(context.Colony, Walked(target)) != null;
                         Unreachable.Refuse(context.Villager.Id, Walked(target),
-                            toDestination ? Unreachable.BlockedForSeconds : Unreachable.RefusedForSeconds);
+                            structure ? Unreachable.BlockedForSeconds : Unreachable.RefusedForSeconds);
                         activity = gaveUp;
                         return stuck.Value;
                     }
@@ -341,7 +347,17 @@ namespace Kukolony.Jobs.Haul
                     // four seconds of no progress, so somebody standing in a doorway would
                     // blacklist a perfectly good chest for five minutes, and the villager
                     // would then report there is nowhere to put what it is carrying and drop
-                    // it on the floor. Long enough to break the loop, short enough to forgive
+                    // it on the floor.
+                    //
+                    // Worth being plain about the cost rather than claiming a clean win: on a
+                    // single-job queue the wrap lands back on the same entry at once, so the
+                    // load is announced and dropped whatever the window is. What the short one
+                    // buys is a retry every twenty seconds instead of every five minutes,
+                    // which on a genuinely walled-in chest is a repetition burned more often.
+                    // The right trade for a queue with somewhere else to go, and a poor one
+                    // without.
+                    //
+                    // Long enough to break the loop, short enough to forgive
                     // a doorway.
                     Unreachable.Refuse(context.Villager.Id, Walked(target),
                         Unreachable.BlockedForSeconds);
