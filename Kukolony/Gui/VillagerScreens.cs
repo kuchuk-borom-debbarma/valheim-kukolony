@@ -174,6 +174,18 @@ namespace Kukolony.Gui
             BuildEquipment(host, column, zdo);
             BuildCarried(host, column, colony, zdo);
 
+            if (column.TryRow(out Row watch))
+            {
+                Widgets.Caption(watch, "Watch them", 220f);
+                Widgets.Button(watch, "Look through their eyes", 260f, () =>
+                {
+                    // The screen goes first. Watching is a camera and the panel is in front of
+                    // it, and a settlement seen from behind a wood panel is not a view.
+                    host.Close();
+                    WatchCamera.Watch(_villager, VillagerRoster.Name(_villager));
+                });
+            }
+
             if (column.TryRow(out Row remove))
             {
                 Widgets.Button(remove, "Remove villager", 220f, () =>

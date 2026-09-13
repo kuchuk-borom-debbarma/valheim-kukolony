@@ -6846,7 +6846,49 @@ namespace Kukolony.Debug
                 "diagnosis: what each of this rig's attack triggers plays, for when this breaks again",
                 wired.ToString());
 
+            yield return CheckWatchingGivesTheCameraBack(report, villager);
+
             VillagerLifecycle.Remove(colony, who);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     That watching a villager borrows the camera and hands it back.
+        /// </summary>
+        /// <remarks>
+        ///     The borrowing is the easy half. Handing it back is the half that strands a player
+        ///     looking at somebody else's shoulder with no way out, so it is asserted as its own
+        ///     claim: the game's camera is off while watching, on again afterwards, and the view
+        ///     returns to where it was.
+        /// </remarks>
+        private static IEnumerator CheckWatchingGivesTheCameraBack(TestReport report, Villager villager)
+        {
+            if (GameCamera.instance == null)
+            {
+                report.Check(false, "control: there is a camera to borrow");
+                yield break;
+            }
+
+            Transform lens = GameCamera.instance.transform;
+            Vector3 before = lens.position;
+
+            bool started = WatchCamera.Watch(villager.Id, "the watched villager");
+            yield return null;
+            yield return null;
+
+            float away = Utils.DistanceXZ(lens.position, villager.transform.position);
+            report.Check(started && !GameCamera.instance.enabled && away <= 40f,
+                "watching a villager points the camera at them and takes the game's own off",
+                $"started={started} gameCamera={GameCamera.instance.enabled} away={away:0.#}m");
+
+            WatchCamera.StopWatching();
+            yield return null;
+
+            report.Check(GameCamera.instance.enabled && !WatchCamera.Watching,
+                "and gives it back, rather than stranding a player behind somebody's shoulder",
+                $"gameCamera={GameCamera.instance.enabled} watching={WatchCamera.Watching} " +
+                $"returned={Utils.DistanceXZ(before, lens.position):0.#}m");
+
             yield return new WaitForSecondsRealtime(.2f);
         }
 
