@@ -1731,6 +1731,7 @@ namespace Kukolony.Debug
             bool cameIntoView = false;
             bool destroyed = false;
             int unloads = 0;
+            int unowned = 0;
             bool wasLoaded = true;
             Vector3 sampledAt = walker != null ? walker.transform.position : Vector3.zero;
             int strode = 0;
@@ -1756,6 +1757,11 @@ namespace Kukolony.Debug
                     destroyed = true;
                     break;
                 }
+
+                // Sampled as it goes, because the state that matters is the one it travels
+                // in: ownership is handed back and forth as a villager crosses in and out of
+                // anybody's active area.
+                if (!living.HasOwner()) unowned++;
 
                 // Unity's null is not C#'s: a destroyed MonoBehaviour compares equal to null but
                 // still arrives here as a live reference, and touching its transform throws.
@@ -1823,6 +1829,16 @@ namespace Kukolony.Debug
             report.Check(!destroyed,
                 $"control: it still exists after travelling {what}",
                 destroyed ? "its record was deleted en route" : $"record intact, unloaded {unloads} time(s)");
+
+            // Owned the whole way, because an unowned villager is not merely unsimulated - the
+            // game stops drawing it. Character.CustomFixedUpdate passes zdo.HasOwner() straight
+            // to SetVisible, which parks the LOD reference point a million metres from every
+            // camera, so the symptom a player meets first is a villager that has vanished while
+            // its map pin stays exactly where it should be. Worth its own check: every other
+            // measure here passed happily while a villager stood invisible thinking nothing.
+            report.Check(unowned == 0,
+                $"a villager sent {what} stays owned, so it stays simulated and drawn",
+                unowned == 0 ? "owned at every sample" : $"unowned at {unowned} sample(s)");
 
             // Give it a moment to finish. The loop above stops as soon as the villager is
             // near enough for this check's purposes, which is not the same instant the journey

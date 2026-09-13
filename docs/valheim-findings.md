@@ -615,3 +615,77 @@ matters.
 
 Hours went into treating this as bad pathfinding, a bad navmesh, bad terrain, physics, and the
 keep-alive. It was a question that could not be answered, asked over and over.
+
+## An unowned `Character` is invisible, and nothing comes back to claim a distant one
+
+Two symptoms, reported together and looking unrelated: a villager three hundred metres out
+showed as **`idle`** on the map, and watching him with the villager camera framed *empty
+ground* — no body at six metres, in broad daylight. One cause.
+
+**`Character.CustomFixedUpdate` decides visibility from ownership:**
+
+```csharp
+ZDO zDO = m_nview.GetZDO();
+bool num     = zDO.IsOwner();
+bool visible = zDO.HasOwner();   // owned by anyone at all
+...
+SetVisible(visible);
+```
+
+and `Character.SetVisible(false)` does not disable a renderer — it moves the LOD group's
+reference point:
+
+```csharp
+m_lodGroup.localReferencePoint = new Vector3(999999f, 999999f, 999999f);
+```
+
+which is *culled from every camera at every distance*, including one standing next to it. The
+body is present, `ZNetScene.FindInstance` returns it, its transform is correct, and nothing is
+drawn. This is the engine being consistent rather than broken: an unowned creature is simulated
+by nobody, so it is a statue, and the game declines to display one.
+
+The same flag freezes its mind. `BaseAI.UpdateAI` returns at `if (!m_nview.IsOwner())`, so a
+villager in that state never thinks — and because our `Activity` lives on the instance rather
+than the ZDO, it keeps reporting the value it was **born with**. That is where `idle` came
+from: not a decision, a field initialiser.
+
+**How a villager ends up unowned, twice over:**
+
+```csharp
+// ZDOMan.ReleaseNearbyZDOS
+if (tempNearObject.GetOwner() == uid) {
+    if (!ZNetScene.InActiveArea(position, zone)) tempNearObject.SetOwner(0L);
+}
+else if ((!tempNearObject.HasOwner() || ...) && ZNetScene.InActiveArea(position, zone)) {
+    tempNearObject.SetOwner(uid);
+}
+```
+
+1. **Walking away.** Anything a peer owns that leaves its active area is released to nobody.
+2. **A world that has just loaded owns nothing.** Ownership is a session id, so it cannot
+   survive a restart.
+
+And nothing ever comes back for it. That arbitration only walks `FindSectorObjects` around a
+**player**; a villager far outside that ring is in no sector it visits, so it is neither
+released nor claimed. It stands there invisible, thinking nothing, for as long as the world
+lasts. Keeping its zone loaded does not help — our `InActiveArea` postfix stops the *release*
+for zones we hold, but a villager that was already unowned is never reconsidered.
+
+**So whoever holds a villager open must also run it.** `Villager.TryTakeOver` adopts any
+villager whose ZDO has no owner, before its own owner gate:
+
+```csharp
+ZDO zdo = _nview.GetZDO();
+if (!zdo.HasOwner() && ZNet.instance != null && ZNet.instance.IsServer())
+    zdo.SetOwner(ZDOMan.GetSessionID());
+```
+
+Server only — a client taking ownership would simulate a villager it is not keeping loaded and
+abandon it again on walking away. Never a steal: `HasOwner()` false means *nobody*, which is
+precisely the state the game leaves behind.
+
+Two things made this hole invisible for so long. `MonoUpdaters` calls `UpdateAI` for every
+`BaseAI.Instances` entry regardless of ownership — the gate is *inside* `BaseAI.UpdateAI` — so
+our tick prefix was running all along and silently returning false. And every travel check
+passed: the villager arrived, on its feet, its record intact. It was owned for all of it,
+because a benchmark villager travels between places a player is standing.

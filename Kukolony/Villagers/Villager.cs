@@ -293,10 +293,42 @@ namespace Kukolony.Villagers
             // may write to it.
             EnsureBag();
 
+            // Nobody owning this villager is not a small thing: the game stops drawing it.
+            // Character.CustomFixedUpdate feeds zdo.HasOwner() straight into SetVisible,
+            // which banishes the LOD reference point to (999999, 999999, 999999) - culled at
+            // every distance, including from a camera standing next to it. That is the game
+            // being consistent rather than broken. An unowned creature is simulated by no
+            // one, so it is a statue, and it declines to show one.
+            //
+            // A villager arrives in that state by ordinary means. ZDOMan.ReleaseNearbyZDOS
+            // sets the owner to nobody for anything a peer owns that has left its active
+            // area, and a world that has just loaded owns nothing at all - ownership is a
+            // session id and cannot survive a restart. Nothing ever comes back for it,
+            // either: that arbitration only walks the sectors around a player, and a
+            // villager three hundred metres out is in none of them. It stands there
+            // invisible, thinking nothing, for as long as the world lasts.
+            //
+            // So whoever holds a villager open runs it. That is the server and nobody else,
+            // which is also why only the server adopts: a client taking ownership would be
+            // simulating a villager it is not keeping loaded, and would abandon it again the
+            // moment it walked away.
+            ZDO zdo = _nview.GetZDO();
+            if (!zdo.HasOwner() && ZNet.instance != null && ZNet.instance.IsServer())
+            {
+                zdo.SetOwner(ZDOMan.GetSessionID());
+                Log.Info($"Villager '{State.Name}' had no owner and was adopted - unowned " +
+                         "means unsimulated, and an unsimulated villager is hidden.");
+            }
+
             // AI runs only on the ZDO owner (BaseAI.UpdateAI enforces the same rule).
             // Ownership can move between ticks, so this is never cached.
             if (!_nview.IsOwner())
             {
+                // Said, rather than left reporting whatever it last did. Activity lives on
+                // the instance, so a villager that has never ticked still reports the value
+                // it was born with - which is how a frozen villager three hundred metres
+                // away came to describe itself as idle on the map.
+                SetActivity("not running here");
                 return false;
             }
 
