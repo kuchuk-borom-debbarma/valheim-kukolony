@@ -201,6 +201,7 @@ namespace Kukolony.Debug
             yield return CheckResting(report, colony, origin);
             CheckSayingThingsOnce(report);
             CheckStructureRecordsSurviveAVersion(report);
+            CheckJobsSurviveAVersion(report);
             yield return CheckMapPins(report, colony);
             yield return CheckWalkingUpToAVillager(report, colony);
             yield return ClearTheGround(colony, "CheckWalkingUpToAVillager");
@@ -1386,6 +1387,74 @@ namespace Kukolony.Debug
                 "control: today's settings write and read back unchanged, orders and all",
                 $"inService={back.InService} repairs={back.Repairs} work={back.Work} " +
                 $"carries={back.Carries} orders={back.Orders.Count}");
+        }
+
+        /// <summary>
+        ///     A version-5 job blob still decodes, and so does the job written after it.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Version 5 wrote four fields this build no longer writes - which station kinds,
+        ///         supply or clear, fuel or material, and a list of named stations - because they
+        ///         described stations and now live on the stations. Dropping them from the writer
+        ///         is easy; the part that can go wrong is the reader, because those bytes are not
+        ///         at the end of anything. Every job in a colony is written into one stream, so a
+        ///         reader that failed to consume them would decode the next job from four fields
+        ///         into this one and produce a job full of plausible nonsense rather than an
+        ///         error.
+        ///     </para>
+        ///     <para>
+        ///         Hence two jobs and an assertion about the <em>second</em> one. A check that
+        ///         read a single record would pass whether or not the bytes were consumed.
+        ///     </para>
+        /// </remarks>
+        private static void CheckJobsSurviveAVersion(TestReport report)
+        {
+            ZPackage stream = new ZPackage();
+
+            JobDefinition first = new JobDefinition
+            {
+                Id = "older", Name = "Older tend", Kind = JobKind.Tend, Repeat = 4
+            };
+            JobDefinition second = new JobDefinition
+            {
+                Id = "after", Name = "The one after it", Kind = JobKind.Chop, Repeat = 9,
+                LeaveStanding = 6, StockItem = "Wood", StockTarget = 80
+            };
+
+            // A version-5 record is today's record plus the four retired fields, which is what
+            // makes this constructible at all: they were appended last, and nothing an older
+            // reader knows how to find has moved since.
+            first.Write(stream);
+            WriteRetired(stream);
+            second.Write(stream);
+            WriteRetired(stream);
+
+            ZPackage reading = new ZPackage(stream.GetArray());
+            JobDefinition readFirst = JobDefinition.Read(reading, 5);
+            JobDefinition readSecond = JobDefinition.Read(reading, 5);
+
+            report.Check(readFirst.Id == "older" && readFirst.Repeat == 4 &&
+                         readFirst.Kind == JobKind.Tend,
+                "a job written before tending moved onto the stations still decodes",
+                $"id='{readFirst.Id}' repeat={readFirst.Repeat} kind={readFirst.Kind}");
+
+            report.Check(readSecond.Id == "after" && readSecond.Repeat == 9 &&
+                         readSecond.Kind == JobKind.Chop && readSecond.LeaveStanding == 6 &&
+                         readSecond.StockItem == "Wood" && readSecond.StockTarget == 80,
+                "and so does the job written after it, which is where a lost byte would show",
+                $"id='{readSecond.Id}' repeat={readSecond.Repeat} leave={readSecond.LeaveStanding} " +
+                $"stock='{readSecond.StockItem}'x{readSecond.StockTarget}");
+        }
+
+        /// <summary>The four fields version 5 wrote and this build does not.</summary>
+        private static void WriteRetired(ZPackage package)
+        {
+            package.Write(3);
+            package.Write(1);
+            package.Write(2);
+            package.Write(1);
+            package.Write("some-station-token");
         }
 
         private static void CheckSayingThingsOnce(TestReport report)
@@ -7259,7 +7328,13 @@ namespace Kukolony.Debug
                 yield break;
             }
 
-            ColonyOperations.EditSettings(colony, station.Id, s => s.Fuel = new List<string> { fuel });
+            // Both on the station now. What it is fed and what a villager may carry to it are
+            // facts about this smelter, which is the whole point of the move.
+            ColonyOperations.EditSettings(colony, station.Id, s =>
+            {
+                s.Fuel = new List<string> { fuel };
+                s.Carries = StationCargo.Fuel;
+            });
             Container box = chest.GetComponentInChildren<Container>(true);
             int seeded = PutIn(box, fuel, 40);
 
@@ -7267,8 +7342,7 @@ namespace Kukolony.Debug
             {
                 new JobDefinition
                 {
-                    Id = "tend", Name = "Tend", Kind = JobKind.Tend, Repeat = 30,
-                    Carries = TendCargo.Fuel
+                    Id = "tend", Name = "Tend", Kind = JobKind.Tend, Repeat = 30
                 }
             });
 

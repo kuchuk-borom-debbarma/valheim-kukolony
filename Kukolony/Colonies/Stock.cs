@@ -58,7 +58,7 @@ namespace Kukolony.Colonies
             foreach (StructureRecord record in colony.State.GetStructures())
             {
                 if ((record.Capabilities & StructureCapability.Storage) == 0) continue;
-                if (record.StatusIn(colony) != StructureStatus.Ready) continue;
+                if (!record.WorkableIn(colony)) continue;
 
                 int held = StructureInventory.Count(record.Id, itemPrefab);
                 if (held > 0) total += held;

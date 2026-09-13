@@ -54,6 +54,17 @@ namespace Kukolony.Colonies
         /// </summary>
         internal const int StructureFormat = 4;
 
+        /// <summary>
+        ///     The job record format this build writes. Readers accept 2 upwards.
+        /// </summary>
+        /// <remarks>
+        ///     Version 6 stops writing the four tending settings that described stations rather
+        ///     than work. A version-5 blob still carries them and is still read - they are
+        ///     consumed and dropped, because the bytes sit in the middle of a stream holding
+        ///     every job the colony has.
+        /// </remarks>
+        internal const int JobFormat = 6;
+
         internal List<StructureRecord> GetStructures()
         {
             List<StructureRecord> result = new List<StructureRecord>();
@@ -141,7 +152,7 @@ namespace Kukolony.Colonies
                 // fields a version does not carry keep their defaults, and JobDefinition.Read is
                 // the one place that knows which those are.
                 int version = p.ReadInt();
-                if (version < 2 || version > 5) return result;
+                if (version < 2 || version > JobFormat) return result;
 
                 int count = p.ReadInt();
                 if (count < 0 || count > 256) return result;
@@ -196,7 +207,7 @@ namespace Kukolony.Colonies
         internal void SetJobs(List<Jobs.JobDefinition> jobs)
         {
             ZPackage p = new ZPackage();
-            p.Write(5);
+            p.Write(JobFormat);
             p.Write(jobs.Count);
             foreach (Jobs.JobDefinition job in jobs) job.Write(p);
             _zdo.Set(JobsKey, p.GetBase64());

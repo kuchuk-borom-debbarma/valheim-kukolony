@@ -68,6 +68,27 @@ namespace Kukolony.Colonies
             return StructureStatus.Ready;
         }
 
+        /// <summary>
+        ///     Whether a villager may work with this right now.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The one gate. Every job asks this rather than testing the status and the
+        ///         switch separately, because a switch honoured in five places out of six is a
+        ///         switch a player cannot trust - and the sixth is found by noticing a villager
+        ///         still walking to a station that was turned off.
+        ///     </para>
+        ///     <para>
+        ///         Out of service means invisible, not merely unusable. A switched-off chest
+        ///         does not count towards what the settlement holds either, which is the honest
+        ///         reading of "villagers may not use this": stock nobody can reach is stock the
+        ///         settlement does not have, and a stop rule that counted it would halt work
+        ///         while the shelves a villager can actually reach stood empty.
+        ///     </para>
+        /// </remarks>
+        internal bool WorkableIn(Colony colony) =>
+            Settings.InService && StatusIn(colony) == StructureStatus.Ready;
+
         internal bool IsLiveIn(Colony colony)
         {
             ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(Id) : null;

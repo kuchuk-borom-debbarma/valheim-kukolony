@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+
 namespace Kukolony.Colonies
 {
     /// <summary>Whether an order is a standing one or a one-off.</summary>
@@ -58,30 +61,66 @@ namespace Kukolony.Colonies
         internal bool Wants => Count > 0 && !string.IsNullOrEmpty(Item) &&
                                !(Mode == OrderMode.Once && Done);
 
-        internal void Write(ZPackage package)
+        /// <summary>Whether the settlement already holds everything this order asked for.</summary>
+        internal bool SatisfiedBy(int held) => !Wants || held >= Count;
+    }
+
+    /// <summary>
+    ///     What a list of orders still wants.
+    /// </summary>
+    /// <remarks>
+    ///     Arithmetic rather than behaviour, and deliberately with no Unity in it, so every
+    ///     case is checked in about a second rather than only inside a four-minute game run.
+    ///     The stock count arrives as a function because where it comes from - the settlement's
+    ///     containers - is exactly the part that needs a world.
+    /// </remarks>
+    internal static class Orders
+    {
+        /// <summary>
+        ///     Whether a station with these orders still has work to do.
+        /// </summary>
+        /// <remarks>
+        ///     <b>No orders means no limit</b>, which is the opposite of what a list normally
+        ///     means here and is the right answer for both users. A kiln that has been given no
+        ///     target should be kept fed, as it was before orders existed; and a crafting
+        ///     station with nothing to make is filtered out long before this, because it has
+        ///     nothing to make rather than no limit on making it.
+        /// </remarks>
+        internal static bool WantsMore(List<StructureOrder> orders, Func<string, int> held)
         {
-            package.Write(Item ?? string.Empty);
-            package.Write(Count);
-            package.Write((int)Mode);
-            package.Write(Done);
+            if (orders == null || orders.Count == 0) return true;
+
+            foreach (StructureOrder order in orders)
+            {
+                if (order == null || !order.Wants) continue;
+                if (!order.SatisfiedBy(held(order.Item))) return true;
+            }
+
+            // Every order is filled, or every one has been finished and latched. Either way
+            // there is nothing here to do - as distinct from a station that was never given an
+            // order at all, which returned true above because it has no limit rather than a
+            // limit already reached.
+            return false;
         }
 
-        internal static StructureOrder Read(ZPackage package)
+        /// <summary>
+        ///     The orders that still want something, in the list's own order.
+        /// </summary>
+        /// <remarks>
+        ///     Ordered rather than sorted by need, because the list is the player's sentence and
+        ///     reordering it silently would make the screen a poor description of what happens.
+        /// </remarks>
+        internal static List<StructureOrder> Outstanding(List<StructureOrder> orders, Func<string, int> held)
         {
-            StructureOrder order = new StructureOrder
-            {
-                Item = package.ReadString(),
-                Count = package.ReadInt()
-            };
+            List<StructureOrder> wanting = new List<StructureOrder>();
+            if (orders == null) return wanting;
 
-            // Explicit rather than a cast, for the reason every other enum here is read this
-            // way: a blob written by a later build can carry a mode this one has never heard
-            // of, and casting an unknown number into an enum produces a value no switch
-            // handles and no branch rejects.
-            int mode = package.ReadInt();
-            order.Mode = mode == (int)OrderMode.Once ? OrderMode.Once : OrderMode.Maintain;
-            order.Done = package.ReadBool();
-            return order;
+            foreach (StructureOrder order in orders)
+            {
+                if (order != null && order.Wants && !order.SatisfiedBy(held(order.Item))) wanting.Add(order);
+            }
+
+            return wanting;
         }
     }
 }

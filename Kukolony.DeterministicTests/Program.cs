@@ -65,6 +65,7 @@ static class Program
         Repeating();
         Chopping();
         Appetite();
+        OrderArithmetic();
         Tending();
 
         Console.WriteLine(_failed == 0
@@ -746,6 +747,80 @@ static class Program
     ///     passes for a function that always answers zero, so the case after it asks the same
     ///     question of a station that <em>is</em> running and requires a number back.
     /// </remarks>
+    /// <summary>
+    ///     What a station's orders still want.
+    /// </summary>
+    /// <remarks>
+    ///     The stop rule for everything a settlement produces, and the one place the difference
+    ///     between a standing order and a one-off is decided. Worth checking without a game
+    ///     because getting it wrong is not visible as a failure: it is a kiln that quietly never
+    ///     stops, or a forge that quietly never starts.
+    /// </remarks>
+    static void OrderArithmetic()
+    {
+        Console.WriteLine("station orders");
+
+        Func<string, int> nothing = _ => 0;
+        Func<string, int> hundred = _ => 100;
+
+        // A station nobody has given an order to has no limit - not a limit already reached.
+        // The distinction is the whole of this function: a kiln registered before orders
+        // existed must go on being fed.
+        Case("a station with no orders always wants more",
+            Orders.WantsMore(new List<StructureOrder>(), hundred));
+
+        List<StructureOrder> fifty = new List<StructureOrder>
+            { new StructureOrder { Item = "Coal", Count = 50 } };
+
+        Case("an order wants more while the settlement is short", Orders.WantsMore(fifty, nothing));
+        Case("and stops once it has enough", !Orders.WantsMore(fifty, hundred));
+
+        // Maintain resumes; that is what makes it a standing order rather than a finished one.
+        Case("a standing order starts again when the stock is spent",
+            Orders.WantsMore(fifty, _ => 49));
+
+        Case("exactly the target is enough", !Orders.WantsMore(fifty, _ => 50));
+
+        List<StructureOrder> once = new List<StructureOrder>
+            { new StructureOrder { Item = "Nails", Count = 20, Mode = OrderMode.Once } };
+
+        Case("a one-off order wants making before it is made", Orders.WantsMore(once, nothing));
+
+        once[0].Done = true;
+        Case("and never again once it is latched, however empty the shelves",
+            !Orders.WantsMore(once, nothing));
+
+        // The difference between the two modes, asserted against each other rather than
+        // separately - the failure worth catching is one becoming the other.
+        Case("control: the same emptiness restarts a standing order",
+            Orders.WantsMore(fifty, nothing) && !Orders.WantsMore(once, nothing));
+
+        Case("an order for nothing is not an order",
+            !Orders.WantsMore(new List<StructureOrder>
+                { new StructureOrder { Item = "Coal", Count = 0 } }, nothing));
+
+        Case("an order for nothing in particular is not an order",
+            !Orders.WantsMore(new List<StructureOrder>
+                { new StructureOrder { Item = string.Empty, Count = 10 } }, nothing));
+
+        // One outstanding line is enough to keep a station working, which is what lets a forge
+        // hold a finished order and a live one at the same time.
+        List<StructureOrder> mixed = new List<StructureOrder>
+        {
+            new StructureOrder { Item = "Nails", Count = 20, Mode = OrderMode.Once, Done = true },
+            new StructureOrder { Item = "Coal", Count = 50 }
+        };
+        Case("a finished line does not silence the one beside it",
+            Orders.WantsMore(mixed, _ => 10));
+
+        List<StructureOrder> outstanding = Orders.Outstanding(mixed, _ => 10);
+        Case("and only the line that still wants something is offered",
+            outstanding.Count == 1 && outstanding[0].Item == "Coal");
+
+        Case("nothing is outstanding when everything is satisfied",
+            Orders.Outstanding(mixed, hundred).Count == 0);
+    }
+
     static void Appetite()
     {
         Console.WriteLine("station appetite");

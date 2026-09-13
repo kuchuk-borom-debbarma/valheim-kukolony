@@ -204,7 +204,7 @@ namespace Kukolony.Colonies
             package.Write((int)Work);
             package.Write((int)Carries);
             package.Write(Orders.Count);
-            foreach (StructureOrder order in Orders) order.Write(package);
+            foreach (StructureOrder order in Orders) WriteOrder(package, order);
         }
 
         /// <summary>
@@ -262,8 +262,38 @@ namespace Kukolony.Colonies
                 throw new System.IO.InvalidDataException($"structure settings claim {orders} orders");
             }
 
-            for (int i = 0; i < orders; i++) settings.Orders.Add(StructureOrder.Read(package));
+            for (int i = 0; i < orders; i++) settings.Orders.Add(ReadOrder(package));
             return settings;
+        }
+
+        /// <summary>
+        ///     An order's bytes. Here rather than on the order itself, which is kept free of
+        ///     ZPackage so its arithmetic can be checked without a game.
+        /// </summary>
+        private static void WriteOrder(ZPackage package, StructureOrder order)
+        {
+            package.Write(order.Item ?? string.Empty);
+            package.Write(order.Count);
+            package.Write((int)order.Mode);
+            package.Write(order.Done);
+        }
+
+        private static StructureOrder ReadOrder(ZPackage package)
+        {
+            StructureOrder order = new StructureOrder
+            {
+                Item = package.ReadString(),
+                Count = package.ReadInt()
+            };
+
+            // Compared rather than cast, for the reason every enum here is read this way: a
+            // blob written by a later build can carry a mode this one has never heard of, and
+            // casting an unknown number into an enum produces a value no branch handles and
+            // none rejects.
+            int mode = package.ReadInt();
+            order.Mode = mode == (int)OrderMode.Once ? OrderMode.Once : OrderMode.Maintain;
+            order.Done = package.ReadBool();
+            return order;
         }
 
         /// <summary>Guards against a malformed record claiming an absurd list length.</summary>

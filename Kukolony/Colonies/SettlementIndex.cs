@@ -54,7 +54,7 @@ namespace Kukolony.Colonies
             List<int> scores = new List<int>();
             foreach (StructureRecord record in Current(colony).Storage)
             {
-                if (record.StatusIn(colony) != StructureStatus.Ready) continue;
+                if (!record.WorkableIn(colony)) continue;
 
                 // Not somewhere this villager has just spent two minutes failing to reach.
                 // A destination is chosen afresh from the same world every tick, so without
@@ -83,7 +83,7 @@ namespace Kukolony.Colonies
             foreach (StructureRecord record in Current(colony).Storage)
             {
                 if (!record.Settings.MayTakeFrom) continue;
-                if (record.StatusIn(colony) != StructureStatus.Ready) continue;
+                if (!record.WorkableIn(colony)) continue;
 
                 // Taking from a container needs its contents, which is a loaded-only
                 // question - so unlike "where does it go", an unreadable container is not an
@@ -114,7 +114,7 @@ namespace Kukolony.Colonies
             foreach (StructureRecord record in Current(colony).Storage)
             {
                 if (!record.Settings.MayTakeFrom) continue;
-                if (record.StatusIn(colony) != StructureStatus.Ready) continue;
+                if (!record.WorkableIn(colony)) continue;
                 answers.Add(record);
             }
 
@@ -131,7 +131,7 @@ namespace Kukolony.Colonies
             {
                 StructureSettings settings = record.Settings;
                 if (settings.Input.Count == 0 && settings.Fuel.Count == 0) continue;
-                if (record.StatusIn(colony) != StructureStatus.Ready) continue;
+                if (!record.WorkableIn(colony)) continue;
                 answers.Add(record);
             }
 

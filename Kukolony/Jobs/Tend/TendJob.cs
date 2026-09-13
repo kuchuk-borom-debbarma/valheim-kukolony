@@ -118,7 +118,7 @@ namespace Kukolony.Jobs.Tend
                 atStation: Within(context, target),
                 carrying: carried.Count > 0,
                 stationWants: want.Any,
-                stationHasOutput: Clearing(context.Job) && protocol != null && protocol.HasOutput(),
+                stationHasOutput: Clearing(record) && protocol != null && protocol.HasOutput(),
                 tired: false);
 
             TendStep step = TendTransitions.Next((TendState)state.WorkState, facts);
@@ -214,19 +214,18 @@ namespace Kukolony.Jobs.Tend
 
                     StationProtocol protocol = Operating(instance);
                     if (protocol == null) continue;
-                    if (!Kind(context.Job, protocol.Kind)) continue;
 
                     // Clearing before supplying, because a station holding finished work cannot
                     // accept anything at all - so this is the only move that makes progress.
-                    if (Clearing(context.Job) && protocol.HasOutput())
+                    if (Clearing(record) && protocol.HasOutput())
                     {
                         Take(context, record.Id);
                         activity = "off to clear " + record.Name;
                         return JobResult.Running;
                     }
 
-                    StationWant want = Allowed(context, protocol.WhatItWants(record.Settings,
-                        string.Empty));
+                    StationWant want = Allowed(context.Colony, record,
+                        protocol.WhatItWants(record.Settings, string.Empty));
                     if (!want.Any) continue;
 
                     StructureRecord from = Holding(context, want.Item, here);
@@ -261,7 +260,9 @@ namespace Kukolony.Jobs.Tend
         /// </remarks>
         private static string WhyNothing(TendContext context, string missing)
         {
-            if (HasEnough(context.Colony, context.Job)) return "we have enough";
+            // Per station now, so there is no single answer - and "we have enough" is only
+            // honest when every station this job could work has everything it was asked for.
+            if (Satisfied(context)) return "we have enough";
 
             // Named as a chest and not as an absence: ore on the ground or in a player's own
             // pockets is not somewhere a villager may take from, and "nothing has copper ore"
@@ -299,9 +300,10 @@ namespace Kukolony.Jobs.Tend
                         : null;
 
                     StationProtocol protocol = Operating(instance);
-                    if (protocol == null || !Kind(context.Job, protocol.Kind)) continue;
+                    if (protocol == null) continue;
 
-                    StationWant want = Allowed(context, protocol.WhatItWants(record.Settings, prefab));
+                    StationWant want = Allowed(context.Colony, record,
+                        protocol.WhatItWants(record.Settings, prefab));
                     if (!want.Any || want.Item != prefab) continue;
 
                     Take(context, record.Id);
@@ -337,15 +339,45 @@ namespace Kukolony.Jobs.Tend
         }
 
         /// <summary>Whether a record is one this job may work, before anything is instantiated.</summary>
+        /// <summary>
+        ///     Whether every station this job could work already has what it was asked for.
+        /// </summary>
+        /// <remarks>
+        ///     Walks the same stations the choosing walks, because the sentence it produces -
+        ///     "we have enough" - is a claim about exactly those. A job with no station in
+        ///     reach is not satisfied, it is idle, and saying the former would have a villager
+        ///     announce a finished settlement while standing beside a cold kiln.
+        /// </remarks>
+        private static bool Satisfied(TendContext context)
+        {
+            List<WorkArea> areas = new List<WorkArea>();
+            WorkArea.AllFor(context.Colony, context.Job, areas);
+
+            Vector3 here = context.Villager.transform.position;
+            bool any = false;
+
+            foreach (WorkArea area in areas)
+            {
+                foreach (StructureRecord record in SettlementIndex.WhatWantsFeeding(context.Colony, here))
+                {
+                    if (!Eligible(context, area, record)) continue;
+
+                    any = true;
+                    if (!HasEnough(context.Colony, record)) return false;
+                }
+            }
+
+            return any;
+        }
+
         private static bool Eligible(TendContext context, WorkArea area, StructureRecord record)
         {
             if (record == null) return false;
             if ((record.Capabilities & StructureCapability.Processing) == 0) return false;
 
-            // Named stations narrow the work area rather than replacing it: an area says where
-            // and a name says which.
-            List<string> named = context.Job != null ? context.Job.Stations : null;
-            if (named != null && named.Count > 0 && !named.Contains(record.PersistentId)) return false;
+            // No named-stations list any more. Which stations a villager works is answered by
+            // the stations themselves - registered, in service, and standing inside one of the
+            // job's work areas - so there is nothing here for a second list to say.
 
             if (Deaf.TryGetValue(record.Id, out float until) && Time.time < until) return false;
             if (Unreachable.Refuses(context.Villager.Id, record.Id)) return false;
@@ -744,35 +776,38 @@ namespace Kukolony.Jobs.Tend
             // that has moved on to wanting something else does not send a loaded villager back
             // to the chest with what it came for.
             string holding = carried.Count > 0 ? Carrying.NameOf(carried[0]) : string.Empty;
-            return Allowed(context, protocol.WhatItWants(record.Settings, holding));
+            return Allowed(context.Colony, record, protocol.WhatItWants(record.Settings, holding));
         }
 
-        /// <summary>What the job will carry, of what the station asked for.</summary>
-        private static StationWant Allowed(TendContext context, StationWant want) =>
-            Allowed(context.Colony, context.Job, want);
-
-        private static StationWant Allowed(Colony colony, JobDefinition job, StationWant want)
+        /// <summary>
+        ///     What a villager will carry, of what the station asked for.
+        /// </summary>
+        /// <remarks>
+        ///     Asked of the station rather than of the job. Whether a kiln wants filling or
+        ///     emptying, and whether it wants fuel or material, are facts about that kiln - with
+        ///     them on the job, a settlement that wanted one furnace emptied and one oven filled
+        ///     needed two jobs and two rosters to say so.
+        /// </remarks>
+        private static StationWant Allowed(Colony colony, StructureRecord record, StationWant want)
         {
-            if (job == null || !want.Any) return want;
+            if (record == null || !want.Any) return want;
+
+            StructureSettings settings = record.Settings;
 
             // The settlement has as much as it asked for, so there is nothing worth putting in
             // - which is a reason to stop supplying and not a reason to stop clearing. A station
             // holding finished work still has to be emptied: an oven left full burns what is on
             // it and then accepts nothing ever again, and "we have enough" is a poor epitaph for
             // a kitchen that set itself alight.
-            if (HasEnough(colony, job)) return StationWant.Nothing;
+            if (HasEnough(colony, record)) return StationWant.Nothing;
 
-            if (want.AsFuel && job.Carries == TendCargo.Material) return StationWant.Nothing;
-            if (!want.AsFuel && job.Carries == TendCargo.Fuel) return StationWant.Nothing;
+            if (want.AsFuel && settings.Carries == StationCargo.Material) return StationWant.Nothing;
+            if (!want.AsFuel && settings.Carries == StationCargo.Fuel) return StationWant.Nothing;
 
-            // The item list narrows and never widens - the station has already said what it
-            // takes, and this can only refuse some of it.
-            if (job.Items != null && job.Items.Count > 0 && !job.Items.Contains(want.Item))
-            {
-                return StationWant.Nothing;
-            }
-
-            return job.Work == TendWork.Collect ? StationWant.Nothing : want;
+            // No item list here any more. What a station will take is already the station's own
+            // answer - its fuel and input rows - so a second list narrowing the first was the
+            // same sentence said twice, in two places that could disagree.
+            return settings.Work == StationWork.Collect ? StationWant.Nothing : want;
         }
 
         /// <summary>
@@ -788,19 +823,15 @@ namespace Kukolony.Jobs.Tend
         ///     a station's own queue is not counted, so a job set to stop at fifty coal will
         ///     keep a kiln loaded that is about to produce the fiftieth.
         /// </remarks>
-        internal static bool HasEnough(Colony colony, JobDefinition job)
+        internal static bool HasEnough(Colony colony, StructureRecord record)
         {
-            if (job == null || job.StockTarget <= 0 || string.IsNullOrEmpty(job.StockItem)) return false;
+            if (colony == null || record == null) return false;
 
-            return Stock.Held(colony, job.StockItem) >= job.StockTarget;
+            return !Orders.WantsMore(record.Settings.Orders, item => Stock.Held(colony, item));
         }
 
-        private static bool Clearing(JobDefinition job) =>
-            job == null || job.Work != TendWork.Supply;
-
-        /// <summary>Whether this job works this kind of station. Nothing chosen means all of them.</summary>
-        private static bool Kind(JobDefinition job, StationKind kind) =>
-            job == null || job.StationKinds == 0 || (job.StationKinds & (1 << (int)kind)) != 0;
+        private static bool Clearing(StructureRecord record) =>
+            record == null || record.Settings.Work != StationWork.Supply;
 
         private static bool Holds(List<ItemDrop.ItemData> carried, string prefab) =>
             Carried(carried, prefab) != null;
@@ -833,15 +864,15 @@ namespace Kukolony.Jobs.Tend
         ///     The same predicate the choosing uses, exposed rather than reimplemented, so a
         ///     check cannot agree with a decision the job does not make.
         /// </remarks>
-        internal static StationWant WouldWant(Colony colony, JobDefinition job, ZDOID station)
+        internal static StationWant WouldWant(Colony colony, ZDOID station)
         {
             StructureRecord record = SettlementIndex.Find(colony, station);
             GameObject instance = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(station) : null;
             StationProtocol protocol = Operating(instance);
 
-            return record == null || protocol == null || !Kind(job, protocol.Kind)
+            return record == null || protocol == null
                 ? StationWant.Nothing
-                : Allowed(colony, job, protocol.WhatItWants(record.Settings, string.Empty));
+                : Allowed(colony, record, protocol.WhatItWants(record.Settings, string.Empty));
         }
     }
 }
