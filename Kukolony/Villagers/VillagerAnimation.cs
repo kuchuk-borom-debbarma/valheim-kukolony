@@ -47,12 +47,25 @@ namespace Kukolony.Villagers
         /// </remarks>
         private static readonly string[] SwingNames = { "swing_axe", "swing_axe0", "swing_pickaxe", "attack" };
 
+        /// <summary>
+        ///     The animator's own idea of what is being held.
+        /// </summary>
+        /// <remarks>
+        ///     Valheim's attack states transition out of this rather than out of nothing, so a
+        ///     rig left at unarmed has no route into an axe swing: the trigger fires, the
+        ///     controller has nowhere to go, and the villager chops invisibly. The visible item
+        ///     in the hand is a separate thing entirely - that is VisEquipment, which decides
+        ///     what is drawn, not what can be animated with it.
+        /// </remarks>
+        private const string WeaponState = "statei";
+
         private static bool _describedRig;
 
         private readonly ZSyncAnimation _animation;
         private readonly bool _canInteract;
         private readonly string _swing;
         private readonly string _sleep;
+        private readonly bool _canHold;
 
         internal VillagerAnimation(GameObject villager)
         {
@@ -100,6 +113,31 @@ namespace Kukolony.Villagers
             {
                 Log.Info("[villager] the rig has no axe swing; chopping will be silent");
             }
+
+            // Probed like everything else here. Without it the swing trigger has no state to
+            // enter, which looks exactly like the trigger not firing.
+            _canHold = _animation.HasParameter(WeaponState, AnimatorControllerParameterType.Int);
+            if (!_canHold)
+            {
+                Log.Info($"[villager] the rig has no '{WeaponState}'; " +
+                         "it will swing without appearing to hold anything");
+            }
+        }
+
+        /// <summary>
+        ///     Tells the rig what it is holding, so a swing has somewhere to go.
+        /// </summary>
+        /// <remarks>
+        ///     Null bares the hands. The item's own animation state is used rather than a
+        ///     guess: it is what the game sets for a player holding the same tool, so an axe
+        ///     swings like an axe and anything else swings like itself.
+        /// </remarks>
+        internal void Hold(ItemDrop.ItemData item)
+        {
+            if (_animation == null || !_canHold) return;
+
+            _animation.SetInt(WeaponState,
+                item?.m_shared == null ? 0 : (int)item.m_shared.m_animationState);
         }
 
         /// <summary>

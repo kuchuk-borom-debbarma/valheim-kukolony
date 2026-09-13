@@ -830,6 +830,12 @@ namespace Kukolony.Jobs.Chop
                 else PutAxeAway(context.Equipment, VillagerRecord(context));
             }
 
+            // And tell the rig what is in that hand. Drawing the axe and being able to swing
+            // it are two different systems: one decides what is rendered, the other decides
+            // which animations the controller can reach from here. Setting only the first is
+            // a villager visibly holding an axe and chopping with an invisible gesture.
+            context.Animation?.Hold(best);
+
             return best;
         }
 

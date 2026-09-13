@@ -235,9 +235,15 @@ namespace Kukolony.Villagers
         ///     Puts away an axe this villager's chopping put in its hand, wherever it has
         ///     stopped chopping - including the paths that never reach the queue again.
         /// </summary>
-        private void PutAxeAway() =>
+        private void PutAxeAway()
+        {
             Jobs.Chop.ChopJob.PutAxeAway(_visEquipment,
                 _nview != null && _nview.IsValid() ? _nview.GetZDO() : null);
+
+            // The rig's own hands, as well as the visible slot. Left set, the villager keeps
+            // standing as though holding a tool it is no longer carrying.
+            _animation?.Hold(null);
+        }
 
         /// <summary>Turns to face something, for work done standing still.</summary>
         internal void FaceTowards(Vector3 target, float deltaTime) =>
