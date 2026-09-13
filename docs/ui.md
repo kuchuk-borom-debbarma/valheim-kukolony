@@ -142,9 +142,9 @@ where the order is visible, because it has room to list it; a summary row names 
 and counts the rest — *"North copse +2"*.
 
 A place that has since been destroyed is said rather than silently fallen back from: the named one
-reads *"(gone)"* and the ones behind the count are tallied — *"North copse +3 (1 gone)"*. The
-marker is terse because the cell is nineteen characters wide, and a warning that does not fit is
-a warning nobody gets.
+reads *"(gone)"* and the ones behind the count are tallied — *"North c… +3 (1 gone)"*. The marker
+is terse, and names give up room before counts do, because the cell is nineteen characters wide
+and a warning that does not fit is a warning nobody gets.
 
 The reach row belongs to the named places. It is one number applied to each of them, and it is
 hidden for a job that only works the Kolony — that reach is the hearth's, set on the hearth.

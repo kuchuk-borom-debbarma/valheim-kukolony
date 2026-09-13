@@ -464,13 +464,21 @@ namespace Kukolony.Gui
         ///     Names the first and counts the rest. A queue of five reads as "Haul +4" rather
         ///     than as a list that would not fit and would be truncated somewhere arbitrary.
         /// </remarks>
+        private const int QueueBudget = 24;
+
         private static string DescribeQueue(Colony colony, List<string> queue)
         {
             if (queue.Count == 0) return "nothing";
 
             JobDefinition first = colony.State.GetJobs().Find(j => j.Id == queue[0]);
             string lead = first != null ? first.Name : "a job that is gone";
-            return queue.Count == 1 ? lead : $"{lead} +{queue.Count - 1}";
+
+            // Held to the button it is drawn on, the same way the job row's own summary is.
+            // A job name is refused only when empty, so "Haul everything to the shed by the
+            // docks" drew four hundred pixels of text across a two-hundred-and-sixty pixel
+            // control - and the count, which the name cannot be read to imply, went with it.
+            string tail = queue.Count == 1 ? string.Empty : $" +{queue.Count - 1}";
+            return JobListScreen.Fit(lead, Mathf.Max(1, QueueBudget - tail.Length)) + tail;
         }
 
         private static List<PickerScreen.Option> JobOptions(Colony colony, string filter)

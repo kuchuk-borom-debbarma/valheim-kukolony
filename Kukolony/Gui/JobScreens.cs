@@ -155,10 +155,12 @@ namespace Kukolony.Gui
         ///         the picker lists the places in order and says so.
         ///     </para>
         ///     <para>
-        ///         <b>Only the name is ever cut.</b> Everything else is short by construction
-        ///         - a count is three characters, the missing-place marker six - so the parts
-        ///         a player cannot reconstruct from the name survive any budget, which is
-        ///         what trimming from the right had been quietly deleting.
+        ///         <b>Only the first place's name is ever cut.</b> The counts behind it are
+        ///         short by construction - at most fourteen characters for the largest list
+        ///         a job may hold - so they survive every budget here, which is what trimming
+        ///         from the right had been quietly deleting. The missing-place marker sits in
+        ///         the name's position and is trimmed with it, but it is six characters
+        ///         against a floor of four, so it degrades to "(go…" rather than vanishing.
         ///     </para>
         /// </remarks>
         internal static string Where(List<StructureRecord> records, JobDefinition job, int budget)
@@ -209,10 +211,6 @@ namespace Kukolony.Gui
             // asked precisely because it has no room.
             return budget <= 1 ? "\u2026" : text.Substring(0, budget - 1) + "\u2026";
         }
-
-        /// <summary>What one place token is called.</summary>
-        private static string PlaceName(List<StructureRecord> records, string token) =>
-            TryPlaceName(records, token, out string name) ? name : GonePlace;
 
         /// <summary>
         ///     The area was destroyed or unregistered.

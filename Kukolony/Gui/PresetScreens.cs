@@ -73,6 +73,15 @@ namespace Kukolony.Gui
     /// <summary>One preset: what it contains, and who to give it to.</summary>
     internal sealed class PresetDetailScreen : ScreenView
     {
+        /// <summary>
+        ///     How much room a job name has on these rows, in characters.
+        /// </summary>
+        /// <remarks>
+        ///     The cell is 300 px and the labels overflow rather than clip, at the same ten
+        ///     pixels a character the job screens are calibrated to.
+        /// </remarks>
+        private const int PresetNameBudget = 30;
+
         private readonly string _id;
 
         internal PresetDetailScreen(string id) => _id = id;
@@ -201,7 +210,10 @@ namespace Kukolony.Gui
                 // A job the colony no longer defines still shows, named for what it is, because
                 // a preset half full of deleted work should look wrong rather than quietly
                 // shorten itself into something nobody asked for.
+                // Held to the cell: a numbered row spends four characters before the name
+                // starts, and a job name has no length limit of its own.
                 string label = job == null ? "a job that is gone" : job.Name;
+                label = JobListScreen.Fit(label, PresetNameBudget - 4);
                 Widgets.Caption(row, $"{i + 1}.  {label}", 300f,
                     job == null ? Color.gray : Color.white);
                 Widgets.Caption(row, job == null ? string.Empty : JobDefinition.Describe(job.Kind),
@@ -226,7 +238,7 @@ namespace Kukolony.Gui
                 if (preset.Jobs.Contains(job.Id)) continue;
                 if (!column.TryRow(out Row row)) continue;
 
-                Widgets.Caption(row, job.Name, 300f, Color.gray);
+                Widgets.Caption(row, JobListScreen.Fit(job.Name, PresetNameBudget), 300f, Color.gray);
                 Widgets.Caption(row, JobDefinition.Describe(job.Kind), 140f, Color.gray);
 
                 string id = job.Id;

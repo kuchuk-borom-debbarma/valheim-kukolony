@@ -162,11 +162,12 @@ namespace Kukolony.Debug
                 report.Check(false, "control: there was a villager whose screen could be audited");
             }
 
-            // The job screens, and with a job built to be as long as the format allows: two
-            // places named, a count for the rest and a "gone" warning, on a row whose cell is
-            // the narrowest on any screen here. A character budget is a proxy for pixels, and
-            // this is the check that makes it answerable - the previous shape of this row was
-            // measured by nobody and drew itself across the Open button.
+            // The job screens, with a job built to be as long as every field on the row
+            // allows: a name far longer than its cell, a place named, a count for the rest
+            // and a "gone" warning, on the narrowest cells of any screen here. A character
+            // budget is a proxy for pixels and this is the check that makes it answerable -
+            // the previous shape of this row was measured by nobody and drew itself across
+            // the Open button beside it.
             List<JobDefinition> before = colony.State.GetJobs();
             List<StructureRecord> places = colony.State.GetStructures();
             List<string> areas = new List<string> { string.Empty, "kukolony.audit.gone.1" };
