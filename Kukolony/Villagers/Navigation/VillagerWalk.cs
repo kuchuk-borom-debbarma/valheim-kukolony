@@ -139,7 +139,6 @@ namespace Kukolony.Villagers.Navigation
         private bool _hasTarget;
         private float _graceUntil;
         private float _closest;
-        private float _nearest;
         private float _lastProgress;
 
         /// <summary>
@@ -285,7 +284,6 @@ namespace Kukolony.Villagers.Navigation
         /// </remarks>
         private const float WalkingGapSeconds = 1f;
 
-        /// <summary>The closest it has managed to get to the current target.</summary>
 
         /// <param name="deltaTime">
         ///     The AI tick's own step. Defaulted to the frame time for callers that do not have
@@ -415,10 +413,6 @@ namespace Kukolony.Villagers.Navigation
             Retarget(target);
 
             float distance = Utils.DistanceXZ(target, _ai.transform.position);
-
-            // Tracked separately from progress: the nearest it has been is useful for reporting
-            // and costs nothing, while what resets the clock has to be a real advance.
-            if (distance < _nearest) _nearest = distance;
 
             if (distance < _closest - ProgressStep)
             {
@@ -559,7 +553,6 @@ namespace Kukolony.Villagers.Navigation
         {
             _hasTarget = false;
             _closest = float.MaxValue;
-            _nearest = float.MaxValue;
         }
 
         /// <summary>The point being walked to, which is not always the thing being walked at.</summary>
@@ -579,7 +572,6 @@ namespace Kukolony.Villagers.Navigation
 
             _target = target;
             _hasTarget = true;
-            _nearest = float.MaxValue;
 
             // Resolved once per journey, not per tick. HavePath is a real query against the
             // navmesh, and a villager has no reason to ask it twenty times a second about a

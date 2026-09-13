@@ -36,7 +36,7 @@ namespace Kukolony.Jobs
         ///     straight back, short enough that a player who fixes the ground does not have to
         ///     wonder whether the mod noticed.
         /// </remarks>
-        private const float RefusedForSeconds = 300f;
+        internal const float RefusedForSeconds = 300f;
 
         /// <summary>
         ///     How long something merely blocked is refused.

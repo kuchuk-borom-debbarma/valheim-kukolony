@@ -81,13 +81,15 @@ namespace Kukolony.Jobs.Haul
                     return Record(state, step, Choose(context, carried, out activity));
 
                 case HaulAction.MoveToSource:
-                    return Record(state, step, Walk(context, source, "fetching", out activity));
+                    BeginLeg(context, HaulState.Fetching);
+                    return Record(state, step, Walk(context, source, "fetching", false, out activity));
 
                 case HaulAction.Collect:
                     return Record(state, step, Collect(context, source, out activity));
 
                 case HaulAction.MoveToDestination:
-                    return Record(state, step, Walk(context, destination, "carrying", out activity));
+                    BeginLeg(context, HaulState.Delivering);
+                    return Record(state, step, Walk(context, destination, "carrying", true, out activity));
 
                 case HaulAction.Deposit:
                     return Record(state, step, Deposit(context, destination, carried, out activity));
@@ -221,7 +223,26 @@ namespace Kukolony.Jobs.Haul
             return JobOutcomes.Skipped(context.State, "nothing to haul", out activity);
         }
 
-        private static JobResult Walk(HaulContext context, GameObject target, string doing, out string activity)
+        /// <summary>
+        ///     Says a leg has begun, the first tick it begins.
+        /// </summary>
+        /// <remarks>
+        ///     Announced here rather than wherever a leg happens to be arranged. A haul
+        ///     reaches its delivery by four different routes - a full bag, a sorted chest, a
+        ///     source that vanished, a fresh choice - and only one of them passes through
+        ///     choosing, so announcing it at each of those was one fix and three omissions
+        ///     waiting. The table already records which leg it is on; entering a leg it was
+        ///     not on is the whole of the question.
+        /// </remarks>
+        private static void BeginLeg(HaulContext context, HaulState leg)
+        {
+            if ((HaulState)context.State.WorkState == leg) return;
+
+            context.Walk.NewLeg();
+        }
+
+        private static JobResult Walk(HaulContext context, GameObject target, string doing,
+            bool toDestination, out string activity)
         {
             if (target == null)
             {
@@ -283,15 +304,16 @@ namespace Kukolony.Jobs.Haul
                         // was a no-op and the villager set straight off again - or, when
                         // tidying, the source chest, so failing to reach a destination
                         // refused a perfectly reachable chest somewhere else entirely.
-                        // The long refusal, as chopping gives the same verdict. Two minutes of
-                        // walking without getting closer is strong evidence; the four-second
-                        // path failure below is weak, and only that one gets the short window.
-                        // Shortening this one was tried to stop the villager announcing there
-                        // is nowhere to put its load and dropping it - but a refusal is live
-                        // the instant it is set, so the next choice does that either way. What
-                        // the short window actually bought was the same walk again every
-                        // twenty seconds.
-                        Unreachable.Refuse(context.Villager.Id, Walked(target));
+                        // How long depends on which end of the trip this is, because the two
+                        // cost different things. Refusing something to fetch means working on
+                        // something else, which is cheap and worth holding for a while.
+                        // Refusing somewhere to put a load means the load has nowhere to go:
+                        // the same refusal set filters destinations, so the next choice
+                        // announces there is nowhere to put it, drops it - and then cannot
+                        // pick it up again either, because the only chest that would take it
+                        // is still refused. Short, so the settlement recovers on its own.
+                        Unreachable.Refuse(context.Villager.Id, Walked(target),
+                            toDestination ? Unreachable.BlockedForSeconds : Unreachable.RefusedForSeconds);
                         activity = gaveUp;
                         return stuck.Value;
                     }
@@ -382,13 +404,6 @@ namespace Kukolony.Jobs.Haul
                     // sweep can pick up the next thing bound for the same chest.
                     context.State.AddCargo(taken);
                     context.State.ClearTarget();
-
-                    // And the delivery begins here rather than at a choice, because this trip
-                    // never returns to choosing - it already has its destination. The walk
-                    // would otherwise see the chest as the same leg as the item it just
-                    // collected whenever the two are close together, and hand the delivery
-                    // whatever the fetch had already accrued.
-                    context.Walk.NewLeg();
                     activity = "picked it up";
                     return JobResult.Running;
 

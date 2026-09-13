@@ -261,6 +261,12 @@ namespace Kukolony.Villagers
             _walk.MoveTowards(destination, Navigation.Approach.ToStructure, deltaTime: .05f);
         }
 
+        /// <summary>Stops walking on purpose, the way resting does, for checks.</summary>
+        internal void StopForTest()
+        {
+            if (Bind()) _walk.Stop();
+        }
+
         /// <summary>Announces a new leg the way a job does, for checks.</summary>
         internal void NewLegForTest()
         {

@@ -5776,6 +5776,42 @@ namespace Kukolony.Debug
                 "a job that chooses something new says so, for targets a stride apart",
                 $"stalled={villager.TripStalledFor:0.00}s");
 
+            // Stopping on purpose ends the trip. Resting drives the walk every tick and stops
+            // once it arrives, so without this a villager accrues a stall for a whole night's
+            // sleep and wakes up abandoning what it was doing before bed.
+            villager.WalkForTest(spot);
+            yield return new WaitForSecondsRealtime(.3f);
+            villager.WalkForTest(spot);
+            report.Check(villager.TripStalledFor > 0f,
+                "control: the clock is running before it is stopped",
+                $"stalled={villager.TripStalledFor:0.00}s");
+
+            villager.StopForTest();
+            report.Check(villager.TripStalledFor <= 0f,
+                "stopping on purpose ends the trip, so sleeping accrues nothing",
+                $"stalled={villager.TripStalledFor:0.00}s");
+
+            // And the queue half this check is named for, which nothing was asserting.
+            List<JobDefinition> two = new List<JobDefinition>
+            {
+                new JobDefinition { Id = "first", Name = "First", Kind = JobKind.Chop, Repeat = 1 },
+                new JobDefinition { Id = "second", Name = "Second", Kind = JobKind.Haul, Repeat = 1 }
+            };
+
+            state.SetQueue(new List<string> { "first", "second" });
+            state.SetQueuePosition(0);
+            state.SetQueueAttempt(0);
+
+            QueueRunner.Apply(state, two, JobResult.Running);
+            report.Check(QueueRunner.Current(state, two)?.Id == "first",
+                "control: a job still running keeps the villager where it is",
+                $"current={QueueRunner.Current(state, two)?.Id}");
+
+            QueueRunner.Apply(state, two, JobResult.Failed);
+            report.Check(QueueRunner.Current(state, two)?.Id == "second",
+                "a trip that gave up hands the villager to the next job",
+                $"current={QueueRunner.Current(state, two)?.Id}");
+
             // And the half that makes giving up worth anything: the villager does not turn
             // round and choose the same thing again. Without this the bound only unblocks the
             // queue, and the next lap walks the same impossible route.
