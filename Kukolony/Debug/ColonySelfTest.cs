@@ -5154,6 +5154,11 @@ namespace Kukolony.Debug
             view.GetZDO().SetOwner(0L);
             yield return new WaitForSecondsRealtime(.2f);
 
+            long mine = ZDOMan.GetSessionID();
+            Core.Log.Info($"[chop-check] disowned: owner={view.GetZDO().GetOwner()} session={mine} " +
+                          $"isOwner={view.IsOwner()} at={view.transform.position} " +
+                          $"playerAt={(Player.m_localPlayer == null ? Vector3.zero : Player.m_localPlayer.transform.position)}");
+
             float before = view.GetZDO().GetFloat(ZDOVars.s_health, tree.GetComponent<TreeBase>().m_health);
             BlowResult unclaimed = Felling.Strike(tree, tool, site + Vector3.back * 2f, out string said);
             yield return new WaitForSecondsRealtime(.2f);
@@ -5168,7 +5173,18 @@ namespace Kukolony.Debug
                 $"health {before:0.0} -> {afterUnclaimed:0.0}");
 
             // Now it is ours, because the call above claimed it. The next blow must land.
+            //
+            // Reported either way, because "the claim did not stick" and "the blow did not
+            // land" are different faults with the same symptom, and the whole design rests on
+            // ownership being takeable. If ownership is being taken away again between the
+            // two blows, that is the thing to know, and by whom.
+            Core.Log.Info($"[chop-check] after claiming: owner={view.GetZDO().GetOwner()} " +
+                          $"session={mine} isOwner={view.IsOwner()}");
+
             yield return new WaitForSecondsRealtime(.4f);
+
+            Core.Log.Info($"[chop-check] before second blow: owner={view.GetZDO().GetOwner()} " +
+                          $"session={mine} isOwner={view.IsOwner()}");
             BlowResult claimed = Felling.Strike(tree, tool, site + Vector3.back * 2f, out string then);
             yield return new WaitForSecondsRealtime(.2f);
 
@@ -5178,7 +5194,8 @@ namespace Kukolony.Debug
 
             report.Check(claimed == BlowResult.Struck || claimed == BlowResult.Felled,
                 "once owned, the same blow lands",
-                $"result={claimed} said='{then}' health {before:0.0} -> {afterClaimed:0.0}");
+                $"result={claimed} said='{then}' health {before:0.0} -> {afterClaimed:0.0} " +
+                $"owner={(view.IsValid() ? view.GetZDO().GetOwner() : 0L)} session={mine}");
 
             report.Check(afterClaimed < before,
                 "control: the health actually moved, which is the only honest proof a blow landed",
@@ -5277,31 +5294,59 @@ namespace Kukolony.Debug
             new VillagerState(view.GetZDO()).SetQueue(new List<string> { "chop" });
             chopper.transform.position = site + new Vector3(3f, 0f, 0f);
 
+            // What the job promises is that choppable things stop existing. Not that wood
+            // appears: a tree leaves a log, a log leaves broken logs, and only those leave
+            // wood - a chain whose shape is Valheim's rather than this job's, and whose end
+            // belongs to hauling. Asserting on wood measured somebody else's work and failed
+            // for it. Chopping is what is under test, so chopping is what is counted.
             bool sawALog = false;
-            int wood = 0;
+            bool photographed = false;
+            int standing = Nearby<TreeBase>(site, 30f);
+            int choppable = standing + Nearby<TreeLog>(site, 30f);
+            int started = choppable;
             float elapsed = 0f;
 
-            while (elapsed < ChopSeconds && wood == 0)
+            while (elapsed < ChopSeconds && choppable > 0)
             {
                 yield return new WaitForSecondsRealtime(.5f);
                 elapsed += .5f;
 
                 if (Nearby<TreeLog>(site, 30f) > 0) sawALog = true;
-                wood = LooseCount("Wood", site + new Vector3(6f, 0f, 0f));
-                if (wood == 0) wood = NearbyWood(site, 30f);
+
+                // One frame of it actually happening, taken the first time there is a log on
+                // the ground - which is the moment the loop is midway and both halves of it
+                // are visible at once.
+                if (sawALog && !photographed)
+                {
+                    photographed = true;
+                    yield return BenchmarkUiScenario.PhotographAtWork("chop-at-work.png",
+                        chopper.transform.position, "a villager chopping, with a felled log",
+                        site + new Vector3(6f, 0f, 0f));
+                }
+
+                standing = Nearby<TreeBase>(site, 30f);
+                choppable = standing + Nearby<TreeLog>(site, 30f);
             }
 
-            report.Check(Nearby<TreeBase>(site, 30f) == 0,
+            report.Check(started > 0, "control: there was something to chop",
+                $"started={started}");
+
+            report.Check(standing == 0,
                 "the tree came down",
-                $"standing={Nearby<TreeBase>(site, 30f)} after {elapsed:0}s");
+                $"standing={standing} after {elapsed:0}s");
 
             report.Check(sawALog,
-                "control: felling it left a log - a tree does not produce wood directly",
+                "control: felling it left a log - a tree does not turn straight into wood",
                 $"sawALog={sawALog}");
 
-            report.Check(wood > 0,
-                "and cutting the log up produced wood on the ground",
-                $"wood={wood} after {elapsed:0}s");
+            report.Check(choppable == 0,
+                "and the villager worked the log down too, until nothing choppable was left",
+                $"remaining={choppable} after {elapsed:0}s");
+
+            yield return BenchmarkUiScenario.PhotographAtWork("chop-cleared.png",
+                chopper != null ? chopper.transform.position : site,
+                $"the ground after chopping - {started} choppable things, {choppable} left",
+                site + new Vector3(6f, 0f, 0f));
 
             VillagerLifecycle.Remove(colony, who);
             Cleanup(colony, planted, null, flag, null);
@@ -5945,24 +5990,6 @@ namespace Kukolony.Debug
             }
 
             return site;
-        }
-
-        /// <summary>Wood lying anywhere near a site, however the log scattered it.</summary>
-        /// <remarks>
-        ///     A log drops its wood along the trunk axis rather than in a pile, so counting
-        ///     within a couple of metres of one point misses most of it.
-        /// </remarks>
-        private static int NearbyWood(Vector3 site, float radius)
-        {
-            int count = 0;
-            foreach (ItemDrop drop in ItemDrop.s_instances)
-            {
-                if (drop == null || Vector3.Distance(drop.transform.position, site) > radius) continue;
-                if (Utils.GetPrefabName(drop.gameObject) != "Wood") continue;
-                count += drop.m_itemData != null ? drop.m_itemData.m_stack : 1;
-            }
-
-            return count;
         }
 
         /// <summary>

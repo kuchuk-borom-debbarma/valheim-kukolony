@@ -54,7 +54,10 @@ set_value BenchmarkAutoBoot true
 set_value BenchmarkFocus "$FOCUS"
 set_value BenchmarkRunId "$RUN_ID"
 set_value BenchmarkOutputPath "$OUTPUT"
-set_value BenchmarkScreenshots false
+# Photographs are the half of "it works" the assertions cannot reach: a villager that
+# fells a tree by sliding backwards through it passes every check in the suite. Kept on
+# for a focused run because there are only a couple of frames and they are the point.
+set_value BenchmarkScreenshots "${BENCHMARK_SCREENSHOTS:-true}"
 set_value BenchmarkAutoExit true
 set_value BenchmarkWorld KukolonyHaulTest
 
@@ -125,5 +128,12 @@ echo
 sed -n '/Colony acceptance run/,$p' "$report" 2>/dev/null || cat "$report"
 
 grep -q "BENCHMARK TERMINAL focus PASS" "$report" || { echo; echo "FOCUSED RUN FAILED"; exit 1; }
+shots="$(ls "$OUTPUT"/*.png 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$shots" != "0" ]; then
+  mkdir -p /Users/kuku/Desktop/kukolony
+  cp -f "$OUTPUT"/*.png /Users/kuku/Desktop/kukolony/ 2>/dev/null || true
+  echo "$shots screenshot(s) copied to ~/Desktop/kukolony"
+fi
+
 echo
 echo "focused run passed: $OUTPUT"
