@@ -64,9 +64,14 @@ namespace Kukolony.KeepAlive
                 return true;
             }
 
+            // Every station a job can operate, or a villager sent to tend an outpost kiln finds
+            // a zone that loaded the building and not the thing inside it - and idles there,
+            // working perfectly whenever anybody comes to look.
             if (prefab.GetComponent<Container>() != null
                 || prefab.GetComponent<CraftingStation>() != null
                 || prefab.GetComponent<Smelter>() != null
+                || prefab.GetComponent<CookingStation>() != null
+                || prefab.GetComponent<Fermenter>() != null
                 || prefab.GetComponent<Fireplace>() != null)
             {
                 return true;

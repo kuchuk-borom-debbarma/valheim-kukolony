@@ -10,21 +10,32 @@ is the whole of what a colony can do, and growing it is how the mod grows.
 | Capability | Detected by | What it means |
 |---|---|---|
 | **Storage** | `Container` | Things can be kept here |
-| **Processing** | `Smelter` | Furnace, smelter, charcoal kiln — and anything else built on `Smelter` |
+| **Processing** | `Smelter`, `CookingStation`, `Fermenter` | Material goes in and a product comes out — furnace, kiln, oven, fermenter, and anything else built on those |
 | **Rest** | `Bed` | One villager can sleep here |
+| **Work area** | `WorkFlag` | Ground far from the hearth that the Kolony works |
 
-**Detected by component, never by prefab name.** A name list misses every modded chest and goes
-stale; a component test does not. Components count wherever they sit on the object, including
-on children — Valheim routinely splits an object's parts across child transforms, and this mod
-does it too — but only when the child belongs to the *same* networked object, or a building
-would inherit the capabilities of everything standing inside it.
+**Detected by component, never by prefab name** — the rule, and the reasoning behind it, is
+[components.md](components.md). A name list misses every modded chest and goes stale; a component
+test does not. Components count wherever they sit on the object, including on children — Valheim
+routinely splits an object's parts across child transforms, and this mod does it too — but only
+when the child belongs to the *same* networked object, or a building would inherit the
+capabilities of everything standing inside it.
+
+**One capability can be several components**, and Processing is the first: a smelter, an oven and
+a fermenter are unrelated classes with unrelated protocols, so the capability says *this converts
+material* and the protocol to operate it is chosen by probing. Probe order matters, because an
+oven is also a fireplace and a fuelled cooking station is both.
 
 A **creature is never a structure**, and neither is a loose item, whatever components they
 carry.
 
-Fireplaces, cooking stations, fermenters and beehives were registerable under the previous
-design and are not now. Registering something nothing can use is a promise the settlement
-cannot keep; each returns with the milestone that gives it meaning.
+Cooking stations and fermenters were registerable under the previous design, were withdrawn
+because nothing could use them, and return here with the Tend job that gives them meaning.
+**Fireplaces and beehives are still out**, and for reasons rather than by omission: a fireplace
+that burns for ever or refuses refills still accepts fuel and still reports a change, so feeding
+one destroys the fuel silently; a beehive produces a world drop rather than changing what it
+holds, so the work is not finished when the call returns. Each returns with the protocol that
+handles it honestly.
 
 ### Capability bits are chosen, not sequential
 

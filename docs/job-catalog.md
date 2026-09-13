@@ -482,3 +482,166 @@ exactly that many left, and *stop when we have* stops when the woodshed is full.
 
 And it does all of that **with nobody watching** — which is the one claim worth proving by
 walking away and coming back, because every failure in the table above passes inspection.
+
+---
+
+# Tend — keeping the fires fed
+
+The third job, and the first that operates something the game owns. Hauling moves what exists and
+chopping makes more of it; neither *transforms* anything. A settlement that can fell a tree, file
+the wood and then turn it into coal is an economy rather than a tidy woodpile.
+
+It is also the job the foundation was already built for and never ran. Phase 1's own *done when*
+says "the smelter stays fed", and it never has: `StructureCapability.Processing` registers every
+`Smelter` in the game, `ProcessingOptions` reads a station's fuel, its conversions and its
+capacities straight off the prefab, and the structure screen has offered *Keep fuelled with*,
+*Feed it* and *Keep it N% full* since the foundation shipped. Two index queries —
+`WhatWantsFeeding` and `WhereIsItKept` — were written for this job and have **zero callers**.
+
+## What it does
+
+A villager asks the settlement which stations are short of something, takes that something out of
+a registered container, carries it to the station, and puts it in. Where a station holds its
+finished product rather than dropping it, the villager takes that off too.
+
+**A station is anything carrying a component we have a probe-verified protocol for** — today
+`Smelter`, `CookingStation` and `Fermenter`. Not a list of prefabs, so a modded kiln or an oven
+from a content pack works the day it is installed. The rule is [components.md](components.md); the
+consequence is that adding a fourth kind of station is one adapter rather than a fourth job.
+
+There is no shared "material in, product out" interface in the game to build this on. Those three
+are unrelated classes with unrelated contracts — ore by name, fermenter items by *hash*, fuel with
+no arguments at all — which is exactly why the protocol is chosen by probing the object and why
+probe order matters: an oven is also a fireplace, and a fuelled cooking station is both.
+
+**The station decides what it wants; the job decides nothing about items at all.** That is the
+same division the whole design rests on — structures say what things are for, jobs say what kind
+of work is done — and it is why this job's settings screen is almost empty while the work is
+specific: a charcoal kiln wants wood and no fuel, a smelter wants ore and coal, and a windmill
+wants barley and nothing to burn. None of that is typed by a player or hard-coded here. Fuel
+versus input is decided by the station's own `m_fuelItem`.
+
+## What it does not do
+
+**It never carries a product.** A smelter spawns what it made on the ground at its output point;
+taking food off an oven and tapping a fermenter both *produce* a world drop rather than putting
+something in the villager's hands. So clearing a station is one call, and hauling files what falls
+— the same division chopping uses, and the same consequence worth stating rather than discovering:
+the player connects the two by registering a chest that wants coal.
+
+Clearing is not a courtesy, either. **A cooking station full of cooked food cannot accept
+anything**, so taking it off is the only move that makes progress — and food left on burns.
+
+**Not fireplaces.** A `Fireplace` *is* feedable — it takes wood and resin — so what keeps it out is
+not a missing component. One that burns for ever or refuses refills still accepts fuel and still
+reports a change, so a villager feeds resin into it indefinitely and the fuel is simply destroyed.
+That needs `m_infiniteFuel` and `m_canRefill` probed, and it is its own protocol.
+
+**Not beehives.** Extracting produces a world drop rather than changing what the station holds, so
+the work is not finished when the call returns: one cycle is two journeys. That is closer to
+chopping than to tending.
+
+## The rule that makes it honest
+
+Hauling's hazard was the shuffle loop. Chopping's was invisible failure. **Tending's is feeding a
+station that did not need feeding** — every call succeeds, the station reports a change, and the
+material is gone. It looks like a working settlement right up until the coal runs out.
+
+It comes in two shapes, and each needs arithmetic rather than good intentions:
+
+| Shape | What it looks like | What makes it safe |
+|---|---|---|
+| Fuel outruns work | A villager keeps a stopped smelter stoked for ever | Fuel only what is queued: `min(queued × m_fuelPerProduct, m_maxFuel) − GetFuel()` |
+| A no-op that reports success | The station is "fed" and nothing changed | Read `GetFuel()` / `GetQueueSize()` before and after; a station that swallows without changing is refused for a while |
+
+And the one that costs material rather than time: **consume the carried item before submitting the
+RPC, never after.** A removal that fails after the call has already handed the station a free item.
+
+Capacity is asked of the station, never assumed — `GetFuel() >= m_maxFuel` and
+`GetQueueSize() >= m_maxOre`, with `IsItemAllowed` for the input. `CanUseItems` is useless here:
+it checks the local *player's* inventory.
+
+## Settings
+
+### On the job
+
+| Setting | Meaning |
+|---|---|
+| **Which stations** — kinds, multi-select, empty means all | Smelters, ovens, fermenters. One villager runs the smelting yard and another runs the kitchen. The list is built from the protocols that exist, so it grows with them and never names a prefab. |
+| **What it does** — supply / collect / both | Supplying and clearing are different work. A supply-only villager will block on a full oven, which is the player's choice to make rather than the mod's to prevent. |
+| **What it carries** — fuel / material / both | A villager who only stokes is a genuinely different worker from one who only loads ore, and on a settlement with one smelter and three kilns the difference is a walk. |
+| **Named stations** — multi-select, empty means all in the work area | Overlaps work areas deliberately: an area says *where*, a name says *which*. A station the job already names is always listed, so a setting can never become unpickable. |
+| **Which items** — allow-list, empty means everything | As hauling's. It can only ever *narrow* what the station already asks for, and the row says so — a setting that appears to widen and cannot is worse than no setting. |
+| **Where it works** | Not new — `Areas` and `WorkRadius`, reused unchanged. It bounds which *stations* count, not where the material may come from: a destination is chosen by what the settlement wants, the way hauling already works. |
+| **Repeat** | Not new — the queue already counts trips before yielding. |
+
+### On the structure — already built, and until now read by nothing
+
+| Setting | Meaning |
+|---|---|
+| **Keep fuelled with** | Offered only when the station burns something. A charcoal kiln has no fuel item at all, which is why "what fuel does this take" has to be allowed to answer "nothing". |
+| **Feed it** | Which of the station's own conversions this one should be kept loaded with. |
+| **Keep it N% full** | A fraction of `m_maxOre`, shown as the count it works out to. This is the terminus: below the line there is work, above it there is none. |
+
+### What is deliberately not offered
+
+- **Which prefabs count as a station.** The components answer that, and a prefab list would be
+  wrong for every modded station and every one Valheim adds later.
+- **What a station accepts.** The station answers that, off its own asset data. A setting here
+  could only disagree with it — which is why *which items* narrows and never widens.
+- **How much fuel to add.** That is arithmetic against the queue, not a preference, and a setting
+  that duplicates an automatic behaviour is a setting that will eventually contradict it.
+
+## The state machine
+
+```
+Choosing ──► Fetching ──► Collecting ──► Delivering ──► Feeding ──┐
+    │                                                             │
+    └──► Clearing ────────────────────────────────────────────────┤
+    ▲                                                             │
+    └─────────────────────────────────────────────────────────────┘
+```
+
+Fetch-and-deliver, which hauling already is — and that is the point at which the shape has **two**
+implementations rather than one, so it is the first honest opportunity to extract it. Tend is
+written concretely first and the extraction judged afterwards, in that order, because the
+predecessor shipped twelve classes built on a shape guessed before the second example existed.
+
+`Choosing = 0`, as in every work-state enum here: an unwritten field reads as zero and so does the
+state left by a villager that was doing another job yesterday.
+
+**Facts outrank the recorded state.** A villager that reloads carrying coal delivers it; one whose
+station was destroyed goes back to choosing rather than walking to a hole in the ground.
+
+## Edge cases, named before building
+
+- **The station fills while the villager walks to it** — another villager, or the player. Not a
+  failure: choose again, and the load is delivered to the next station that wants it.
+- **Nothing in the settlement has what the station wants.** *Skipped*, and said once —
+  "no coal to fetch" — not a failure that burns a repetition.
+- **A load nothing wants any more.** The villager files it like a hauler would rather than carrying
+  it for ever; a bag that fills with oddments cannot work at all. That failure has already been
+  paid for once in this repo.
+- **A station that is a `Smelter` with no fuel item** — kiln, windmill, spinning wheel. The fuel
+  half must answer "nothing" rather than fetching nothing for ever.
+- **Two villagers feeding one station.** `TargetClaims`, claimed on the *station* rather than on
+  the chest, because the station is the scarce thing.
+- **The station is in the work area and the chest is not**, or the reverse.
+- **The station's zone is not loaded.** `GetFuel` and `GetQueueSize` are loaded-only questions, so
+  an unreadable station is not an answer — the same rule `WhereIsItKept` already applies to chests.
+- **The recorded RPC argument shape must be re-probed.** `valheim-findings.md` records
+  `InvokeRPC("RPC_AddOre", prefabName, false)` as probe-verified, and the trailing bool is not
+  obvious from the method it names. Verified against the running game before it is relied on,
+  because a call that silently does nothing is precisely this job's failure mode.
+- **Fuel and ore are cargo, and the bag is also the wardrobe.** The manifest rule from hauling
+  applies unchanged.
+
+## Done when
+
+You register a charcoal kiln and tell it to keep itself half full of wood. A villager fetches wood
+from the chest a hauler filled, feeds the kiln until it is half full, and **stops** — and does not
+touch it again until it has burned some down. Coal appears on the ground and the hauler files it
+in the chest that asked for coal.
+
+And a smelter with nothing to smelt is not stoked, which is the one claim worth proving by walking
+away and counting the coal afterwards.

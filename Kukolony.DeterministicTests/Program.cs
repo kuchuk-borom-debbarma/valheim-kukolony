@@ -4,7 +4,9 @@ using Kukolony.Jobs;
 using Kukolony.Villagers.Navigation;
 using Kukolony.Villagers;
 using Kukolony.Jobs.Haul;
+using Kukolony.Colonies;
 using Kukolony.Jobs.Chop;
+using Kukolony.Jobs.Tend;
 
 /// <summary>
 ///     Verification for logic that needs no game running.
@@ -63,6 +65,8 @@ static class Program
         Tiring();
         Repeating();
         Chopping();
+        Appetite();
+        Tending();
 
         Console.WriteLine(_failed == 0
             ? $"RESULT: PASS ({_cases} cases)"
@@ -712,6 +716,217 @@ static class Program
 
         Case($"no combination of facts ever swings without an axe (swung in {swingingWithoutAnAxe})",
             swingingWithoutAnAxe == 0);
+    }
+
+    /// <summary>
+    ///     What a station is short of, which is the whole of the tending job's honesty.
+    /// </summary>
+    /// <remarks>
+    ///     Every rule here has its positive control beside it. "An idle smelter is not stoked"
+    ///     passes for a function that always answers zero, so the case after it asks the same
+    ///     question of a station that <em>is</em> running and requires a number back.
+    /// </remarks>
+    static void Appetite()
+    {
+        Console.WriteLine("station appetite");
+
+        // The rule this class exists for: nothing queued means nothing to burn for, whatever
+        // the station could hold.
+        Case("an idle station wants no fuel",
+            StationAppetite.FuelWanted(queued: 0, fuelPerProduct: 4, maxFuel: 10, fuel: 0f) == 0);
+
+        // The control. Without it the line above passes for a function that never wants fuel.
+        Case("control: a station with one thing queued wants fuel for it",
+            StationAppetite.FuelWanted(1, 4, 10, 0f) == 4);
+
+        Case("fuel is capped by what the station holds, not by what the queue would burn",
+            StationAppetite.FuelWanted(5, 4, 10, 0f) == 10);
+
+        Case("fuel already burning counts against the ceiling",
+            StationAppetite.FuelWanted(2, 4, 10, 6f) == 2);
+
+        Case("a station fuller than its queue justifies wants none",
+            StationAppetite.FuelWanted(2, 4, 10, 8f) == 0);
+
+        Case("an over-full station never wants a negative amount",
+            StationAppetite.FuelWanted(3, 4, 10, 12f) == 0);
+
+        Case("half a log short of the ceiling is left alone rather than overshot",
+            StationAppetite.FuelWanted(1, 4, 10, 3.5f) == 0);
+
+        Case("a station that burns nothing is never fuelled",
+            StationAppetite.FuelWanted(5, 4, maxFuel: 0, fuel: 0f) == 0);
+
+        // A queue size is read from a ZDO, so it is not a number this code chose. In 32 bits
+        // this product wraps negative and the answer becomes "wants nothing" by luck.
+        Case("a queue large enough to overflow the product is still capped, not wrapped",
+            StationAppetite.FuelWanted(int.MaxValue, 4, 10, 0f) == 10);
+
+        Case("a station with no fuel-per-product burns up to its own capacity",
+            StationAppetite.FuelWanted(1, fuelPerProduct: 0, maxFuel: 10, fuel: 0f) == 10);
+
+        // The terminus. At the line there is no work, which is what makes "keep it half full"
+        // a stopping rule rather than a rate.
+        Case("an empty station wants material up to the line", StationAppetite.InputWanted(0, 10, .5f) == 5);
+        Case("a station at the line wants nothing", StationAppetite.InputWanted(5, 10, .5f) == 0);
+        Case("a station above the line wants nothing", StationAppetite.InputWanted(6, 10, .5f) == 0);
+        Case("zero per cent is a real setting and asks for nothing",
+            StationAppetite.InputWanted(0, 10, 0f) == 0);
+        Case("a hundred per cent asks for the whole capacity", StationAppetite.InputWanted(0, 10, 1f) == 10);
+        Case("what is wanted is bounded by the room left", StationAppetite.InputWanted(9, 10, 1f) == 1);
+        Case("a station with no capacity wants nothing", StationAppetite.InputWanted(0, 0, 1f) == 0);
+        Case("a fraction outside the range is clamped rather than trusted",
+            StationAppetite.InputWanted(0, 10, 5f) == 10 && StationAppetite.InputWanted(0, 10, -1f) == 0);
+
+        // The screen shows the player this exact number, so the two must agree. Mathf.RoundToInt
+        // is (int)Math.Round, which rounds halves to even - 25% of 10 is 2, not 3.
+        Case("the target is the number the structure screen shows", StationAppetite.TargetQueue(10, .25f) == 2);
+        Case("control: three quarters of ten rounds the other way", StationAppetite.TargetQueue(10, .75f) == 8);
+    }
+
+    /// <summary>
+    ///     The tending state machine, exhaustively.
+    /// </summary>
+    static void Tending()
+    {
+        Console.WriteLine("tending");
+
+        Step("with nothing chosen it looks for work",
+            TendState.Choosing, Tend(), TendAction.ChooseWork);
+
+        Step("with a station wanting something and a chest to get it from, it sets off",
+            TendState.Choosing, Tend(hasStation: true, stationWants: true, hasSupply: true),
+            TendAction.MoveToSupply);
+
+        Step("at the chest it takes what it came for",
+            TendState.Fetching, Tend(hasStation: true, stationWants: true, hasSupply: true, atSupply: true),
+            TendAction.Collect);
+
+        Step("having taken it, it carries it to the station",
+            TendState.Collecting, Tend(hasStation: true, stationWants: true, carrying: true),
+            TendAction.MoveToStation);
+
+        Step("at the station it puts it in",
+            TendState.Delivering, Tend(hasStation: true, stationWants: true, carrying: true, atStation: true),
+            TendAction.Feed);
+
+        Step("and keeps putting it in while the station still wants it",
+            TendState.Feeding, Tend(hasStation: true, stationWants: true, carrying: true, atStation: true),
+            TendAction.Feed);
+
+        Step("an empty-handed villager at the station has finished the trip",
+            TendState.Feeding, Tend(hasStation: true, atStation: true), TendAction.Complete);
+
+        // Clearing, which is the half that makes cooking possible at all.
+        Step("a station holding finished work is cleared before anything is fetched for it",
+            TendState.Choosing, Tend(hasStation: true, stationWants: true, hasSupply: true, stationHasOutput: true),
+            TendAction.MoveToStation);
+
+        Step("standing at it, the finished work comes off",
+            TendState.Choosing, Tend(hasStation: true, stationHasOutput: true, atStation: true),
+            TendAction.TakeOutput);
+
+        Step("and it keeps coming off until there is none",
+            TendState.Clearing, Tend(hasStation: true, stationHasOutput: true, atStation: true),
+            TendAction.TakeOutput);
+
+        Step("a station somebody else cleared sends it back to choosing",
+            TendState.Clearing, Tend(hasStation: true, atStation: true), TendAction.ChooseWork);
+
+        // Facts outrank the recorded state.
+        Step("a villager that reloads carrying something delivers it rather than fetching more",
+            TendState.Fetching, Tend(hasStation: true, stationWants: true, hasSupply: true, carrying: true),
+            TendAction.MoveToStation);
+
+        Step("a station that filled while it walked sends it looking for somewhere else",
+            TendState.Delivering, Tend(hasStation: true, carrying: true), TendAction.ChooseWork);
+
+        Step("a station that filled under its hands does the same",
+            TendState.Feeding, Tend(hasStation: true, carrying: true, atStation: true), TendAction.ChooseWork);
+
+        Step("a station destroyed mid-trip does not leave it walking to a hole in the ground",
+            TendState.Delivering, Tend(carrying: true), TendAction.ChooseWork);
+
+        Step("a chest emptied by somebody else sends it back to choosing",
+            TendState.Fetching, Tend(hasStation: true, stationWants: true), TendAction.ChooseWork);
+
+        Step("standing at the chest it may still top up",
+            TendState.Collecting, Tend(hasStation: true, stationWants: true, hasSupply: true,
+                atSupply: true, carrying: true), TendAction.Collect);
+
+        Step("shoved away from the station mid-feed, it walks back",
+            TendState.Feeding, Tend(hasStation: true, stationWants: true, carrying: true),
+            TendAction.MoveToStation);
+
+        Step("a satisfied station is given up rather than walked to",
+            TendState.Choosing, Tend(hasStation: true, hasSupply: true), TendAction.ChooseWork);
+
+        Step("wanting something nowhere holds is a look for work, not a walk",
+            TendState.Choosing, Tend(hasStation: true, stationWants: true), TendAction.ChooseWork);
+
+        Step("being tired yields, however much there is to do",
+            TendState.Choosing, Tend(hasStation: true, stationWants: true, hasSupply: true, tired: true),
+            TendAction.Yield);
+
+        Step("a state written by an older build starts over rather than acting",
+            (TendState)99, Tend(hasStation: true, stationWants: true, hasSupply: true),
+            TendAction.MoveToSupply);
+
+        // Every combination, against the four things that must never happen. A settlement that
+        // feeds a station nobody asked it to is the failure this whole job is arranged against,
+        // so it is asserted over the facts rather than over a happy path.
+        int fedWithNothing = 0, fedUnwanted = 0, fedFromAfar = 0, tookFromNowhere = 0, clearedNothing = 0;
+        TendState[] states =
+        {
+            TendState.Choosing, TendState.Fetching, TendState.Collecting,
+            TendState.Delivering, TendState.Feeding, TendState.Clearing
+        };
+
+        for (int bits = 0; bits < 256; bits++)
+        {
+            TendFacts facts = new TendFacts(
+                hasSupply: (bits & 1) != 0,
+                hasStation: (bits & 2) != 0,
+                atSupply: (bits & 4) != 0,
+                atStation: (bits & 8) != 0,
+                carrying: (bits & 16) != 0,
+                stationWants: (bits & 32) != 0,
+                stationHasOutput: (bits & 64) != 0,
+                tired: (bits & 128) != 0);
+
+            foreach (TendState from in states)
+            {
+                TendAction action = TendTransitions.Next(from, facts).Action;
+
+                if (action == TendAction.Feed)
+                {
+                    if (!facts.Carrying) fedWithNothing++;
+                    if (!facts.StationWants) fedUnwanted++;
+                    if (!facts.AtStation) fedFromAfar++;
+                }
+
+                if (action == TendAction.Collect && !(facts.HasSupply && facts.AtSupply)) tookFromNowhere++;
+                if (action == TendAction.TakeOutput && !(facts.StationHasOutput && facts.AtStation)) clearedNothing++;
+            }
+        }
+
+        Case($"no combination ever feeds a station empty-handed (did {fedWithNothing})", fedWithNothing == 0);
+        Case($"no combination ever feeds a station that wants nothing (did {fedUnwanted})", fedUnwanted == 0);
+        Case($"no combination ever feeds a station it is not standing at (did {fedFromAfar})", fedFromAfar == 0);
+        Case($"no combination ever takes from a chest it is not at (did {tookFromNowhere})", tookFromNowhere == 0);
+        Case($"no combination ever clears a station with nothing on it (did {clearedNothing})", clearedNothing == 0);
+    }
+
+    static TendFacts Tend(bool hasSupply = false, bool hasStation = false, bool atSupply = false,
+        bool atStation = false, bool carrying = false, bool stationWants = false,
+        bool stationHasOutput = false, bool tired = false) =>
+        new TendFacts(hasSupply, hasStation, atSupply, atStation, carrying, stationWants,
+            stationHasOutput, tired);
+
+    static void Step(string what, TendState state, TendFacts facts, TendAction expected)
+    {
+        TendAction actual = TendTransitions.Next(state, facts).Action;
+        Case($"{what} (got {actual})", actual == expected);
     }
 
     static ChopFacts Chop(bool hasTool = false, bool hasTarget = false, bool atTarget = false,

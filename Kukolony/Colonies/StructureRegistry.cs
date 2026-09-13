@@ -144,7 +144,11 @@ namespace Kukolony.Colonies
             if (candidate == null || candidate.GetComponent<Character>() != null || candidate.GetComponent<ItemDrop>() != null)
                 return false;
             if (Has<Container>(candidate)) capabilities |= StructureCapability.Storage;
-            if (Has<Smelter>(candidate)) capabilities |= StructureCapability.Processing;
+            // Asked of the one predicate rather than tested again here, so what may be
+            // registered and what a villager will work cannot come to disagree. It admits any
+            // component this mod has a protocol for - smelter, cooking station, fermenter -
+            // which is why a modded oven needs no change here. See docs/components.md.
+            if (Stations.StationProbe.Is(candidate)) capabilities |= StructureCapability.Processing;
             if (Has<Bed>(candidate)) capabilities |= StructureCapability.Rest;
             if (Has<WorkFlag>(candidate)) capabilities |= StructureCapability.WorkArea;
             return capabilities != StructureCapability.None;

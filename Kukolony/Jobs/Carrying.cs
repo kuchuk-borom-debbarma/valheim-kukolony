@@ -116,8 +116,13 @@ namespace Kukolony.Jobs
         ///         wanted most.
         ///     </para>
         /// </remarks>
+        /// <param name="most">
+        ///     The most to take, or a negative number for as much as will fit. Tending asks for
+        ///     exactly what a station is short of: a villager that emptied a chest of fifty wood
+        ///     to put five in a kiln would spend the rest of the trip carrying forty-five back.
+        /// </param>
         internal static TakeResult TakeFromContainer(Container from, ItemDrop.ItemData item, Inventory bag,
-            out string taken)
+            out string taken, int most = -1)
         {
             taken = string.Empty;
             if (from == null || item == null || bag == null) return TakeResult.Unavailable;
@@ -136,6 +141,9 @@ namespace Kukolony.Jobs
             if (room <= 0) return TakeResult.Full;
 
             int amount = Mathf.Min(item.m_stack, room);
+            if (most >= 0) amount = Mathf.Min(amount, most);
+            if (amount <= 0) return TakeResult.Full;
+
             if (!TryFindSlot(bag, item, out int x, out int y)) return TakeResult.Full;
 
             taken = NameOf(item);

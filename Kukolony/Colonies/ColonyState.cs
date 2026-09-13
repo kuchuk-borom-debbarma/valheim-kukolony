@@ -125,10 +125,11 @@ namespace Kukolony.Colonies
                 // settings to a job while the mod was in use, and discarding would have thrown
                 // away a player's configured work to make room for a feature they could not use
                 // yet. Version 2 stops after the item list; version 3 keeps one work area where
-                // 4 keeps an ordered list; the fields a version does not carry keep their
-                // defaults, and JobDefinition.Read is the one place that knows which those are.
+                // 4 keeps an ordered list; 5 adds what a tending job works and carries. The
+                // fields a version does not carry keep their defaults, and JobDefinition.Read is
+                // the one place that knows which those are.
                 int version = p.ReadInt();
-                if (version < 2 || version > 4) return result;
+                if (version < 2 || version > 5) return result;
 
                 int count = p.ReadInt();
                 if (count < 0 || count > 256) return result;
@@ -183,7 +184,7 @@ namespace Kukolony.Colonies
         internal void SetJobs(List<Jobs.JobDefinition> jobs)
         {
             ZPackage p = new ZPackage();
-            p.Write(4);
+            p.Write(5);
             p.Write(jobs.Count);
             foreach (Jobs.JobDefinition job in jobs) job.Write(p);
             _zdo.Set(JobsKey, p.GetBase64());

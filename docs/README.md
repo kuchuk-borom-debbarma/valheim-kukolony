@@ -6,6 +6,9 @@ and presets. Each villager ZDO owns its ordered queue and runtime position.
 
 Read these first:
 
+- [Components](components.md) — the rule everything else applies: things are found by the
+  components they carry, never by prefab name, which is what makes modded and future content
+  work untested.
 - [Colonies](colonies.md) — root ownership, live radius, and membership.
 - [Structure registry](structure-registry.md) — eligibility, capabilities, target modes,
   and picker behavior.

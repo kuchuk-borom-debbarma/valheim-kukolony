@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Kukolony.Colonies;
+using Kukolony.Colonies.Stations;
 using Kukolony.Core;
 using Kukolony.Jobs;
 using UnityEngine;
@@ -77,9 +78,13 @@ namespace Kukolony.Gui
             // here is also the only way a new kind becomes reachable at all: a single "New
             // job" button that hardcoded Haul is exactly how the previous kind stayed
             // unreachable after being added to the enum.
+            // Three fit: 190 for the caption and 170 each, against a content width of 800. A
+            // fourth kind will not, and the symptom would be a silently half-width button
+            // rather than an error - so the row has to be split when that day comes.
             Widgets.Caption(adding, "Add a job", 190f);
             Add(host, adding, JobKind.Haul);
             Add(host, adding, JobKind.Chop);
+            Add(host, adding, JobKind.Tend);
         }
 
         private static void Add(ColonyScreen host, Row row, JobKind kind)
@@ -297,6 +302,7 @@ namespace Kukolony.Gui
             // the gate is here, at the one place a setting becomes visible.
             if (job.Kind == JobKind.Haul) BuildHaul(host, column, job);
             if (job.Kind == JobKind.Chop) BuildChop(host, column, job);
+            if (job.Kind == JobKind.Tend) BuildTend(host, column, colony, job);
 
             // Where it works. The Kolony itself and its work-area flags, and nothing else:
             // any registered thing can still serve as a centre, but offering every chest and
@@ -417,6 +423,137 @@ namespace Kukolony.Gui
                 Widgets.Flag(load, "Fill the bag before delivering", job.FillBagFirst,
                     value => { Edit(host, j => j.FillBagFirst = value); host.Refresh(); });
             }
+        }
+
+        /// <summary>
+        ///     Which stations a tending job works, and what it does for them.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Deliberately thin, because the stations carry most of it: what a kiln burns
+        ///         and how full to keep it belong to the kiln, where a player is already standing
+        ///         when they think about it. What is left here is the division of labour - which
+        ///         stations, and which half of the work.
+        ///     </para>
+        ///     <para>
+        ///         The kinds come from the protocols that exist rather than from a list of
+        ///         prefabs, so a modded oven is already covered by "ovens" and the row grows when
+        ///         a protocol is added rather than when a prefab is.
+        ///     </para>
+        /// </remarks>
+        private void BuildTend(ColonyScreen host, Column column, Colony colony, JobDefinition job)
+        {
+            if (column.TryRow(out Row kinds))
+            {
+                Widgets.Caption(kinds, "Which stations", 220f);
+                Kind(host, kinds, "Smelters", job, StationKind.Smelter);
+                Kind(host, kinds, "Ovens", job, StationKind.Cooking);
+                Kind(host, kinds, "Fermenters", job, StationKind.Fermenter, 190f);
+            }
+
+            if (column.TryRow(out Row work))
+            {
+                Widgets.Caption(work, "What it does");
+                Widgets.Button(work, JobDefinition.DescribeWork(job.Work), 260f, () =>
+                {
+                    Edit(host, j => j.Work = j.Work == TendWork.Both ? TendWork.Supply
+                        : j.Work == TendWork.Supply ? TendWork.Collect
+                        : TendWork.Both);
+                    host.Refresh();
+                });
+            }
+
+            // Only when it supplies. A clear-only villager carries nothing, so offering it a
+            // choice of what to carry would be a setting that does nothing - the trap this
+            // codebase has already walked into once.
+            if (job.Work != TendWork.Collect && column.TryRow(out Row cargo))
+            {
+                Widgets.Caption(cargo, "What it carries");
+                Widgets.Button(cargo, JobDefinition.DescribeCargo(job.Carries), 260f, () =>
+                {
+                    Edit(host, j => j.Carries = j.Carries == TendCargo.Both ? TendCargo.Fuel
+                        : j.Carries == TendCargo.Fuel ? TendCargo.Material
+                        : TendCargo.Both);
+                    host.Refresh();
+                });
+            }
+
+            if (column.TryRow(out Row named))
+            {
+                Widgets.Choice(named, "Named stations",
+                    job.Stations.Count == 0 ? "all of them" : $"{job.Stations.Count} chosen",
+                    () => host.Push(new PickerScreen("Which stations",
+                        filter => Stations(colony, job, filter), job.Stations, true,
+                        chosen => { Edit(host, j => j.Stations = chosen); host.Refresh(); })));
+            }
+
+            if (job.Work != TendWork.Collect && column.TryRow(out Row items))
+            {
+                // Narrows and never widens: the station has already said what it takes, so this
+                // can only refuse some of it. Said on the row, because a setting that looks like
+                // it adds and cannot is worse than no setting at all.
+                Widgets.Choice(items, "Which items it carries",
+                    job.Items.Count == 0 ? "whatever they ask for" : Summarise(job.Items),
+                    () => host.Push(new PickerScreen("Which items", SearchItems, job.Items, true,
+                        chosen => { Edit(host, j => j.Items = chosen); host.Refresh(); })));
+            }
+        }
+
+        /// <summary>One kind of station, on or off, sharing a row with the others.</summary>
+        private void Kind(ColonyScreen host, Row row, string label, JobDefinition job,
+            StationKind kind, float width = 150f)
+        {
+            // Nothing chosen means all of them, so an empty mask shows every kind as on - which
+            // is what the job actually does, rather than what the bits literally say.
+            int bit = 1 << (int)kind;
+            bool on = job.StationKinds == 0 || (job.StationKinds & bit) != 0;
+
+            Widgets.Button(row, $"{label}: {(on ? "yes" : "no")}", width, () =>
+            {
+                Edit(host, j =>
+                {
+                    int mask = j.StationKinds == 0 ? Every : j.StationKinds;
+                    mask = on ? mask & ~bit : mask | bit;
+
+                    // Turning the last one off would mean a job that works nothing while its
+                    // row claims otherwise, so it wraps back to all of them.
+                    j.StationKinds = mask == 0 || mask == Every ? 0 : mask;
+                });
+                host.Refresh();
+            });
+        }
+
+        /// <summary>Every station kind, as a mask.</summary>
+        private const int Every = (1 << (int)StationKind.Smelter) | (1 << (int)StationKind.Cooking) |
+                                  (1 << (int)StationKind.Fermenter);
+
+        /// <summary>
+        ///     The colony's stations, for pointing a job at some of them.
+        /// </summary>
+        /// <remarks>
+        ///     Registered stations only, plus any this job already names - so a station that has
+        ///     since been unregistered can still be seen and unpicked rather than being stuck in
+        ///     a setting no screen offers a way to change.
+        /// </remarks>
+        private static List<PickerScreen.Option> Stations(Colony colony, JobDefinition job, string filter)
+        {
+            List<PickerScreen.Option> options = new List<PickerScreen.Option>();
+
+            foreach (StructureRecord record in colony.State.GetStructures())
+            {
+                bool station = (record.Capabilities & StructureCapability.Processing) != 0;
+                if (!station && !job.Stations.Contains(record.PersistentId)) continue;
+
+                if (!string.IsNullOrEmpty(filter) &&
+                    record.Name.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                options.Add(new PickerScreen.Option(record.PersistentId, record.Name));
+            }
+
+            return options;
         }
 
         /// <summary>

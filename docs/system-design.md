@@ -114,7 +114,8 @@ A structure joins the colony by being **looked at** and registered from the scre
 
 **Only structures with a component the colony understands may be registered.** The list of
 understood components is the whole of what a colony can use, and growing it is how the mod
-grows. To begin with:
+grows. Nothing is ever recognised by prefab name — see [components.md](components.md) for the
+rule and what it buys. To begin with:
 
 - **Storage** — a container. Configured with what belongs in it.
 - **Processing** — a smelter, kiln and their relatives. Configured with what to keep it fed.
