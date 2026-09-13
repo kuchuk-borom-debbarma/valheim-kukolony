@@ -71,6 +71,23 @@ namespace Kukolony.Colonies.Stations
             return false;
         }
 
+        /// <summary>
+        ///     Whether the station would give this slot up, asked the way it asks itself.
+        /// </summary>
+        /// <remarks>
+        ///     <c>RPC_RemoveDoneItem</c> walks the slots and takes the first whose
+        ///     <c>IsItemDone(name)</c> is true - a test on the item's <em>name</em>, which is
+        ///     true for cooked food and for the overcooked item alike. Asking a different
+        ///     question here and the handler that one would let this report output the station
+        ///     then declines to give up: nothing comes off, the villager re-chooses, and picks
+        ///     the same station again for ever.
+        /// </remarks>
+        private bool Finished(int slot)
+        {
+            _station.GetSlot(slot, out string item, out float _, out CookingStation.Status _, out bool _);
+            return !string.IsNullOrEmpty(item) && _station.IsItemDone(item);
+        }
+
         internal override bool TakeOutput()
         {
             if (_station == null || View == null || !View.IsValid()) return false;
@@ -83,10 +100,12 @@ namespace Kukolony.Colonies.Stations
 
             int before = Used();
 
-            // Probe-verified shape from docs/valheim-findings.md: a position for the food to pop
-            // out at, and a count. Taken from the station itself rather than from the villager,
-            // so a piece of meat never lands inside a wall the villager happens to be standing
-            // against.
+            // RPC_RemoveDoneItem(userPoint, amount): it finds the first finished slot, spawns
+            // that many copies at the point given, and clears the slot. Vanilla passes the
+            // player's position because that is where a player wants it; this passes the
+            // station's own, so a piece of meat never lands inside a wall the villager happens
+            // to be standing against. One, because a villager has no cooking skill to earn the
+            // bonus yield the player's path can roll for.
             View.InvokeRPC("RPC_RemoveDoneItem", View.transform.position + Vector3.up, 1);
 
             // Whether it actually came off is read back rather than assumed, for the same reason
@@ -153,14 +172,6 @@ namespace Kukolony.Colonies.Stations
             }
 
             return used;
-        }
-
-        private bool Finished(int slot)
-        {
-            _station.GetSlot(slot, out string item, out float _, out CookingStation.Status status, out bool _);
-            if (string.IsNullOrEmpty(item)) return false;
-
-            return status == CookingStation.Status.Done || status == CookingStation.Status.Burnt;
         }
 
         /// <summary>Whether this station has a conversion for an item, by name.</summary>

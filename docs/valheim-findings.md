@@ -237,14 +237,36 @@ decompiled source do not, and calling those does nothing.
 | | `InvokeRPC("RPC_AddItem", prefabHash, false)` | by **hash**, not name — unlike the others |
 | Beehive | `InvokeRPC("RPC_Extract")` | |
 
-**The decompiled reference in `.reference/` is stale for these members, and it has now misled two
-reviews.** It shows `Fermenter.RPC_AddItem` registered for a `string`; the assembly this mod
-compiles against declares `RPC_AddItem(long sender, int prefabHash, bool cheated)` — a parameter
-name no decompiled text could invent. `Smelter.RPC_AddOre` likewise carries a third argument the
-reference does not show. **Where they disagree, the shipped assembly wins**, because that is what
-the game runs — and the `tend` slice now settles it by feeding a real item to each of the three
-station kinds and reading the station's own numbers back, which is the only evidence that cannot
-be argued with.
+**The reference decompile drifted once and misled two reviews; it has been regenerated.** The copy
+in `.reference/` was produced from an older `assembly_valheim.dll` and never refreshed - 143,425
+lines against the current 167,794 - and it showed `Fermenter.RPC_AddItem` taking a *string*. The
+game now registers it for an **int**. Two reviews argued from the stale file, and one of them
+called a correct implementation a defect.
+
+Regenerate it rather than reason about which copy is right:
+
+```sh
+dotnet ~/.dotnet/tools/.store/ilspycmd/*/ilspycmd/*/tools/net10.0/any/ilspycmd.dll \
+  -r "$VALHEIM/valheim_Data/Managed" \
+  "$VALHEIM/valheim_Data/Managed/assembly_valheim.dll" > .reference/assembly_valheim.decompiled.cs
+```
+
+(The tool's apphost cannot find the Homebrew runtime, so it is run through `dotnet` directly.)
+
+**Read vanilla's own call site, not just the handler.** Every one of these takes a trailing
+`cheated` flag that the older reference does not show, and the game passes `item.m_cheated`:
+
+| Station | What the game itself invokes |
+|---|---|
+| Smelter | `InvokeRPC("RPC_AddOre", item.m_dropPrefab.name, item.m_cheated)` |
+| Cooking station | `InvokeRPC("RPC_AddItem", name, item.m_cheated)` |
+| Fermenter | `InvokeRPC("RPC_AddItem", name.GetStableHashCode(), item.m_cheated)` |
+| Cooking station, taking off | `InvokeRPC("RPC_RemoveDoneItem", userPoint, amount)` - the handler spawns `amount` copies at `userPoint` and clears the first finished slot |
+
+`CookingStation.RPC_RemoveDoneItem` decides what is finished with `IsItemDone(name)`, which tests
+the item's *name* - true for cooked food and for the overcooked item alike, so burnt food does come
+off. Anything asking a different question and then calling this reports output the station will
+then decline to give up.
 
 Behavioural facts, each of which cost a run to find:
 
