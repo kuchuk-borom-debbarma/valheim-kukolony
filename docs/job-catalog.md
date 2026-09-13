@@ -572,8 +572,18 @@ it checks the local *player's* inventory.
 | **What it carries** — fuel / material / both | A villager who only stokes is a genuinely different worker from one who only loads ore, and on a settlement with one smelter and three kilns the difference is a walk. |
 | **Named stations** — multi-select, empty means all in the work area | Overlaps work areas deliberately: an area says *where*, a name says *which*. A station the job already names is always listed, so a setting can never become unpickable. |
 | **Which items** — allow-list, empty means everything | As hauling's. It can only ever *narrow* what the station already asks for, and the row says so — a setting that appears to widen and cannot is worse than no setting. |
+| **Stop when we have** — an item and a count, 0 meaning never | The terminus this job otherwise lacks, and the same one chopping has. Without it a kiln is kept topped up for ever and a settlement turns every log it owns into coal nobody asked for, while every individual decision is correct. Above the line the job returns **Skipped** and says *"we have enough"*. |
 | **Where it works** | Not new — `Areas` and `WorkRadius`, reused unchanged. It bounds which *stations* count, not where the material may come from: a destination is chosen by what the settlement wants, the way hauling already works. |
 | **Repeat** | Not new — the queue already counts trips before yielding. |
+
+**Having enough stops supplying, never clearing.** A station holding finished work still has to be
+emptied whatever the stores say: an oven left full burns what is on it and then accepts nothing
+ever again, and *"we have enough"* is a poor epitaph for a kitchen that set itself alight.
+
+**Two limits, and they answer different questions.** *Keep it half full* is about the station — do
+not overfill this kiln. *Stop when we have* is about the settlement — we do not need more coal.
+Neither substitutes for the other, which is the same division chopping draws between *leave
+standing* and *stop when we have*.
 
 ### On the structure — already built, and until now read by nothing
 

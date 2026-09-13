@@ -219,7 +219,7 @@ namespace Kukolony.Jobs.Tend
                         return JobResult.Running;
                     }
 
-                    StationWant want = Allowed(context.Job, protocol.WhatItWants(record.Settings,
+                    StationWant want = Allowed(context, protocol.WhatItWants(record.Settings,
                         string.Empty));
                     if (!want.Any) continue;
 
@@ -240,7 +240,9 @@ namespace Kukolony.Jobs.Tend
                 }
             }
 
-            return JobOutcomes.Skipped(state, "nothing to tend", out activity);
+            return JobOutcomes.Skipped(state,
+                HasEnough(context.Colony, context.Job) ? "we have enough" : "nothing to tend",
+                out activity);
         }
 
         /// <summary>
@@ -273,7 +275,7 @@ namespace Kukolony.Jobs.Tend
                     StationProtocol protocol = Operating(instance);
                     if (protocol == null || !Kind(context.Job, protocol.Kind)) continue;
 
-                    StationWant want = Allowed(context.Job, protocol.WhatItWants(record.Settings, prefab));
+                    StationWant want = Allowed(context, protocol.WhatItWants(record.Settings, prefab));
                     if (!want.Any || want.Item != prefab) continue;
 
                     Take(context, record.Id);
@@ -716,13 +718,23 @@ namespace Kukolony.Jobs.Tend
             // that has moved on to wanting something else does not send a loaded villager back
             // to the chest with what it came for.
             string holding = carried.Count > 0 ? Carrying.NameOf(carried[0]) : string.Empty;
-            return Allowed(context.Job, protocol.WhatItWants(record.Settings, holding));
+            return Allowed(context, protocol.WhatItWants(record.Settings, holding));
         }
 
         /// <summary>What the job will carry, of what the station asked for.</summary>
-        private static StationWant Allowed(JobDefinition job, StationWant want)
+        private static StationWant Allowed(TendContext context, StationWant want) =>
+            Allowed(context.Colony, context.Job, want);
+
+        private static StationWant Allowed(Colony colony, JobDefinition job, StationWant want)
         {
             if (job == null || !want.Any) return want;
+
+            // The settlement has as much as it asked for, so there is nothing worth putting in
+            // - which is a reason to stop supplying and not a reason to stop clearing. A station
+            // holding finished work still has to be emptied: an oven left full burns what is on
+            // it and then accepts nothing ever again, and "we have enough" is a poor epitaph for
+            // a kitchen that set itself alight.
+            if (HasEnough(colony, job)) return StationWant.Nothing;
 
             if (want.AsFuel && job.Carries == TendCargo.Material) return StationWant.Nothing;
             if (!want.AsFuel && job.Carries == TendCargo.Fuel) return StationWant.Nothing;
@@ -735,6 +747,26 @@ namespace Kukolony.Jobs.Tend
             }
 
             return job.Work == TendWork.Collect ? StationWant.Nothing : want;
+        }
+
+        /// <summary>
+        ///     Whether the settlement already holds as much as this job was asked to make.
+        /// </summary>
+        /// <remarks>
+        ///     The terminus a producing job otherwise lacks, and the same one chopping uses -
+        ///     an item and a count, measured over the settlement's own containers. Without it a
+        ///     kiln is kept topped up for ever and a woodpile becomes a coal pile becomes
+        ///     nothing anybody asked for, while every individual decision is correct.
+        ///
+        ///     Counted in registered storage only, which is worth knowing: material sitting in
+        ///     a station's own queue is not counted, so a job set to stop at fifty coal will
+        ///     keep a kiln loaded that is about to produce the fiftieth.
+        /// </remarks>
+        internal static bool HasEnough(Colony colony, JobDefinition job)
+        {
+            if (job == null || job.StockTarget <= 0 || string.IsNullOrEmpty(job.StockItem)) return false;
+
+            return Stock.Held(colony, job.StockItem) >= job.StockTarget;
         }
 
         private static bool Clearing(JobDefinition job) =>
@@ -783,7 +815,7 @@ namespace Kukolony.Jobs.Tend
 
             return record == null || protocol == null || !Kind(job, protocol.Kind)
                 ? StationWant.Nothing
-                : Allowed(job, protocol.WhatItWants(record.Settings, string.Empty));
+                : Allowed(colony, job, protocol.WhatItWants(record.Settings, string.Empty));
         }
     }
 }

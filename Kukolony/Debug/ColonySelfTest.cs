@@ -305,6 +305,7 @@ namespace Kukolony.Debug
                     yield return CheckTheStationContract(report, origin);
                     yield return CheckAnIdleSmelterIsNotStoked(report, colony, origin);
                     yield return CheckAKilnIsKeptHalfFullAndStops(report, colony, origin);
+                    yield return CheckEnoughStopsTheTending(report, colony, origin);
                     break;
 
                 case "queue":
@@ -6558,6 +6559,123 @@ namespace Kukolony.Debug
         ///     decompiled reference and its findings document disagree about whether AddOre takes
         ///     two arguments or three, so the live station is asked rather than either of them.
         /// </remarks>
+        /// <summary>
+        ///     That "we have enough" actually stops a villager fetching.
+        /// </summary>
+        /// <remarks>
+        ///     In two rounds against one fixture, because a villager that stops for the right
+        ///     reason and one that never started look identical from outside. The second round
+        ///     raises the same job's target past what the settlement holds, and the same
+        ///     villager must go back to work.
+        /// </remarks>
+        private static IEnumerator CheckEnoughStopsTheTending(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject kiln = SpawnFirst(origin + new Vector3(-8f, 0f, -8f), "charcoal_kiln", "smelter");
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(-5f, 0f, -5f));
+            yield return new WaitForSecondsRealtime(.4f);
+
+            StructureRecord station = Register(colony, kiln, "Enough kiln");
+            StructureRecord store = Register(colony, chest, "Enough store");
+            Smelter smelter = kiln != null ? kiln.GetComponentInChildren<Smelter>(true) : null;
+            if (station == null || store == null || smelter == null)
+            {
+                report.Check(false, "control: the enough check could place and register its fixtures");
+                yield break;
+            }
+
+            // What this station makes, asked of the station. The stopping rule counts the
+            // product, and naming it here rather than reading it would be a fixture that keeps
+            // working when the game changes what a kiln is for.
+            string material = string.Empty;
+            string product = string.Empty;
+            foreach (Smelter.ItemConversion conversion in smelter.m_conversion)
+            {
+                if (conversion == null || conversion.m_from == null || conversion.m_to == null) continue;
+
+                material = conversion.m_from.gameObject.name;
+                product = conversion.m_to.gameObject.name;
+                break;
+            }
+
+            Container box = chest.GetComponentInChildren<Container>(true);
+            int wood = material.Length > 0 ? PutIn(box, material, 40) : 0;
+            int coal = product.Length > 0 ? PutIn(box, product, 20) : 0;
+
+            if (wood <= 0 || coal <= 0)
+            {
+                report.Check(false, "control: the enough check could stock what a kiln eats and makes",
+                    $"material='{material}'x{wood} product='{product}'x{coal}");
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, station.Id, s =>
+            {
+                s.Input = new List<string> { material };
+                s.KeepFull = 1f;
+                s.Accepts = new List<string> { material, product };
+            });
+
+            // Ten, against the twenty already in the chest. Nothing to do from the first tick.
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition
+                {
+                    Id = "enough", Name = "Tend", Kind = JobKind.Tend, Repeat = 30,
+                    StockItem = product, StockTarget = 10
+                }
+            });
+
+            Villager hand = VillagerLifecycle.Spawn(colony);
+            yield return null;
+            if (hand == null || !hand.TryGetComponent(out ZNetView who) || !who.IsValid())
+            {
+                report.Check(false, "control: the enough check could spawn a villager");
+                yield break;
+            }
+
+            SendRested(who);
+            new VillagerState(who.GetZDO()).SetQueue(new List<string> { "enough" });
+
+            report.Check(Stock.Held(colony, product) >= 10,
+                "control: the settlement really does hold more than the job asked for",
+                $"{product}={Stock.Held(colony, product)} target=10");
+
+            int before = CountIn(box, material);
+            for (int attempt = 0; attempt < 40; attempt++) yield return new WaitForSecondsRealtime(.5f);
+
+            report.Check(CountIn(box, material) == before && smelter.GetQueueSize() == 0,
+                "a job that has enough stops fetching for its station",
+                $"{material} {before}->{CountIn(box, material)} queue={smelter.GetQueueSize()} " +
+                $"did='{hand.Activity}'");
+
+            // The control. Same fixture, same villager - only the line moves.
+            List<JobDefinition> raised = colony.State.GetJobs();
+            raised.Find(j => j.Id == "enough").StockTarget = 999;
+            colony.State.SetJobs(raised);
+
+            for (int attempt = 0; attempt < 60 && smelter.GetQueueSize() == 0; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+            }
+
+            report.Check(smelter.GetQueueSize() > 0,
+                "control: raising the line puts the same villager back to work",
+                $"queue={smelter.GetQueueSize()} {material}={CountIn(box, material)} did='{hand.Activity}'");
+
+            VillagerLifecycle.Remove(colony, who.GetZDO().m_uid);
+            colony.State.SetJobs(new List<JobDefinition>());
+            colony.RemoveStructure(station.Id);
+            colony.RemoveStructure(store.Id);
+            Release(kiln);
+            Release(chest);
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
         /// <summary>
         ///     That an axe swing is actually seen, rather than merely asked for.
         /// </summary>

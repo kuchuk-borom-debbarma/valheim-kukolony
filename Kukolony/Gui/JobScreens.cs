@@ -487,6 +487,10 @@ namespace Kukolony.Gui
                         chosen => { Edit(host, j => j.Stations = chosen); host.Refresh(); })));
             }
 
+            // The same terminus chopping has: without it a kiln is kept topped up for ever and
+            // a settlement turns every log it owns into coal nobody asked for.
+            BuildStock(host, column, job);
+
             if (job.Work != TendWork.Collect && column.TryRow(out Row items))
             {
                 // Narrows and never widens: the station has already said what it takes, so this
@@ -595,6 +599,20 @@ namespace Kukolony.Gui
                     value => { Edit(host, j => j.LeaveStanding = (int)value); host.Refresh(); });
             }
 
+            BuildStock(host, column, job);
+        }
+
+        /// <summary>
+        ///     When the settlement has enough of something to stop making more.
+        /// </summary>
+        /// <remarks>
+        ///     Shared by every job that <em>produces</em> rather than moves - chopping and
+        ///     tending today. One set of rows and one rule behind them, because two copies of a
+        ///     stopping rule is two things to keep in step and this codebase has already paid
+        ///     for that lesson with a setting nothing read.
+        /// </remarks>
+        private void BuildStock(ColonyScreen host, Column column, JobDefinition job)
+        {
             if (column.TryRow(out Row stock))
             {
                 Widgets.Choice(stock, "Stop when we have",
