@@ -5181,10 +5181,30 @@ namespace Kukolony.Debug
             Core.Log.Info($"[chop-check] after claiming: owner={view.GetZDO().GetOwner()} " +
                           $"session={mine} isOwner={view.IsOwner()}");
 
-            yield return new WaitForSecondsRealtime(.4f);
+            // Waited for rather than assumed, and re-claimed if it is taken away again.
+            //
+            // A fixed pause here made this check flaky: it failed one run and passed the
+            // next on identical code. Ownership of a ZDO nobody is standing near is not
+            // ours to keep - the game hands it about on its own schedule - so a window
+            // between claiming and swinging sometimes contained that. Which is worth
+            // knowing rather than papering over: the job already survives it, because a
+            // blow at something it no longer owns re-claims and lands on the following
+            // tick. The check needs to measure the blow, not the timing of that schedule.
+            float owning = 0f;
+            while (owning < 3f && view.IsValid() && !view.IsOwner())
+            {
+                view.ClaimOwnership();
+                yield return new WaitForSecondsRealtime(.1f);
+                owning += .1f;
+            }
+
+            report.Check(view.IsValid() && view.IsOwner(),
+                "ownership of a tree nobody owns can actually be taken",
+                $"owner={(view.IsValid() ? view.GetZDO().GetOwner() : 0L)} session={mine} " +
+                $"took={owning:0.0}s");
 
             Core.Log.Info($"[chop-check] before second blow: owner={view.GetZDO().GetOwner()} " +
-                          $"session={mine} isOwner={view.IsOwner()}");
+                          $"session={mine} isOwner={view.IsOwner()} waited={owning:0.0}s");
             BlowResult claimed = Felling.Strike(tree, tool, site + Vector3.back * 2f, out string then);
             yield return new WaitForSecondsRealtime(.2f);
 
