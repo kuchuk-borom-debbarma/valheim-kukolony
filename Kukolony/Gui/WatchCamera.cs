@@ -25,6 +25,14 @@ namespace Kukolony.Gui
     ///         holding a direction key while looking at a villager three hundred metres away
     ///         would walk off whatever they were standing on.
     ///     </para>
+    ///     <para>
+    ///         <b>Moving the camera moves more than the view.</b> Valheim decides what biome you
+    ///         are in by asking the camera where it is - reasonable when the camera is always
+    ///         behind the player, and false here - so watching somebody on a mountain put the
+    ///         weather, the music and the freezing on a player standing in the meadows. The
+    ///         environment is pinned to the body instead; see EnvManBiomePatch, which is where
+    ///         any other "the camera is the player" assumption should be undone as it is found.
+    ///     </para>
     /// </remarks>
     internal sealed class WatchCamera : MonoBehaviour
     {
