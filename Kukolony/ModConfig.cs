@@ -191,10 +191,14 @@ namespace Kukolony
                 nameof(KeepAliveMaxZones),
                 96,
                 new ConfigDescription(
-                    "Hard ceiling on zones held open at once. Reaching it is logged rather than "
-                    + "silently dropping anything. Each villager holds a 3x3 block; a hearth or "
-                    + "flag holds every zone its radius touches plus a ring.",
-                    new AcceptableValueRange<int>(9, 256)));
+                    "Hard ceiling on zones held open at once, or 0 for no ceiling. Reaching it is "
+                    + "logged rather than silently dropping anything. Each villager holds a 3x3 "
+                    + "block and a hearth or flag holds every zone its radius touches plus a "
+                    + "ring - but the zones are a set, so villagers working the same settlement "
+                    + "share theirs and cost nothing extra. A held zone is every object in it "
+                    + "alive and ticking, so 0 is a promise about your machine rather than about "
+                    + "the mod.",
+                    new AcceptableValueRange<int>(0, 1024)));
 
             KeepAliveScanSeconds = config.Bind(
                 "3 - Off-screen simulation",

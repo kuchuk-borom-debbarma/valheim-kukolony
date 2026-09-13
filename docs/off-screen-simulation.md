@@ -75,6 +75,17 @@ Implemented and verified. **Each villager and the colony's registered structures
 positions to a bounded halo of live zones.** The region follows actual work rather than a
 speculative world-wide square, and the cost is proportional to what a colony occupies.
 
+**The kept zones are a set, which is what makes a settlement cheap.** A villager holds the zone
+it stands in plus a ring of neighbours — it cannot path into unloaded ground — but twenty
+villagers working one settlement share those nine zones rather than paying nine each. Only
+villagers genuinely spread across the map cost what they look like they cost.
+
+**The ceiling is a budget, not a rule.** Every object in a held zone is instantiated and ticking,
+so `KeepAliveMaxZones` bounds what a settlement can ask of the machine; villagers are taken before
+the circles, so what a bound cap drops is an outpost's far edge rather than somebody's legs. Set
+it to **0** for no ceiling — a promise about your machine rather than about the mod — and reaching
+a ceiling is logged rather than passed over in silence.
+
 Three facts make it work, all read from the game:
 
 **A live instance holds its own zone open.** `ZoneSystem.UpdateTTL` only unloads a zone when

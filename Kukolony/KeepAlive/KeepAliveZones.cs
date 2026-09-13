@@ -115,7 +115,13 @@ namespace Kukolony.KeepAlive
             }
 
             int rings = ModConfig.KeepAliveHaloRings.Value;
+
+            // Zero means no ceiling, said once here rather than tested at every use. What a
+            // ceiling buys is a bound on what a settlement can ask the machine to keep alive -
+            // every object in a held zone is instantiated and ticking - and a player who would
+            // rather spend that has no business being told they may not.
             int cap = ModConfig.KeepAliveMaxZones.Value;
+            if (cap <= 0) cap = int.MaxValue;
             bool capped = false;
             int dropped = 0;
 
