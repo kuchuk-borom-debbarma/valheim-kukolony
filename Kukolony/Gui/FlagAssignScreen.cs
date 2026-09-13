@@ -143,7 +143,7 @@ namespace Kukolony.Gui
         {
             Widgets.ClearChildren(_content.transform);
 
-            Widgets.Title(_content.transform, "Kolony Flag");
+            Widgets.Title(_content.transform, _flag.Name);
 
             ZDOID owner = _flag.Owner;
             Widgets.Subtitle(_content.transform, owner.IsNone()
@@ -151,6 +151,27 @@ namespace Kukolony.Gui
                 : "Working for " + WorkFlag.OwnerName(owner));
 
             Column column = new Column(_content.transform, _page);
+
+            if (column.TryRow(out Row naming))
+            {
+                Widgets.Text(naming, "Name", _flag.Name, value =>
+                {
+                    string trimmed = (value ?? string.Empty).Trim();
+                    if (trimmed.Length == 0)
+                    {
+                        // Refused rather than silently cleared, the same way a structure's
+                        // name is: a flag with no name is one you cannot pick out of a list
+                        // of three outposts, which is the whole reason to name it.
+                        Report.Say("A flag needs a name.");
+                        Refresh();
+                        return;
+                    }
+
+                    _flag.SetName(trimmed);
+                    Report.Say($"Named {trimmed}.");
+                    Refresh();
+                });
+            }
 
             if (column.TryRow(out Row radius))
             {

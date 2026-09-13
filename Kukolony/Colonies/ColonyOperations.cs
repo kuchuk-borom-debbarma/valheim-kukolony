@@ -227,7 +227,11 @@ namespace Kukolony.Colonies
             {
                 Id = flagZdo.m_uid,
                 PersistentId = token,
-                Name = StructureRegistry.DisplayName(flag.gameObject),
+                // A flag the player has named keeps that name in the list it joins; an
+                // unnamed one falls back to the prefab's, which is what it has always used.
+                Name = WorkFlag.GivenName(flagZdo) is string given && given.Length > 0
+                    ? given
+                    : StructureRegistry.DisplayName(flag.gameObject),
                 Prefab = Utils.GetPrefabName(flag.gameObject),
                 Capabilities = capabilities
             };

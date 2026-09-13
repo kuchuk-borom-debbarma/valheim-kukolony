@@ -909,6 +909,35 @@ namespace Kukolony.Villagers
             return "bound ok";
         }
 
+        /// <summary>
+        ///     How rested this villager is, in the words a player thinks in.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Worked out on demand rather than read off the record: a resting villager's
+        ///         stored figure is the one from when it lay down, and the hover would say it
+        ///         was exhausted for the whole of a night's sleep.
+        ///     </para>
+        ///     <para>
+        ///         A number and a word, because the number alone does not say what it means -
+        ///         the thresholds are configurable, so a villager can be working at thirty and
+        ///         resting at thirty in two different settlements.
+        ///     </para>
+        /// </remarks>
+        internal static string EnergyText(VillagerState state)
+        {
+            float energy = Resting.Now(state);
+            float tired = ModConfig.TiredBelow != null ? ModConfig.TiredBelow.Value : 20f;
+            float rested = ModConfig.RestedAbove != null ? ModConfig.RestedAbove.Value : 70f;
+
+            string word = state.Resting ? "resting"
+                : energy <= tired ? "tired"
+                : energy >= rested ? "rested"
+                : "working";
+
+            return $"energy {energy:0}% ({word})";
+        }
+
         /// <summary>Hover line: who this is and what they are doing.</summary>
         internal string DescribeForHover()
         {
@@ -927,6 +956,7 @@ namespace Kukolony.Villagers
             // it passed by calling the method itself.
             string prompt = "[<color=yellow><b>$KEY_Use</b></color>] manage";
             return $"{state.Name}\n<color=grey>{Activity}</color>\n" +
+                   $"<color=grey>{EnergyText(state)}</color>\n" +
                    (Localization.instance != null ? Localization.instance.Localize(prompt) : prompt);
         }
 

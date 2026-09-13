@@ -41,6 +41,11 @@ namespace Kukolony.Colonies
 
         private static readonly int RadiusKey = "kukolony.flag.radius.v1".GetStableHashCode();
 
+        private static readonly int NameKey = "kukolony.flag.name.v1".GetStableHashCode();
+
+        /// <summary>What a flag nobody has named is called.</summary>
+        internal const string UnnamedLabel = "Kolony Flag";
+
         private ZNetView _nview;
 
         private bool Bind()
@@ -65,6 +70,62 @@ namespace Kukolony.Colonies
             float configured = ModConfig.FlagRadius != null ? ModConfig.FlagRadius.Value : 48f;
             float stored = zdo?.GetFloat(RadiusKey, 0f) ?? 0f;
             return Mathf.Clamp(stored > 0f ? stored : configured, MinRadius, MaxRadius);
+        }
+
+        /// <summary>
+        ///     What this flag is called.
+        /// </summary>
+        /// <remarks>
+        ///     Kept on the flag's own ZDO rather than only in the Kolony's structure record,
+        ///     because a flag can be named before anybody claims it - it is planted first and
+        ///     assigned afterwards, and a name that only existed once claimed would be a name
+        ///     you could not give at the moment you most want to: while deciding which of
+        ///     three outposts this is.
+        /// </remarks>
+        internal string Name => Bind() ? NameOf(_nview.GetZDO()) : UnnamedLabel;
+
+        /// <summary>The name somebody actually gave this flag, or empty if nobody has.</summary>
+        /// <remarks>
+        ///     Kept apart from <see cref="NameOf" /> so a caller can tell "unnamed" from
+        ///     "named the same thing the default says" - registration needs that distinction
+        ///     to decide whether it may use the prefab's display name instead.
+        /// </remarks>
+        internal static string GivenName(ZDO zdo) =>
+            (zdo?.GetString(NameKey, string.Empty) ?? string.Empty).Trim();
+
+        /// <summary>The name off a bare ZDO, for callers with no instance.</summary>
+        internal static string NameOf(ZDO zdo)
+        {
+            string given = GivenName(zdo);
+            return given.Length == 0 ? UnnamedLabel : given;
+        }
+
+        /// <summary>
+        ///     Names the flag, and tells its Kolony so the structures list agrees.
+        /// </summary>
+        /// <remarks>
+        ///     Both, because the two are read in different places: the hover text and this
+        ///     flag's own screen read the ZDO, while the Kolony screen's structures list and
+        ///     the job targets read the registered record. Writing only one is how a flag
+        ///     comes to be called two things at once - a disagreement this codebase has
+        ///     already paid for elsewhere.
+        /// </remarks>
+        internal void SetName(string name)
+        {
+            if (!Bind()) return;
+
+            // Claim, then write, as the radius does: a non-owner write is discarded on the
+            // next sync and the screen would snap back with nothing said.
+            _nview.ClaimOwnership();
+            ZDO zdo = _nview.GetZDO();
+            zdo.Set(NameKey, (name ?? string.Empty).Trim());
+
+            // Best effort by design. A flag is planted three hundred metres out, where its
+            // hearth is usually not loaded, so the record cannot always be reached from
+            // here - and the name on the flag is the one the player is looking at. The
+            // record catches up the next time the flag is assigned.
+            Colony colony = Colony.FindFor(zdo);
+            if (colony != null) ColonyOperations.RenameStructure(colony, zdo.m_uid, NameOf(zdo));
         }
 
         internal void SetRadius(float radius)
@@ -93,7 +154,7 @@ namespace Kukolony.Colonies
                 : $"<color=orange>{OwnerName(owner)}</color>";
 
             return Localization.instance.Localize(
-                $"$kukolony_flag\n{whose}\n<color=grey>reaches {Radius:0} m</color>"
+                $"{Name}\n{whose}\n<color=grey>reaches {Radius:0} m</color>"
                 + "\n[<color=yellow><b>$KEY_Use</b></color>] assign");
         }
 

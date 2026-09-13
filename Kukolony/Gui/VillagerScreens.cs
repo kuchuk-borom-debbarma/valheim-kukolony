@@ -137,6 +137,12 @@ namespace Kukolony.Gui
                 Widgets.Label(doing, VillagerListScreen.Doing(_villager), Color.gray);
             }
 
+            if (column.TryRow(out Row energy))
+            {
+                Widgets.Caption(energy, "Energy");
+                Widgets.Label(energy, Villager.EnergyText(new VillagerState(zdo)));
+            }
+
             StructureRecord bed = SettlementIndex.BedOf(colony, _villager);
             if (column.TryRow(out Row bedRow))
             {
