@@ -204,6 +204,24 @@ namespace Kukolony.Villagers.Navigation
         internal float TripStalledFor => _tripStalled;
 
         /// <summary>
+        ///     Starts the trip clock afresh, for a job that has chosen something new.
+        /// </summary>
+        /// <remarks>
+        ///     A second signal, not the only one. The walk recognises a new leg by where it
+        ///     is being sent, which covers every leg nobody announces - but two trees in a
+        ///     stand can stand a metre apart, and walking to the second after giving up on the
+        ///     first is a new trip that no distance rule can see. Deliberately not folded into
+        ///     <see cref="Forget" />: the rescue ladder calls that, and a ladder rung clearing
+        ///     the trip's clock is how the bound came to mean "time since the last rescue".
+        /// </remarks>
+        internal void NewLeg()
+        {
+            _tripTarget = new Vector3(float.MaxValue, 0f, float.MaxValue);
+            _tripStalled = 0f;
+            _tripClosest = float.MaxValue;
+        }
+
+        /// <summary>
         ///     Keeps the trip clock, from the leg being walked.
         /// </summary>
         /// <remarks>
@@ -228,24 +246,6 @@ namespace Kukolony.Villagers.Navigation
         ///         as the clock it replaced, in the other direction.
         ///     </para>
         /// </remarks>
-        /// <summary>
-        ///     Starts the trip clock afresh, for a job that has chosen something new.
-        /// </summary>
-        /// <remarks>
-        ///     A second signal, not the only one. The walk recognises a new leg by where it
-        ///     is being sent, which covers every leg nobody announces - but two trees in a
-        ///     stand can stand a metre apart, and walking to the second after giving up on the
-        ///     first is a new trip that no distance rule can see. Deliberately not folded into
-        ///     <see cref="Forget" />: the rescue ladder calls that, and a ladder rung clearing
-        ///     the trip's clock is how the bound came to mean "time since the last rescue".
-        /// </remarks>
-        internal void NewLeg()
-        {
-            _tripTarget = new Vector3(float.MaxValue, 0f, float.MaxValue);
-            _tripStalled = 0f;
-            _tripClosest = float.MaxValue;
-        }
-
         private void KeepTripClock(Vector3 target, float distance)
         {
             if (Utils.DistanceXZ(_tripTarget, target) > NewLegDistance)
@@ -286,7 +286,6 @@ namespace Kukolony.Villagers.Navigation
         private const float WalkingGapSeconds = 1f;
 
         /// <summary>The closest it has managed to get to the current target.</summary>
-        internal float Closest => _nearest;
 
         /// <param name="deltaTime">
         ///     The AI tick's own step. Defaulted to the frame time for callers that do not have
@@ -540,6 +539,12 @@ namespace Kukolony.Villagers.Navigation
         {
             VillagerMovement.Stop(_ai);
             Forget();
+
+            // Stopping on purpose ends the trip, and with it the trip's clock. Resting drives
+            // the walk every tick and stops once it arrives, so without this a villager
+            // accrued a stall for the whole of a night's sleep - then woke and gave up on
+            // whatever it had been doing before bed, having been standing next to it.
+            NewLeg();
         }
 
         /// <summary>Drops the route as well, for a villager whose errand has been cancelled.</summary>

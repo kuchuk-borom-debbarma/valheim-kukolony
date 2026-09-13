@@ -283,14 +283,15 @@ namespace Kukolony.Jobs.Haul
                         // was a no-op and the villager set straight off again - or, when
                         // tidying, the source chest, so failing to reach a destination
                         // refused a perfectly reachable chest somewhere else entirely.
-                        // The short refusal, as on the path-failure branch below and for
-                        // the same reason: a settlement often has one chest that accepts a
-                        // thing, and refusing it for five minutes makes the very next choice
-                        // announce there is nowhere to put the load and drop it on the floor -
-                        // which is a false statement about a chest that is merely awkward to
-                        // get to. Twenty seconds breaks the loop and forgives a doorway.
-                        Unreachable.Refuse(context.Villager.Id, Walked(target),
-                            Unreachable.BlockedForSeconds);
+                        // The long refusal, as chopping gives the same verdict. Two minutes of
+                        // walking without getting closer is strong evidence; the four-second
+                        // path failure below is weak, and only that one gets the short window.
+                        // Shortening this one was tried to stop the villager announcing there
+                        // is nowhere to put its load and dropping it - but a refusal is live
+                        // the instant it is set, so the next choice does that either way. What
+                        // the short window actually bought was the same walk again every
+                        // twenty seconds.
+                        Unreachable.Refuse(context.Villager.Id, Walked(target));
                         activity = gaveUp;
                         return stuck.Value;
                     }
@@ -381,6 +382,13 @@ namespace Kukolony.Jobs.Haul
                     // sweep can pick up the next thing bound for the same chest.
                     context.State.AddCargo(taken);
                     context.State.ClearTarget();
+
+                    // And the delivery begins here rather than at a choice, because this trip
+                    // never returns to choosing - it already has its destination. The walk
+                    // would otherwise see the chest as the same leg as the item it just
+                    // collected whenever the two are close together, and hand the delivery
+                    // whatever the fetch had already accrued.
+                    context.Walk.NewLeg();
                     activity = "picked it up";
                     return JobResult.Running;
 

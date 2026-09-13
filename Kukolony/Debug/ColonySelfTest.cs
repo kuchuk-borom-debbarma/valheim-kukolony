@@ -5692,12 +5692,6 @@ namespace Kukolony.Debug
                 "control: the limit is past the rescue ladder, so it is not a second rescue",
                 $"limit={JobOutcomes.AbandonAfterSeconds:0}s vs ladder at 45s");
 
-            List<JobDefinition> two = new List<JobDefinition>
-            {
-                new JobDefinition { Id = "first", Name = "First", Kind = JobKind.Chop, Repeat = 1 },
-                new JobDefinition { Id = "second", Name = "Second", Kind = JobKind.Haul, Repeat = 1 }
-            };
-
             Villager villager = VillagerLifecycle.Spawn(colony);
             yield return new WaitForSecondsRealtime(.4f);
             if (villager == null || !villager.TryGetComponent(out ZNetView view) || !view.IsValid())
