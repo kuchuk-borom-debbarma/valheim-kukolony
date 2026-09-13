@@ -477,10 +477,12 @@ namespace Kukolony.Gui
         {
             List<PickerScreen.Option> options = new List<PickerScreen.Option>();
 
-            // Once for the whole list. This picker rebuilds on every click and every
-            // keystroke in its search box, and asking per job made each of those decode the
-            // settlement's structure registry once per job.
-            List<StructureRecord> records = colony.State.GetStructures();
+            // Once for the whole list, and only once something is actually going to be
+            // listed. This picker rebuilds on every click and every keystroke in its search
+            // box; asking per job made each of those decode the settlement's structure
+            // registry once per job, and asking up front made a filter that matches nothing
+            // pay for a list it does not draw.
+            List<StructureRecord> records = null;
 
             foreach (JobDefinition job in colony.State.GetJobs())
             {
@@ -490,8 +492,14 @@ namespace Kukolony.Gui
                     continue;
                 }
 
+                records = records ?? colony.State.GetStructures();
+
+                // Both halves are held to the cell, not just the half this screen added. The
+                // job name is refused only when empty, so "Haul everything to the shed by the
+                // docks" was free to run across the Choose button beside it.
                 options.Add(new PickerScreen.Option(job.Id,
-                    $"{job.Name} - {JobListScreen.Where(records, job, 24)}"));
+                    $"{JobListScreen.Fit(job.Name, JobListScreen.NameBudget)} - " +
+                    $"{JobListScreen.Where(records, job, JobListScreen.PickerBudget)}"));
             }
 
             return options;

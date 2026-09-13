@@ -38,10 +38,12 @@ namespace Kukolony.Gui
                 Widgets.Label(empty, "This Kolony has no jobs yet.", Color.gray);
             }
 
-            // Decoded once for the whole list rather than once a row. Every caller that
-            // shows more than one job hoists this now; Where's convenience overload is for
-            // the ones that show exactly one.
-            List<StructureRecord> records = colony.State.GetStructures();
+            // Decoded once for the whole list rather than once a row, and not at all for a
+            // settlement with no jobs - GetStructures base64-decodes a package and resolves
+            // a durable reference per record, which is not a thing to pay to draw nothing.
+            List<StructureRecord> records = jobs.Count > 0
+                ? colony.State.GetStructures()
+                : new List<StructureRecord>();
 
             foreach (JobDefinition job in jobs)
             {
@@ -111,10 +113,21 @@ namespace Kukolony.Gui
         ///     that fits. Measured against the longest text the old single-place row was ever
         ///     asked to draw, which fitted.
         /// </remarks>
-        private const int RowBudget = 20;
+        private const int RowBudget = 19;
 
         /// <summary>How much room the job screen's own choice button has.</summary>
-        private const int ChoiceBudget = 26;
+        private const int ChoiceBudget = 24;
+
+        /// <summary>
+        ///     The villager job picker's share of its cell, which it shares with a job name.
+        /// </summary>
+        internal const int PickerBudget = 18;
+
+        /// <summary>The narrowest cell that can name two places and still show its suffixes.</summary>
+        private const int TwoNameBudget = 24;
+
+        /// <summary>What a name is cut to when it shares a cell with something else.</summary>
+        internal const int NameBudget = 18;
 
         /// <summary>A short answer to "where does this happen", for a screen showing one job.</summary>
         /// <remarks>
@@ -143,27 +156,48 @@ namespace Kukolony.Gui
         /// </remarks>
         internal static string Where(List<StructureRecord> records, JobDefinition job, int budget)
         {
+            budget = Mathf.Max(budget, 8);
+
             List<string> tokens = job.Areas ?? new List<string>();
-            if (tokens.Count == 0) return WholeKolony;
+            if (tokens.Count == 0) return Fit(WholeKolony, budget);
 
-            string first = PlaceName(records, tokens[0]);
-            if (tokens.Count == 1) return Fit(first, budget);
+            // A narrow cell names one place and counts the rest; a wider control names two,
+            // which is what makes the order visible. Naming two in the 190 px row spent the
+            // whole cell before the second name contributed a character - every job whose
+            // first area was the settlement rendered as the same truncated string.
+            int named = tokens.Count > 1 && budget >= TwoNameBudget ? 2 : 1;
 
-            string summary = tokens.Count == 2
-                ? $"{first} then {PlaceName(records, tokens[1])}"
-                : $"{first} then {PlaceName(records, tokens[1])} +{tokens.Count - 2}";
-
-            // Counted over the places the row does *not* name. The two it does name say so
+            // Counted over the places the summary does *not* name. The named ones say so
             // themselves, and counting them as well turned "the first of five is gone" into
-            // a row that also claimed one of the hidden three was - two broken areas where
-            // there is one. What this suffix is for is the ones behind the "+N".
+            // a row that also claimed one of the hidden ones was.
             int gone = 0;
-            for (int i = 2; i < tokens.Count; i++)
+            for (int i = named; i < tokens.Count; i++)
             {
                 if (!TryPlaceName(records, tokens[i], out string _)) gone++;
             }
 
-            return Fit(gone > 0 ? $"{summary} ({gone} gone)" : summary, budget);
+            // Built first and kept whole, whatever has to be cut. These carry what the names
+            // cannot say - how many places are not shown, and that some of them are gone -
+            // and they sit at the end, which is exactly where trimming from the right bites:
+            // a job whose second area had been destroyed rendered as a cut-off name with no
+            // warning at all, which is the silence "a place that is gone" exists to break.
+            string tail = tokens.Count > named ? $" +{tokens.Count - named}" : string.Empty;
+            if (gone > 0) tail += $" ({gone} gone)";
+
+            string first = PlaceName(records, tokens[0]);
+            string second = named == 2 ? PlaceName(records, tokens[1]) : string.Empty;
+
+            string full = named == 2 ? $"{first} then {second}{tail}" : $"{first}{tail}";
+            if (full.Length <= budget) return full;
+
+            // Over the cell, so the names give up the room rather than the suffixes. Six for
+            // the joining word, and what is left is split between however many names there
+            // are.
+            int share = Mathf.Max(4, (budget - tail.Length - (named == 2 ? 6 : 0)) / named);
+
+            return named == 2
+                ? $"{Fit(first, share)} then {Fit(second, share)}{tail}"
+                : $"{Fit(first, share)}{tail}";
         }
 
         /// <summary>
@@ -175,10 +209,16 @@ namespace Kukolony.Gui
         ///     string near the length that already fitted beats a label drawn across the
         ///     button beside it.
         /// </remarks>
-        private static string Fit(string text, int budget) =>
-            text != null && budget > 1 && text.Length > budget
-                ? text.Substring(0, budget - 1) + "\u2026"
-                : text;
+        internal static string Fit(string text, int budget)
+        {
+            if (text == null || text.Length <= budget) return text;
+
+            // A budget too small to hold anything still has to produce something, and an
+            // ellipsis alone is a truthful "there was more here" - failing open and returning
+            // the whole string is the one answer that cannot be right, because the caller
+            // asked precisely because it has no room.
+            return budget <= 1 ? "\u2026" : text.Substring(0, budget - 1) + "\u2026";
+        }
 
         /// <summary>What one place token is called.</summary>
         private static string PlaceName(List<StructureRecord> records, string token) =>
@@ -277,7 +317,10 @@ namespace Kukolony.Gui
             if (column.TryRow(out Row where))
             {
                 // One job on this screen, so the registry decode Where does for itself is
-                // the only one - nothing to hoist.
+                // not worth hoisting. It is not the only one: the reach row below asks each
+                // named place how far it reaches, and each of those decodes the registry
+                // again. Fine for one screen at the rate a person presses buttons, and worth
+                // knowing before anything here is put in a loop.
                 Widgets.Choice(where, "Where it works", JobListScreen.Where(colony, job),
                     () => host.Push(new PickerScreen("Where it works",
                         filter => Places(colony, job, filter),

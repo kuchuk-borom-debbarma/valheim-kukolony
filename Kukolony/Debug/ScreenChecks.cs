@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using Kukolony.Colonies;
 using Kukolony.Gui;
+using Kukolony.Jobs;
 using UnityEngine;
 
 namespace Kukolony.Debug
@@ -160,6 +161,52 @@ namespace Kukolony.Debug
             {
                 report.Check(false, "control: there was a villager whose screen could be audited");
             }
+
+            // The job screens, and with a job built to be as long as the format allows: two
+            // places named, a count for the rest and a "gone" warning, on a row whose cell is
+            // the narrowest on any screen here. A character budget is a proxy for pixels, and
+            // this is the check that makes it answerable - the previous shape of this row was
+            // measured by nobody and drew itself across the Open button.
+            List<JobDefinition> before = colony.State.GetJobs();
+            List<StructureRecord> places = colony.State.GetStructures();
+            List<string> areas = new List<string> { string.Empty, "kukolony.audit.gone.1" };
+            foreach (StructureRecord record in places)
+            {
+                if (areas.Count >= 4) break;
+                if (!string.IsNullOrEmpty(record.PersistentId)) areas.Add(record.PersistentId);
+            }
+
+            // A second missing place, so the count behind the "+N" and the warning are both
+            // exercised whatever the fixture colony happens to have registered.
+            areas.Add("kukolony.audit.gone.2");
+
+            List<JobDefinition> audited = new List<JobDefinition>(before)
+            {
+                new JobDefinition
+                {
+                    Id = "audit-job",
+                    Name = "Haul everything to the shed by the docks",
+                    Kind = JobKind.Haul,
+                    Repeat = 4,
+                    Areas = areas
+                }
+            };
+            colony.State.SetJobs(audited);
+
+            screen.Root(new ColonyHomeScreen());
+            screen.Push(new JobListScreen());
+            yield return null;
+            ScreenAudit.Result jobs = ScreenAudit.Inspect(screen.Content);
+            report.Check(jobs.Clean, "the jobs list has no layout faults, with a job named at length",
+                jobs.Clean ? jobs.Summary : jobs.FirstFault);
+
+            screen.Push(new JobDetailScreen("audit-job"));
+            yield return null;
+            ScreenAudit.Result detail = ScreenAudit.Inspect(screen.Content);
+            report.Check(detail.Clean, "a job's own screen has no layout faults",
+                detail.Clean ? detail.Summary : detail.FirstFault);
+
+            colony.State.SetJobs(before);
 
             screen.Root(new ColonyHomeScreen());
             yield return null;
