@@ -468,6 +468,21 @@ namespace Kukolony.Jobs.Chop
                     return JobResult.Running;
 
                 case MoveResult.Moving:
+                    // Bounded. Walking is the one step here that can go on saying "still
+                    // going" for ever, and the queue ignores Running - so a villager that
+                    // cannot get up a hillside would hold its job open and the next entry in
+                    // its queue would never run.
+                    JobResult? stuck = JobOutcomes.GiveUpIfStuck(context.State,
+                        context.Walk.StalledFor, "that tree", out string gaveUp);
+                    if (stuck.HasValue)
+                    {
+                        // Refused for the session as well, or the next choose picks the same
+                        // unreachable tree and the villager spends its day on it.
+                        if (!context.State.Target.IsNone()) Refused(context).Add(context.State.Target);
+                        activity = gaveUp;
+                        return stuck.Value;
+                    }
+
                     context.State.TouchClaim();
                     activity = "off to chop";
                     return JobResult.Running;

@@ -93,14 +93,7 @@ namespace Kukolony.Gui
                 Widgets.Text(name, "Name", preset.Name, value => Edit(host, p => p.Name = value.Trim()));
             }
 
-            // The jobs, in order, because a queue is an order. The picker keeps what it is given.
-            if (column.TryRow(out Row jobs))
-            {
-                Widgets.Choice(jobs, "Does these jobs", PresetListScreen.Describe(colony, preset),
-                    () => host.Push(new PickerScreen("Which jobs, in order",
-                        filter => JobOptions(colony, filter), preset.Jobs, true,
-                        chosen => { Edit(host, p => p.Jobs = chosen); host.Refresh(); })), 260f);
-            }
+            BuildOrder(host, column, colony, preset);
 
             List<ZDOID> everyone = Assignment.Everyone(colony);
 
@@ -168,18 +161,83 @@ namespace Kukolony.Gui
             colony.State.SetPresets(presets);
         }
 
-        private static List<PickerScreen.Option> JobOptions(Colony colony, string filter)
+        /// <summary>
+        ///     The preset's jobs as the ordered list they are, and the way to change that order.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         A preset is a queue and a queue is an order, so the order has to be visible
+        ///         and editable. It was a multi-select picker, which is the wrong shape twice
+        ///         over: the order it returned was its own rather than the player's, and
+        ///         nothing on screen showed what that order had turned out to be. A player
+        ///         setting "chop, then haul" had no way to tell they had been given "haul,
+        ///         then chop".
+        ///     </para>
+        ///     <para>
+        ///         So the two halves are shown as what they are: the jobs this preset does,
+        ///         numbered, each removable; and the jobs it does not, each addable. Adding
+        ///         puts one at the end, which is the only rule needed to build any order -
+        ///         add them in the sequence you want them done.
+        ///     </para>
+        /// </remarks>
+        private void BuildOrder(ColonyScreen host, Column column, Colony colony, JobPreset preset)
         {
-            List<PickerScreen.Option> options = new List<PickerScreen.Option>();
-            foreach (JobDefinition job in colony.State.GetJobs())
-            {
-                if (!Matches(job.Name, filter)) continue;
+            List<JobDefinition> defined = colony.State.GetJobs();
 
-                options.Add(new PickerScreen.Option(job.Id,
-                    $"{job.Name} - {JobListScreen.Where(colony, job)}"));
+            if (column.TryRow(out Row heading))
+            {
+                Widgets.Label(heading, preset.Jobs.Count == 0
+                    ? "Does no jobs yet - add one below"
+                    : $"Does these {preset.Jobs.Count} jobs, in this order:", Color.gray);
             }
 
-            return options;
+            for (int i = 0; i < preset.Jobs.Count; i++)
+            {
+                if (!column.TryRow(out Row row)) continue;
+
+                string id = preset.Jobs[i];
+                JobDefinition job = defined.Find(j => j.Id == id);
+
+                // A job the colony no longer defines still shows, named for what it is, because
+                // a preset half full of deleted work should look wrong rather than quietly
+                // shorten itself into something nobody asked for.
+                string label = job == null ? "a job that is gone" : job.Name;
+                Widgets.Caption(row, $"{i + 1}.  {label}", 300f,
+                    job == null ? Color.gray : Color.white);
+                Widgets.Caption(row, job == null ? string.Empty : JobDefinition.Describe(job.Kind),
+                    140f, Color.gray);
+
+                int at = i;
+                Widgets.Button(row, "Remove", 140f, () =>
+                {
+                    Edit(host, p =>
+                    {
+                        if (at >= 0 && at < p.Jobs.Count) p.Jobs.RemoveAt(at);
+                    });
+                    host.Refresh();
+                });
+            }
+
+            // What is left to add. A job already in the list is not offered again: a preset is
+            // an order to work through, and the same job twice in it is a rotation nobody has
+            // asked for and a queue position that is ambiguous to read.
+            foreach (JobDefinition job in defined)
+            {
+                if (preset.Jobs.Contains(job.Id)) continue;
+                if (!column.TryRow(out Row row)) continue;
+
+                Widgets.Caption(row, job.Name, 300f, Color.gray);
+                Widgets.Caption(row, JobDefinition.Describe(job.Kind), 140f, Color.gray);
+
+                string id = job.Id;
+                Widgets.Button(row, "Add", 140f, () =>
+                {
+                    // Appended, never inserted. "Add them in the order you want them done" is
+                    // one rule a player can hold in their head, and it can build any order.
+                    Edit(host, p => p.Jobs.Add(id));
+                    host.Refresh();
+                });
+            }
         }
 
         /// <summary>

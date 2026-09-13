@@ -290,6 +290,11 @@ namespace Kukolony.Debug
                     yield return CheckChoppingFellsATree(report, colony, origin);
                     break;
 
+                case "queue":
+                    yield return CheckAStuckTripEndsAndTheQueueMovesOn(report, colony);
+                    yield return CheckAPresetKeepsItsOrder(report, colony);
+                    break;
+
                 case "travel":
                     yield return CheckWorkFlags(report, colony, origin);
                     yield return CheckDistantTravel(report, colony, origin);
@@ -300,7 +305,7 @@ namespace Kukolony.Debug
                     // Named but unknown. Failing beats running everything under a name that
                     // says otherwise, or running nothing and reporting a pass.
                     report.Check(false, $"'{wanted}' is not a slice this run knows",
-                        "known: chop, travel");
+                        "known: chop, travel, queue");
                     break;
             }
 
@@ -5660,6 +5665,144 @@ namespace Kukolony.Debug
             Release(standFlag);
             SweepFelling(site, 24f);
             ChoppingGround.ResetForTest();
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A trip that cannot be finished ends, and the queue moves on.
+        /// </summary>
+        /// <remarks>
+        ///     The failure a player actually meets: a villager reporting "off to chop" on a
+        ///     hillside it cannot climb, for ever. Walking is the one step that can keep
+        ///     saying "still going", and the queue ignores Running entirely - so the job never
+        ///     finishes and the second entry of a preset never runs. One villager on a slope
+        ///     quietly stops being a settlement.
+        /// </remarks>
+        private static IEnumerator CheckAStuckTripEndsAndTheQueueMovesOn(TestReport report,
+            Colony colony)
+        {
+            // Asked of the rule rather than by finding a hill: what is under test is that a
+            // trip which has stopped progressing is ended, and that is a decision about a
+            // number. Staging real terrain would measure the pathfinder instead.
+            VillagerState idle = new VillagerState(null);
+
+            report.Check(!JobOutcomes.GiveUpIfStuck(idle, 0f, "a tree", out string _).HasValue,
+                "control: a trip that is making progress is left alone");
+
+            report.Check(!JobOutcomes.GiveUpIfStuck(idle, JobOutcomes.AbandonAfterSeconds - 1f,
+                    "a tree", out string _).HasValue,
+                "control: and is still left alone right up to the limit",
+                $"limit={JobOutcomes.AbandonAfterSeconds:0}s");
+
+            report.Check(JobOutcomes.AbandonAfterSeconds > 45f,
+                "control: the limit is past the rescue ladder, so it is not a second rescue",
+                $"limit={JobOutcomes.AbandonAfterSeconds:0}s vs ladder at 45s");
+
+            // The queue is the half that matters. Running leaves it exactly where it was.
+            List<JobDefinition> two = new List<JobDefinition>
+            {
+                new JobDefinition { Id = "first", Name = "First", Kind = JobKind.Chop, Repeat = 1 },
+                new JobDefinition { Id = "second", Name = "Second", Kind = JobKind.Haul, Repeat = 1 }
+            };
+
+            Villager villager = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+            if (villager == null || !villager.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "stuck-trip check could spawn a villager");
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            VillagerState state = new VillagerState(view.GetZDO());
+            state.SetQueue(new List<string> { "first", "second" });
+            state.SetQueuePosition(0);
+            state.SetQueueAttempt(0);
+
+            QueueRunner.Apply(state, two, JobResult.Running);
+            report.Check(QueueRunner.Current(state, two)?.Id == "first",
+                "control: a job still running keeps the villager where it is",
+                $"current={QueueRunner.Current(state, two)?.Id}");
+
+            // Failed is what a given-up trip returns, and it is what has to move the queue on.
+            QueueRunner.Apply(state, two, JobResult.Failed);
+            report.Check(QueueRunner.Current(state, two)?.Id == "second",
+                "a trip that gave up hands the villager to the next job",
+                $"current={QueueRunner.Current(state, two)?.Id}");
+
+            VillagerLifecycle.Remove(colony, who);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A preset's order is the order its villagers work in.
+        /// </summary>
+        private static IEnumerator CheckAPresetKeepsItsOrder(TestReport report, Colony colony)
+        {
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "chop", Name = "Chop", Kind = JobKind.Chop, Repeat = 1 },
+                new JobDefinition { Id = "haul", Name = "Haul", Kind = JobKind.Haul, Repeat = 1 }
+            });
+
+            // Built the way the screen builds one: appended, in the order chosen.
+            List<JobPreset> presets = colony.State.GetPresets();
+            presets.RemoveAll(p => p.Id == "order");
+            JobPreset preset = new JobPreset { Id = "order", Name = "Ordered" };
+            preset.Jobs.Add("chop");
+            preset.Jobs.Add("haul");
+            presets.Add(preset);
+            colony.State.SetPresets(presets);
+
+            JobPreset stored = colony.State.GetPresets().Find(p => p.Id == "order");
+            report.Check(stored != null && stored.Jobs.Count == 2 &&
+                         stored.Jobs[0] == "chop" && stored.Jobs[1] == "haul",
+                "a preset keeps the order it was given",
+                stored == null ? "missing" : string.Join(",", stored.Jobs.ToArray()));
+
+            Villager villager = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+            if (villager == null || !villager.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "preset-order check could spawn a villager");
+                colony.State.SetJobs(new List<JobDefinition>());
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            Assignment.Apply(new List<ZDOID> { who }, stored.Jobs);
+
+            VillagerState state = new VillagerState(view.GetZDO());
+            List<string> queue = state.GetQueue();
+            report.Check(queue.Count == 2 && queue[0] == "chop" && queue[1] == "haul",
+                "and a villager given that preset works it in that order",
+                string.Join(",", queue.ToArray()));
+
+            List<JobDefinition> defined = colony.State.GetJobs();
+            report.Check(QueueRunner.Current(state, defined)?.Id == "chop",
+                "control: the first job really is first");
+
+            QueueRunner.Apply(state, defined, JobResult.Completed);
+            report.Check(QueueRunner.Current(state, defined)?.Id == "haul",
+                "control: and finishing it hands over to the second");
+
+            // Removing the first leaves the second, which is what the screen's Remove does.
+            preset.Jobs.RemoveAt(0);
+            presets = colony.State.GetPresets();
+            presets.RemoveAll(p => p.Id == "order");
+            presets.Add(preset);
+            colony.State.SetPresets(presets);
+
+            JobPreset trimmed = colony.State.GetPresets().Find(p => p.Id == "order");
+            report.Check(trimmed != null && trimmed.Jobs.Count == 1 && trimmed.Jobs[0] == "haul",
+                "removing one leaves the rest in order",
+                trimmed == null ? "missing" : string.Join(",", trimmed.Jobs.ToArray()));
+
+            VillagerLifecycle.Remove(colony, who);
+            presets = colony.State.GetPresets();
+            presets.RemoveAll(p => p.Id == "order");
+            colony.State.SetPresets(presets);
+            colony.State.SetJobs(new List<JobDefinition>());
             yield return new WaitForSecondsRealtime(.2f);
         }
 

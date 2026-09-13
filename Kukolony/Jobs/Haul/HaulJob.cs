@@ -242,6 +242,18 @@ namespace Kukolony.Jobs.Haul
             switch (context.Walk.MoveTowards(target.transform.position, Approach.DistanceTo(target)))
             {
                 case MoveResult.Moving:
+                    // Bounded first. Walking is the one step that can go on reporting progress
+                    // for ever, and the queue ignores Running entirely - so a villager that
+                    // cannot reach a chest holds its job open and the rest of its queue never
+                    // runs.
+                    JobResult? stuck = JobOutcomes.GiveUpIfStuck(context.State,
+                        context.Walk.StalledFor, "that", out string gaveUp);
+                    if (stuck.HasValue)
+                    {
+                        activity = gaveUp;
+                        return stuck.Value;
+                    }
+
                     // Still going, so the claim on what it is going to is still live. Without
                     // this the reservation ages against the length of the walk rather than
                     // against being stuck, and any errand longer than the timeout loses its

@@ -50,6 +50,52 @@ namespace Kukolony.Jobs
         }
 
         /// <summary>
+        ///     How long a trip may make no progress at all before it is given up on.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Comfortably past the rescue ladder, which is given forty-five seconds before
+        ///         it starts and several rungs after that. This is not a second rescue - it is
+        ///         the bound that says the rescues did not work.
+        ///     </para>
+        ///     <para>
+        ///         Without it, walking is an unbounded Running. The ladder resets its own
+        ///         counters on any scrap of progress, so a villager inching at a hillside
+        ///         climbs a rung, gains half a metre, and starts again for ever - reporting
+        ///         "off to chop" the whole time and never ending the trip. And because the
+        ///         queue ignores Running entirely, the job never finishes and the next entry
+        ///         in a preset never runs. One villager standing on a slope quietly stops
+        ///         being a settlement.
+        ///     </para>
+        /// </remarks>
+        internal const float AbandonAfterSeconds = 120f;
+
+        /// <summary>
+        ///     Gives up on a trip that has stopped making progress, if it has.
+        /// </summary>
+        /// <remarks>
+        ///     Returns null while there is still reason to wait, so a caller can go on with
+        ///     whatever it was doing. Every job that walks needs this, because every job that
+        ///     walks can be asked to reach somewhere it cannot - and the rule this enforces is
+        ///     stated on <see cref="Running" />: a wait that cannot make progress is not one.
+        /// </remarks>
+        internal static JobResult? GiveUpIfStuck(VillagerState state, float stalledFor,
+            string what, out string activity)
+        {
+            activity = null;
+            if (stalledFor < AbandonAfterSeconds) return null;
+
+            // Said out loud. A villager that quietly stops working looks identical to one with
+            // nothing to do, and this is the case a player most needs told about - it usually
+            // means the ground between here and there cannot be walked.
+            Core.Chatter.Say("stuck " + what,
+                $"Somebody cannot reach {what} and has given up on it for now.");
+
+            return JobOutcomes.Failed(state,
+                $"cannot reach {what} - gave up after {stalledFor:0}s", out activity);
+        }
+
+        /// <summary>
         ///     Nothing useful to do right now. Releases the trip, consumes nothing, and yields.
         /// </summary>
         /// <remarks>
