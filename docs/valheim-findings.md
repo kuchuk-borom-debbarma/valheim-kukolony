@@ -295,6 +295,33 @@ Behavioural facts, each of which cost a run to find:
 - `DamageText.instance` is null on a dedicated server, which matters for any path that shows
   damage.
 
+## Pathfinding
+
+**`Pathfinding.FindValidPoint` is broken, and it is the answer to "is there anywhere to stand
+here".** It builds its query with `agentTypeID = (int)settings.m_agentType` - the enum's ordinal,
+0, 1, 2 - where Unity assigns agent type IDs as hashes. The filter matches no agent type, so
+`NavMesh.SamplePosition` answers no almost everywhere. `GetPath` gets this right in its own
+`SnapToNavMesh`, using `settings.m_build.agentTypeID`, which is why pathing works perfectly while
+asking whether ground exists does not.
+
+Build the filter yourself - see `Villagers/Navigation/Standing.cs`. Measured: a travelling villager
+reported `hasRoute=False canStand=False` on every tick of a journey it was walking without
+difficulty, and was carried for half of it, because both questions went through that one call.
+
+**`GetPath` snaps both ends and fails outright if either will not snap.** A destination in terrain
+nobody has loaded returns *nothing* - not a partial path. So long journeys cannot be asked for
+directly; they have to be walked in legs that end inside loaded ground.
+
+**A partial path is an answer, not a failure.** `PathPartial` is returned as success unless
+`requireFullPath`, and its last corner is the edge of the built navmesh in that direction. Walking
+to it is what brings the next stretch into range, which is the whole mechanism behind travelling
+further than the world is loaded.
+
+**Asking builds.** `GetPath` pokes a three-by-three block of 32 m tiles around *each* endpoint, and
+`Buildtiles` builds the most overdue tile every 0.1 s - one at a time, asynchronously. Tiles expire
+30 s after their last poke. So probing candidate legs is also how the corridor ahead gets built -
+but a tile in an unloaded zone meshes empty ground, so poking can never outrun zone loading.
+
 ## Inventory
 
 **`Inventory.MoveItemToThis`'s amount overload requires a real grid coordinate.** Passing

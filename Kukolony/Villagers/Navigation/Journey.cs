@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Kukolony.Villagers.Navigation
@@ -81,6 +82,40 @@ namespace Kukolony.Villagers.Navigation
         private const float MinimumLegGain = 10f;
 
         /// <summary>
+        ///     How far off the straight bearing a leg may be tried, in order.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Straight ahead first, then a little either side, then a lot. A villager walks
+        ///         the line when the line is walkable and goes round when it is not, which is the
+        ///         whole of what "avoiding things" means at this scale - the local avoidance
+        ///         inside a leg is the navmesh's own.
+        ///     </para>
+        ///     <para>
+        ///         Both signs at each angle, nearer first: a detour of twenty-five degrees is
+        ///         preferred to one of fifty whichever side it lies, and preferring one side
+        ///         would make a villager circle an obstacle always the same way, which is how
+        ///         one ends up walking into the same corner from two directions.
+        ///     </para>
+        /// </remarks>
+        private static readonly float[] Fan = { 0f, 25f, -25f, 50f, -50f, 75f, -75f, 110f, -110f };
+
+        /// <summary>How long a chosen leg is kept before the fan is walked again.</summary>
+        /// <remarks>
+        ///     Choosing asks the pathfinder up to nine questions, which is not a thing to do
+        ///     twenty times a second per villager. A leg is a second or two of walking, and it
+        ///     is re-chosen when it is reached or when it stops being reachable - this is only
+        ///     the backstop for ground that changes underneath it.
+        /// </remarks>
+        private const float LegSeconds = 2f;
+
+        /// <summary>Near enough to the leg to want the next one.</summary>
+        private const float LegReached = 6f;
+
+        /// <summary>The shortest leg worth walking to.</summary>
+        private const float ShortestLeg = 8f;
+
+        /// <summary>
         ///     How near standable ground must be to count as a stride away - close enough
         ///     that putting a villager there reads as stepping onto it.
         /// </summary>
@@ -116,6 +151,25 @@ namespace Kukolony.Villagers.Navigation
 
         private Vector3 _destination = new Vector3(float.MaxValue, 0f, float.MaxValue);
         private Vector3 _waypoint;
+
+        /// <summary>Whether the current waypoint was chosen by asking, rather than by bearing.</summary>
+        private bool _legChosen;
+
+        private float _legUntil;
+
+        /// <summary>
+        ///     How long a villager that has just lost its route still counts as having one.
+        /// </summary>
+        /// <remarks>
+        ///     The fan finding nothing is usually the corridor not having finished building
+        ///     rather than the villager being walled in - and the probing that just failed is
+        ///     itself what pokes those tiles, so the answer is often different a second later.
+        ///     Carrying somebody the moment the first question comes back "no" is how a journey
+        ///     over open meadow ends up part-glided.
+        /// </remarks>
+        private const float LookingSeconds = 8f;
+
+        private float _lookingUntil;
         private bool _travelling;
         private float _nextPoke;
         private float _nextProbe;
@@ -125,6 +179,16 @@ namespace Kukolony.Villagers.Navigation
 
         /// <summary>Where the ground needs to exist, so the keep-alive set can hold it open.</summary>
         internal Vector3 Waypoint => _travelling ? _waypoint : _ai.transform.position;
+
+        /// <summary>
+        ///     Whether the current leg is one the pathfinder said could be walked.
+        /// </summary>
+        /// <remarks>
+        ///     False means the fan found nothing reachable - walled in, or the corridor has not
+        ///     finished building - which is the only circumstance in which carrying a villager
+        ///     is the lesser evil.
+        /// </remarks>
+        internal bool HasRoute => _travelling && (_legChosen || Time.time < _lookingUntil);
 
         /// <summary>Whether this is a journey rather than a step across the settlement.</summary>
         internal bool Travelling => _travelling;
@@ -207,7 +271,16 @@ namespace Kukolony.Villagers.Navigation
                 ForgetWater();
             }
 
-            if (!_travelling && remaining > HopLength) _travelling = true;
+            if (!_travelling && remaining > HopLength)
+            {
+                _travelling = true;
+
+                // The grace starts with the journey, not with the first leg found. The corridor
+                // ahead is at its least built in the moment a villager sets off, so the first
+                // fan is the one most likely to come back empty - and treating that first "no"
+                // as "walled in" is how a journey over open meadow began with a glide.
+                _lookingUntil = Time.time + LookingSeconds;
+            }
             if (_travelling && remaining <= arriveWithin) _travelling = false;
             if (!_travelling) return;
 
@@ -215,39 +288,161 @@ namespace Kukolony.Villagers.Navigation
             bearing.y = 0f;
             if (bearing.sqrMagnitude < .01f) return;
 
-            // The keep-alive anchor: far enough ahead that its halo covers ground the villager
-            // has not reached, near enough that it is on the way rather than over the horizon.
-            _waypoint = here + bearing.normalized * Mathf.Min(HopLength, remaining);
-            if (ZoneSystem.instance != null &&
-                ZoneSystem.instance.GetSolidHeight(_waypoint, out float ground))
+            // The leg that was chosen stands until it is reached, stops being walkable, or ages
+            // out. Re-asking every tick would be nine path queries twenty times a second per
+            // villager, and would also make the route flicker between two equally good ways
+            // round the same rock.
+            // Kept until it is reached or it ages out, and deliberately not re-verified in
+            // between: asking whether the leg is still reachable is itself a path query, and one
+            // of those per tick per villager is twenty a second for an answer that changes on
+            // the scale of seconds. Two seconds of walking is the resolution this needs.
+            bool reached = Utils.DistanceXZ(here, _waypoint) <= LegReached;
+            if (_legChosen && !reached && Time.time < _legUntil)
             {
-                _waypoint.y = ground;
+                PokeAhead(here, destination);
+                return;
             }
 
-            // Snapped to somewhere an agent of this kind can actually be. A straight line
-            // projected forty-five metres ahead lands in a lake or against a cliff often enough
-            // to matter, and a leg the villager cannot walk to is no better than a destination it
-            // cannot walk to - it produces the same unanswerable path query and the same journey
-            // spent entirely on rescues. Wide, because the point of the leg is to be roughly
-            // ahead rather than exactly there.
-            if (Pathfinding.instance != null &&
-                Pathfinding.instance.FindValidPoint(out Vector3 walkable, _waypoint, LegSearch,
-                    _ai.m_pathAgentType) &&
-                Utils.DistanceXZ(walkable, destination) < remaining - MinimumLegGain)
+            if (!TryChooseLeg(here, destination, remaining, bearing.normalized, out Vector3 leg))
             {
-                // Only if it is still progress. FindValidPoint answers "the nearest place an
-                // agent can be", which can be to the side of the route or behind it - and a
-                // villager sent sideways walks perfectly well while getting no closer to where
-                // it was going, which reads exactly like being stuck.
-                _waypoint = walkable;
+                // Nothing reachable in any direction. The straight-line waypoint is kept so the
+                // keep-alive still holds ground open ahead - the corridor being unbuilt is the
+                // usual reason, and the tiles the probing just poked are what fixes it a moment
+                // later. The rescue ladder is what catches a villager genuinely walled in.
+                _waypoint = Ahead(here, bearing.normalized, remaining);
+                _legChosen = false;
+                PokeAhead(here, destination);
+                return;
             }
+
+            _waypoint = leg;
+            _legChosen = true;
+            _legUntil = Time.time + LegSeconds;
+            _lookingUntil = Time.time + LegSeconds + LookingSeconds;
 
             PokeAhead(here, destination);
         }
 
+        /// <summary>
+        ///     The furthest leg along the fan that this villager can actually walk to.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>Reachable, not merely walkable-looking.</b> The leg used to be the point
+        ///         forty-five metres along the straight bearing, snapped to the nearest navmesh.
+        ///         That asks whether there is ground there and never whether the villager can
+        ///         get to it - so a leg on the far side of a rock face, a ravine or a lake was
+        ///         accepted, the villager walked into the obstacle, stalled, and the rescue
+        ///         ladder carried it the rest of the way in a straight line. Going round things
+        ///         is not a thing a bearing can express.
+        ///     </para>
+        ///     <para>
+        ///         Every candidate is asked of the pathfinder with a <em>full</em> path required,
+        ///         because the point of the question is "can I walk there", and a partial path is
+        ///         the answer "no, but I can walk towards it" - which is what got a villager
+        ///         stuck against the obstacle in the first place.
+        ///     </para>
+        ///     <para>
+        ///         Probing is not free of side effects and that is half of why it works: every
+        ///         query pokes a three-by-three block of navmesh tiles around the point it asks
+        ///         about, so the fan builds the corridor ahead as it looks down it.
+        ///     </para>
+        /// </remarks>
+        private bool TryChooseLeg(Vector3 here, Vector3 destination, float remaining,
+            Vector3 bearing, out Vector3 leg)
+        {
+            leg = here;
+            if (Pathfinding.instance == null) return false;
+
+            // The long hop first, then shorter ones. A leg the villager cannot reach is usually
+            // reaching too far - past the built navmesh, or across the neck of a bay - and three
+            // metres of walking that is genuinely walkable beats forty-five metres of sliding.
+            // Each shorter attempt also pokes tiles nearer to hand, which is the ground most
+            // likely to finish building first.
+            foreach (float share in Hops)
+            {
+                if (TryFan(here, destination, remaining * share, bearing, out leg)) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>How much of a hop to try, longest first.</summary>
+        private static readonly float[] Hops = { 1f, .5f, .25f };
+
+        private bool TryFan(Vector3 here, Vector3 destination, float reach, Vector3 bearing,
+            out Vector3 leg)
+        {
+            leg = here;
+
+            // Below this there is no point: the leg would be inside the villager's own arrival
+            // tolerance and choosing it would be choosing to stand still.
+            if (reach < ShortestLeg) return false;
+
+            float remaining = Utils.DistanceXZ(here, destination);
+            float gain = Mathf.Min(MinimumLegGain, reach * .5f);
+
+            foreach (float angle in Fan)
+            {
+                Vector3 aimed = Quaternion.Euler(0f, angle, 0f) * bearing;
+                Vector3 candidate = Ahead(here, aimed, reach);
+
+                // No FindValidPoint here any more: it is the engine's broken sampler, and
+                // GetPath snaps both of its own ends correctly - so asking for the path is both
+                // the snap and the answer, in one question instead of two.
+
+                // How far along the navmesh this actually gets, which is the leg. Asking for a
+                // *full* path was too strict by half: over ground that is still building, most
+                // candidates have no complete route yet, so every one of them was refused and
+                // the villager was declared walled in and carried - measured at half the journey
+                // spent being carried over open meadow.
+                //
+                // A partial path is not a failure here, it is the answer to the question this
+                // job actually asks: how far can I walk towards that. Its last corner is the
+                // edge of the built world in that direction, and walking to it is what brings
+                // the next stretch into range - which is the whole mechanism.
+                if (!Pathfinding.instance.GetPath(here, candidate, _corners, _ai.m_pathAgentType,
+                        requireFullPath: false, cleanup: false))
+                {
+                    continue;
+                }
+
+                if (_corners.Count == 0) continue;
+
+                Vector3 reached = _corners[_corners.Count - 1];
+
+                // Still progress. The nearest navmesh point can be to the side of the route or
+                // behind it, and a partial path can stop almost where it started - a villager
+                // sent sideways walks perfectly well while getting no closer, which reads
+                // exactly like being stuck.
+                if (Utils.DistanceXZ(reached, destination) >= remaining - gain) continue;
+
+                leg = reached;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>A point one hop along a bearing, put on the ground.</summary>
+        private static Vector3 Ahead(Vector3 here, Vector3 bearing, float remaining)
+        {
+            Vector3 point = here + bearing * Mathf.Min(HopLength, remaining);
+            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(point, out float ground))
+            {
+                point.y = ground;
+            }
+
+            return point;
+        }
+
+        /// <summary>The corners of the last path asked for, reused so choosing allocates nothing.</summary>
+        private readonly List<Vector3> _corners = new List<Vector3>();
+
         internal void Forget()
         {
             _travelling = false;
+            _legChosen = false;
 
             // The probe caches for a second, so a water flag latched at the end of one
             // errand survived into the next one started within it - and a villager on dry
@@ -418,8 +613,7 @@ namespace Kukolony.Villagers.Navigation
 
             foreach (float radius in ResumeSearches)
             {
-                if (Pathfinding.instance.FindValidPoint(out point, body.transform.position,
-                        radius, _ai.m_pathAgentType))
+                if (Standing.Near(body.transform.position, radius, _ai.m_pathAgentType, out point))
                 {
                     return true;
                 }
@@ -430,9 +624,7 @@ namespace Kukolony.Villagers.Navigation
 
         /// <summary>Whether an agent of this kind could stand within a given radius.</summary>
         private bool HasStanding(Character body, float radius) =>
-            Pathfinding.instance != null &&
-            Pathfinding.instance.FindValidPoint(out _, body.transform.position, radius,
-                _ai.m_pathAgentType);
+            Standing.Near(body.transform.position, radius, _ai.m_pathAgentType, out _);
 
         /// <summary>How fast this villager covers ground on a journey.</summary>
         /// <remarks>

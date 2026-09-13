@@ -466,14 +466,35 @@ static class Program
             Locomotor.Decide(new TravelFacts(true, true, false, true, true, false, true))
                 == Locomotion.CoverGround);
 
-        // Escalation: unseen and stalled goes straight to covering ground, because there is
-        // nobody to be polite for.
-        Case("stalled and unobserved starts a rescue without ceremony",
+        // Escalation, and the gentle option comes first whether or not anybody is watching.
+        // It used to go straight to covering ground when unseen, on the reasoning that there
+        // was nobody to be polite for - but politeness was never the point. Being put back on
+        // the navmesh is a step sideways; covering ground is a body sliding across country, and
+        // a settlement that does that unwatched is one whose villagers arrive by means nobody
+        // would accept if they saw it.
+        Case("stalled and unobserved is still put back on the navmesh rather than carried",
             Locomotor.Decide(new TravelFacts(false, true, true, false, true, true, true))
-                == Locomotion.BeginRescue);
+                == Locomotion.PutBackOnNavmesh);
         Case("stalled in view tries the gentle option first",
             Locomotor.Decide(new TravelFacts(false, true, true, true, true, true, true))
                 == Locomotion.PutBackOnNavmesh);
+
+        // And a villager that can still walk somewhere is never carried at all, which is the
+        // rule the whole corridor exists to make true: a stall while holding a full path to the
+        // next leg is the navmesh building or a doorway blocked, not a villager that needs
+        // lifting over the terrain.
+        Case("stalled while holding a walkable route keeps walking",
+            Locomotor.Decide(new TravelFacts(false, true, true, false, true, false, false,
+                hasRoute: true)) == Locomotion.Walk);
+        Case("control: the same stall without a route does not keep walking",
+            Locomotor.Decide(new TravelFacts(false, true, true, false, true, false, false))
+                != Locomotion.Walk);
+        Case("water ahead is not crossed by carrying when there is a way round",
+            Locomotor.Decide(new TravelFacts(false, true, false, false, false, true, true,
+                waterAhead: true, hasRoute: true)) == Locomotion.Walk);
+        Case("control: water ahead with no way round is still crossed",
+            Locomotor.Decide(new TravelFacts(false, true, false, false, false, true, true,
+                waterAhead: true)) == Locomotion.BeginRescue);
 
         // Control: the gentle option must not be offered where it cannot work.
         Case("control: nowhere to stand means no point being put back on the navmesh",

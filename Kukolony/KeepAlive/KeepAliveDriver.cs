@@ -171,6 +171,14 @@ namespace Kukolony.KeepAlive
             // with its own. Circles rather than points, so a real outpost keeps all of its
             // zones rather than the one its flagpole stands in.
             _areas.Clear();
+            // Asked for by the thing that needs it. The registry is a cached sweep, and the
+            // only callers that ever started one were the map pins and the flag screen - so the
+            // circles this holds open existed because somebody had the map component running.
+            // On a dedicated server, where there is no local player and the pins return early,
+            // that means no hearth circle and no flag circle held at all: villagers kept their
+            // own haloes and every outpost quietly went cold. Throttled inside the registry, so
+            // asking every refresh costs nothing.
+            ColonyRegistry.EnsureFresh(this);
             ColonyRegistry.CollectAreas(_areas);
 
             // Every registered structure, last. Almost all of them stand inside a circle

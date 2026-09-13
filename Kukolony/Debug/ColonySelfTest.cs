@@ -1732,6 +1732,11 @@ namespace Kukolony.Debug
             bool destroyed = false;
             int unloads = 0;
             bool wasLoaded = true;
+            Vector3 sampledAt = walker != null ? walker.transform.position : Vector3.zero;
+            int strode = 0;
+            int slid = 0;
+            int carried = 0;
+            bool photograph = true;
             float closest = startedAt;
             float elapsed = 0f;
 
@@ -1760,8 +1765,34 @@ namespace Kukolony.Debug
 
                 if (loaded)
                 {
-                    if (walker.IsReckoning) wentUnseen = true;
+                    if (walker.IsReckoning)
+                    {
+                        wentUnseen = true;
+                        carried++;
+                    }
                     else if (wentUnseen) cameIntoView = true;
+
+                    // Whether it is walking, asked of the rig rather than of a flag. "Not
+                    // reckoning" says the rescue ladder is not carrying it; it says nothing
+                    // about whether the legs are moving, and a villager sliding across the
+                    // ground in an idle pose satisfies every flag this check had. The clip
+                    // playing is the evidence - and it is the same evidence the axe swing
+                    // needed, for the same reason.
+                    Vector3 at = walker.transform.position;
+                    if (Utils.DistanceXZ(at, sampledAt) > SlidingStep)
+                    {
+                        if (Walking(walker)) strode++;
+                        else slid++;
+
+                        if (photograph && slid + strode >= 4)
+                        {
+                            photograph = false;
+                            yield return BenchmarkUiScenario.PhotographAtWork("travel-underway.png",
+                                at, $"a villager {what}, {Utils.DistanceXZ(at, destination):0}m to go");
+                        }
+                    }
+
+                    sampledAt = at;
                 }
 
                 // Read from the record when there is no body to read from. The record is what
@@ -1772,6 +1803,7 @@ namespace Kukolony.Debug
             }
 
             string story = $"{startedAt:0}m to {closest:0}m in {elapsed:0}s, walkedMostly={!wentUnseen}" +
+                           $" strode={strode} slid={slid} carriedSamples={carried}" +
                            (expectHandover ? $" cameIntoView={cameIntoView}" : string.Empty) +
                            $" unloadedTimes={unloads}" +
                            (destroyed ? " - ZDO GONE, TRULY DESTROYED" : string.Empty);
@@ -1779,6 +1811,14 @@ namespace Kukolony.Debug
 
             bool reached = closest <= ArrivedWithin;
             report.Check(reached, $"a villager sent {what} arrives", story);
+
+            // Covering ground on its legs, not merely covering ground. Measured over the samples
+            // where it actually moved: a villager that slid would show ground covered with no
+            // walk playing, which is exactly what every other flag here would have called a
+            // clean journey.
+            report.Check(strode > 0 && slid <= strode / 8,
+                $"a villager sent {what} walks there rather than sliding",
+                $"strode={strode} slid={slid} of {strode + slid} moving samples");
 
             report.Check(!destroyed,
                 $"control: it still exists after travelling {what}",
@@ -6913,6 +6953,41 @@ namespace Kukolony.Debug
         private static string Join(HashSet<string> clips) =>
             clips.Count == 0 ? "nothing" : string.Join(", ", new List<string>(clips).ToArray());
 
+        /// <summary>How far a villager must move between samples for the step to count.</summary>
+        /// <remarks>
+        ///     Above the jitter of standing on uneven ground, below anything that could be
+        ///     called covering distance.
+        /// </remarks>
+        private const float SlidingStep = 1f;
+
+        /// <summary>
+        ///     Whether this villager's legs are actually going.
+        /// </summary>
+        /// <remarks>
+        ///     Asked of the rig, because every other way of asking is a flag that a sliding
+        ///     villager satisfies: it is not reckoning, it is not stalled, it is getting closer.
+        ///     A body covering ground in an idle pose is the one failure those cannot see, and
+        ///     the clip playing is what tells them apart. Matched loosely by name - this rig's
+        ///     locomotion clips are "Jog New", "Jog backward" and their walking relatives - so a
+        ///     modded controller answers for itself.
+        /// </remarks>
+        private static bool Walking(Villager villager)
+        {
+            Animator animator = villager != null ? villager.GetComponentInChildren<Animator>() : null;
+            if (animator == null) return false;
+
+            HashSet<string> playing = new HashSet<string>();
+            Collect(animator, playing);
+
+            foreach (string clip in playing)
+            {
+                string name = clip.ToLowerInvariant();
+                if (name.Contains("jog") || name.Contains("walk") || name.Contains("run")) return true;
+            }
+
+            return false;
+        }
+
         /// <summary>Adds the name of every clip playing right now to a set.</summary>
         private static void Collect(Animator animator, HashSet<string> into)
         {
@@ -7349,24 +7424,40 @@ namespace Kukolony.Debug
         /// </remarks>
         private static IEnumerator CheckWorkFlags(TestReport report, Colony colony, Vector3 origin)
         {
-            Vector3 farOut = origin + new Vector3(colony.EffectiveRadius + 90f, 0f, 0f);
+            // Beyond the colony's reach, which is all this check is about - and no further.
+            // Ninety metres past the radius put the fixtures a hundred and thirty-eight metres
+            // out, where there is no loaded ground for a piece to stand on: both objects
+            // destroyed themselves in Awake and arrived here as null references, which reads
+            // exactly like a prefab that does not exist. Twenty-five metres past the edge is
+            // just as out of reach and is somewhere things can be built.
+            Vector3 farOut = origin + new Vector3(colony.EffectiveRadius + 25f, 0f, 0f);
 
             // Control first: without any flag, ground out there is nobody's.
             GameObject strayChest = Spawn("piece_chest_wood", farOut + new Vector3(4f, 0f, 0f));
             yield return new WaitForSecondsRealtime(.3f);
 
             StructureRecord strayRecord = StructureRegistry.Describe(strayChest);
+            RegisterOutcome strayOutcome = strayChest == null
+                ? RegisterOutcome.NotUsable
+                : ColonyOperations.Register(colony, strayChest);
+
             report.Check(strayChest != null && strayRecord != null &&
-                         ColonyOperations.Register(colony, strayChest) == RegisterOutcome.OutOfReach,
-                "control: without a flag, a distant chest is refused as out of reach");
+                         strayOutcome == RegisterOutcome.OutOfReach,
+                "control: without a flag, a distant chest is refused as out of reach",
+                $"chest={(strayChest != null)} record={(strayRecord != null)} outcome={strayOutcome} " +
+                $"at {farOut.x:0},{farOut.z:0} which is {Utils.DistanceXZ(farOut, origin):0}m out, " +
+                $"radius={colony.EffectiveRadius:0}");
 
             GameObject flag = Spawn(WorkFlagPrefab.PrefabName, farOut);
             yield return new WaitForSecondsRealtime(.3f);
 
-            WorkFlag planted = flag != null ? flag.GetComponent<WorkFlag>() : null;
+            WorkFlag planted = flag != null ? flag.GetComponentInChildren<WorkFlag>(true) : null;
             if (planted == null)
             {
-                report.Check(false, "flag check could place a flag");
+                report.Check(false, "flag check could place a flag",
+                    $"prefab={(ZNetScene.instance.GetPrefab(WorkFlagPrefab.PrefabName) != null)} " +
+                    $"instance={(flag != null)} " +
+                    $"components={(flag == null ? "none" : StructureRegistry.Explain(flag))}");
                 Release(strayChest);
                 yield break;
             }
@@ -7399,8 +7490,17 @@ namespace Kukolony.Debug
             // The keep-alive holds the flag's ground. Asked of the zone set directly: the
             // question is "would this survive nobody being here", which watching it while
             // being here cannot answer.
+            // Waited for, not sampled. The registry is a sweep that runs as a coroutine, so
+            // asking the instant after planting a flag asks a list that is still being built -
+            // which reads as "the keep-alive does not know about this flag" when the truth is
+            // "not yet". The driver asks for the sweep itself now; this waits for that answer.
             var areas = new List<Vector4>();
-            ColonyRegistry.CollectAreas(areas);
+            for (int attempt = 0; attempt < 40 && areas.Count == 0; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                areas.Clear();
+                ColonyRegistry.CollectAreas(areas);
+            }
             bool flagArea = areas.Exists(a =>
                 Utils.DistanceXZ(new Vector3(a.x, 0f, a.z), farOut) < 2f && a.w >= 8f);
             report.Check(flagArea,

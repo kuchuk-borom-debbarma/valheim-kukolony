@@ -175,6 +175,8 @@ namespace Kukolony.Villagers.Navigation
         private Vector3 _legStanding;
         private float _nextComplaint;
 
+        private float _nextWhy;
+
         internal VillagerWalk(MonsterAI ai)
         {
             _ai = ai;
@@ -367,9 +369,28 @@ namespace Kukolony.Villagers.Navigation
                 politeRescuesLeft: _rescues < RescuesBeforeGliding,
                 canStand: canStand,
                 waterAhead: _journey.WaterAhead(_ai.transform.position),
-                nearLand: nearLand);
+                nearLand: nearLand,
+                hasRoute: _journey.HasRoute);
 
-            switch (Locomotor.Decide(facts))
+            Locomotion decided = Locomotor.Decide(facts);
+
+            // Why a villager is being carried, in the words the decision was made in. Every
+            // attempt to reason about this from the outside has been wrong so far - the
+            // measurement said half a journey was carried while every flag read clean - so the
+            // decision says its own reasons. Throttled, and only for the carrying branches.
+            if ((decided == Locomotion.CoverGround || decided == Locomotion.BeginRescue) &&
+                Time.time > _nextWhy)
+            {
+                _nextWhy = Time.time + 3f;
+                Core.Log.Info($"[carry] {decided}: travelling={facts.Travelling} " +
+                              $"hasRoute={facts.HasRoute} stalled={facts.Stalled} " +
+                              $"water={facts.WaterAhead} observed={facts.Observed} " +
+                              $"canStand={facts.CanStand} nearLand={facts.NearLand} " +
+                              $"burstSpent={facts.BurstSpent} rescuing={facts.Rescuing} " +
+                              $"stalledFor={StalledFor:0.#}s");
+            }
+
+            switch (decided)
             {
                 case Locomotion.CoverGround:
                     if (facts.BurstSpent) _reckonUntil = Time.time + Rescue.BurstSeconds(_bursts);

@@ -24,8 +24,9 @@ namespace Kukolony.Villagers.Navigation
     {
         internal TravelFacts(bool rescuing, bool travelling, bool burstSpent, bool observed,
             bool stalled, bool politeRescuesLeft, bool canStand, bool waterAhead = false,
-            bool nearLand = false)
+            bool nearLand = false, bool hasRoute = false)
         {
+            HasRoute = hasRoute;
             Rescuing = rescuing;
             Travelling = travelling;
             BurstSpent = burstSpent;
@@ -57,6 +58,19 @@ namespace Kukolony.Villagers.Navigation
 
         /// <summary>There is somewhere within reach an agent of this kind can stand.</summary>
         internal bool CanStand { get; }
+
+        /// <summary>
+        ///     The pathfinder has given this villager a leg it can actually walk.
+        /// </summary>
+        /// <remarks>
+        ///     The answer to a question the ladder could not previously ask. Every rescue here
+        ///     exists because a villager could not get somewhere on foot, and the evidence for
+        ///     that used to be circumstantial - it has stopped making progress, or a straight
+        ///     line to the next leg crosses water. Now the leg is chosen by asking the navmesh
+        ///     for a full path, so "there is a way and it is this one" is a fact rather than an
+        ///     inference, and a villager holding one has no business being carried.
+        /// </remarks>
+        internal bool HasRoute { get; }
 
         /// <summary>
         ///     There is somewhere to stand within a stride or two - close enough that being
@@ -111,6 +125,14 @@ namespace Kukolony.Villagers.Navigation
         {
             if (facts.Rescuing)
             {
+                // A route has appeared. Put it down and let it walk, whatever else is true -
+                // this is checked before everything below because everything below is a reason
+                // to keep carrying somebody, and none of them outrank being able to walk. It is
+                // also the difference between a rescue and a mode: without it, a villager
+                // carried out of one bad patch stayed carried until its burst ran out, which
+                // measured at half the journey.
+                if (facts.HasRoute && facts.CanStand) return Locomotion.BackOnFoot;
+
                 // The journey is over: stop, whether or not there is anywhere good to stand.
                 // Continuing to cover ground towards somewhere already reached is pointless, and
                 // the villager would arrive sliding - which made the whole thing flaky, because
@@ -144,14 +166,29 @@ namespace Kukolony.Villagers.Navigation
             // straight chord to the waypoint, so a walkable route that merely curves around
             // a bay reads as water. Watched, the villager keeps walking; if the water really
             // does block it, the stall ladder below takes over with its measured politeness.
-            if (facts.Travelling && facts.WaterAhead && !facts.Observed)
+            // ...but only when there is no way round. The probe is a straight chord to the
+            // waypoint, so a route that merely curves around a bay reads as water - which, on a
+            // coastal settlement, is most routes: the travel gate measured a villager gliding
+            // part of a hundred-and-sixty-metre walk over open meadow for exactly this reason.
+            // A villager holding a walkable leg walks it, and the crossing is for water that
+            // genuinely has no way round.
+            if (facts.Travelling && facts.WaterAhead && !facts.Observed && !facts.HasRoute)
                 return Locomotion.BeginRescue;
 
             if (!facts.Travelling || !facts.Stalled) return Locomotion.Walk;
 
-            // Stalled on a journey. The gentlest thing that might help is being put back on the
-            // navmesh, and it is only worth trying where there is somewhere to be put.
-            if (facts.Observed && facts.PoliteRescuesLeft && facts.CanStand)
+            // Stalled while holding a route it can walk. Whatever is wrong, gliding is not the
+            // answer to it: a villager with a full path to a leg forty-five metres ahead is not
+            // a villager that needs carrying, and the stall is more likely the navmesh still
+            // building under it or a doorway somebody else is standing in. It keeps walking.
+            if (facts.HasRoute) return Locomotion.Walk;
+
+            // Stalled with nowhere to walk. The gentlest thing that might help is being put back
+            // on the navmesh, and it is only worth trying where there is somewhere to be put.
+            // A snap is a teleport of a metre or two rather than a body sliding across country,
+            // so it is preferred to covering ground wherever it is available at all - the
+            // politeness counter only decides whether it is done in view.
+            if (facts.CanStand && (facts.PoliteRescuesLeft || !facts.Observed))
             {
                 return Locomotion.PutBackOnNavmesh;
             }

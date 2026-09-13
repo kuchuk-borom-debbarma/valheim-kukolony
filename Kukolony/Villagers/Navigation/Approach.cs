@@ -109,7 +109,10 @@ namespace Kukolony.Villagers.Navigation
 
             if (Pathfinding.instance.HavePath(from, desired, agent)) return desired;
 
-            if (Pathfinding.instance.FindValidPoint(out Vector3 valid, desired, SearchRadius, agent) &&
+            // Fully qualified: this class has its own Standing method, and the two mean quite
+            // different things - one is "where should a villager stand to work on that", the
+            // other is "is there navmesh here at all".
+            if (Navigation.Standing.Near(desired, SearchRadius, agent, out Vector3 valid) &&
                 Pathfinding.instance.HavePath(from, valid, agent))
             {
                 return valid;
