@@ -705,7 +705,8 @@ namespace Kukolony.Villagers
                         Walk = _walk,
                         Animation = _animation,
                         Job = job,
-                        State = state
+                        State = state,
+                        DeltaTime = deltaTime
                     }, out doing);
 
                 case Jobs.JobKind.Chop:

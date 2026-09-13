@@ -57,6 +57,12 @@ namespace Kukolony.Jobs
 
                 string prefab = Utils.GetPrefabName(drop.m_itemData.m_dropPrefab);
                 if (!Wanted(job, prefab)) continue;
+                if (drop.TryGetComponent(out ZNetView dropView) && dropView.IsValid() &&
+                    Unreachable.Refuses(asker.Id, dropView.GetZDO().m_uid))
+                {
+                    // Refused for now: this villager has already failed to walk to it.
+                    continue;
+                }
 
                 ZDOID id = view.GetZDO().m_uid;
                 if (TargetClaims.IsClaimedByOther(id, asker)) continue;
@@ -134,6 +140,11 @@ namespace Kukolony.Jobs
                 // Destinations are deliberately not bounded - see WorkArea.
                 if (!area.Contains(instance.transform.position)) continue;
                 if (TargetClaims.IsClaimedByOther(record.Id, asker)) continue;
+
+                // And not something this villager has just spent two minutes failing to
+                // reach. Giving up unblocks the queue; without this the next choice is the
+                // same unreachable chest and the villager never gets past it.
+                if (Unreachable.Refuses(asker.Id, record.Id)) continue;
 
                 Container container = instance.GetComponentInChildren<Container>(true);
                 Inventory inventory = container != null ? container.GetInventory() : null;

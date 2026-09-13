@@ -255,6 +255,20 @@ namespace Kukolony.Villagers.Navigation
                     if (facts.BurstSpent) _reckonUntil = Time.time + Rescue.BurstSeconds(_bursts);
 
                     VillagerMovement.Stop(_ai);
+
+                    // Covering ground is progress, and the stall clock has to know it.
+                    //
+                    // This branch returns before the walking progress test below, so the clock
+                    // froze for the whole of a glide - while the villager was in fact closing
+                    // on its target the entire time. Anything reading that clock as "getting
+                    // nowhere" is then told a lie about a journey that is working: a water
+                    // crossing covers ground continuously by design and would look stuck for
+                    // every second of it.
+                    //
+                    // The ladders are deliberately not reset here. Gliding is the rescue, and
+                    // a rescue that cleared its own counters could go on rescuing for ever.
+                    NoteProgress(Utils.DistanceXZ(target, _ai.transform.position), climbDown: false);
+
                     return _journey.Advance(_ai.m_character, target,
                         deltaTime > 0f ? deltaTime : Time.deltaTime)
                         ? MoveResult.Arrived
@@ -293,16 +307,7 @@ namespace Kukolony.Villagers.Navigation
                 // own counter, leaving the ladder unable to climb past its second rung.
                 bool measured = _closest < float.MaxValue;
 
-                _closest = distance;
-                _lastProgress = Time.time;
-
-                if (measured)
-                {
-                    // Walking is working again, so the ground it was struggling with is behind
-                    // it. Both ladders start from the bottom next time.
-                    _rescues = 0;
-                    _bursts = 0;
-                }
+                NoteProgress(distance, climbDown: measured);
             }
 
             // Walk towards the next stretch of the route, not the far end of it.
@@ -377,6 +382,29 @@ namespace Kukolony.Villagers.Navigation
                 default:
                     return MoveResult.Moving;
             }
+        }
+
+        /// <summary>
+        ///     Records that the villager got closer, and optionally that walking is working.
+        /// </summary>
+        /// <remarks>
+        ///     <paramref name="climbDown" /> is what puts the rescue ladders back at the
+        ///     bottom, and belongs only to walking: a glide that reset them would be a rescue
+        ///     granting itself another rescue, for ever.
+        /// </remarks>
+        private void NoteProgress(float distance, bool climbDown)
+        {
+            if (distance >= _closest - ProgressStep) return;
+
+            _closest = distance;
+            _lastProgress = Time.time;
+
+            if (!climbDown) return;
+
+            // Walking is working again, so the ground it was struggling with is behind it.
+            // Both ladders start from the bottom next time.
+            _rescues = 0;
+            _bursts = 0;
         }
 
         private void BeginReckoning()

@@ -20,6 +20,18 @@ namespace Kukolony.Jobs.Haul
         internal VillagerAnimation Animation;
         internal JobDefinition Job;
         internal VillagerState State;
+
+        /// <summary>
+        ///     The AI tick's own interval, for anything that moves by rate.
+        /// </summary>
+        /// <remarks>
+        ///     Neither available clock is this interval: the render frame varies and the
+        ///     physics step is two fifths of it. Left to default, a rescued villager covers
+        ///     ground at frame rate rather than the AI rate - which matters more now that a
+        ///     trip is given up on after a number of seconds, because a haul crossing would
+        ///     be abandoned over water a chop crossing gets across.
+        /// </remarks>
+        internal float DeltaTime;
     }
 
     /// <summary>
@@ -239,17 +251,23 @@ namespace Kukolony.Jobs.Haul
             // How close it can actually get depends on what it is walking to: a chest stops
             // the villager a good metre short of its own centre, and demanding the centre is
             // demanding a position inside the chest.
-            switch (context.Walk.MoveTowards(target.transform.position, Approach.DistanceTo(target)))
+            switch (context.Walk.MoveTowards(target.transform.position, Approach.DistanceTo(target),
+                deltaTime: context.DeltaTime))
             {
                 case MoveResult.Moving:
                     // Bounded first. Walking is the one step that can go on reporting progress
                     // for ever, and the queue ignores Running entirely - so a villager that
                     // cannot reach a chest holds its job open and the rest of its queue never
                     // runs.
-                    JobResult? stuck = JobOutcomes.GiveUpIfStuck(context.State,
-                        context.Walk.StalledFor, "that", out string gaveUp);
+                    JobResult? stuck = JobOutcomes.GiveUpIfStuck(context.Villager, context.State,
+                        context.Walk.StalledFor, Describe(context, target), out string gaveUp,
+                        out ZDOID abandoned);
                     if (stuck.HasValue)
                     {
+                        // Refused for a while, or Choose re-derives the same answer from the
+                        // same world on the very next tick and the villager walks the same
+                        // unreachable route for ever, a repetition at a time.
+                        Unreachable.Refuse(context.Villager.Id, abandoned);
                         activity = gaveUp;
                         return stuck.Value;
                     }
@@ -279,6 +297,18 @@ namespace Kukolony.Jobs.Haul
                         $"cannot get there (stopped {gap:0.0}m away, needed {Approach.DistanceTo(target):0.0}m, " +
                         $"{context.Villager.Explain(target.transform.position)})", out activity);
             }
+        }
+
+        /// <summary>What the villager was heading for, for a message a player can act on.</summary>
+        private static string Describe(HaulContext context, GameObject target)
+        {
+            StructureRecord record = SettlementIndex.Find(context.Colony, context.State.Target);
+            if (record != null) return record.Name;
+
+            record = SettlementIndex.Find(context.Colony, context.State.Destination);
+            if (record != null) return record.Name;
+
+            return target != null ? StructureRegistry.DisplayName(target) : "that";
         }
 
         private static JobResult Collect(HaulContext context, GameObject source, out string activity)

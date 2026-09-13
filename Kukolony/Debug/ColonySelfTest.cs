@@ -211,6 +211,13 @@ namespace Kukolony.Debug
 
             // Chopping. The index first, because an empty one makes every check below pass by
             // finding nothing to contradict.
+            // The queue's own rules, before the jobs that depend on them: a job that cannot
+            // end is a queue that cannot advance, and every check after this one assumes it
+            // does. Shared with the focused slice rather than copied - a focused run that
+            // drifted from this one would be worse than no focused run.
+            yield return CheckAStuckTripEndsAndTheQueueMovesOn(report, colony);
+            yield return CheckAPresetKeepsItsOrder(report, colony);
+
             yield return CheckChoppingIndex(report);
             yield return CheckTreesAreKeptLoaded(report);
             yield return CheckTheAxeIsPutAway(report, colony);
@@ -5681,24 +5688,10 @@ namespace Kukolony.Debug
         private static IEnumerator CheckAStuckTripEndsAndTheQueueMovesOn(TestReport report,
             Colony colony)
         {
-            // Asked of the rule rather than by finding a hill: what is under test is that a
-            // trip which has stopped progressing is ended, and that is a decision about a
-            // number. Staging real terrain would measure the pathfinder instead.
-            VillagerState idle = new VillagerState(null);
-
-            report.Check(!JobOutcomes.GiveUpIfStuck(idle, 0f, "a tree", out string _).HasValue,
-                "control: a trip that is making progress is left alone");
-
-            report.Check(!JobOutcomes.GiveUpIfStuck(idle, JobOutcomes.AbandonAfterSeconds - 1f,
-                    "a tree", out string _).HasValue,
-                "control: and is still left alone right up to the limit",
-                $"limit={JobOutcomes.AbandonAfterSeconds:0}s");
-
             report.Check(JobOutcomes.AbandonAfterSeconds > 45f,
                 "control: the limit is past the rescue ladder, so it is not a second rescue",
                 $"limit={JobOutcomes.AbandonAfterSeconds:0}s vs ladder at 45s");
 
-            // The queue is the half that matters. Running leaves it exactly where it was.
             List<JobDefinition> two = new List<JobDefinition>
             {
                 new JobDefinition { Id = "first", Name = "First", Kind = JobKind.Chop, Repeat = 1 },
@@ -5715,6 +5708,34 @@ namespace Kukolony.Debug
 
             ZDOID who = view.GetZDO().m_uid;
             VillagerState state = new VillagerState(view.GetZDO());
+
+            // The case the whole fix exists for, asked of a real villager with a real target -
+            // the negative cases alone would all pass with the bound removed entirely, which
+            // is a check that proves nothing.
+            state.SetTarget(who);
+            JobResult? gaveUp = JobOutcomes.GiveUpIfStuck(villager, state,
+                JobOutcomes.AbandonAfterSeconds + 1f, "that", out string _, out ZDOID abandoned);
+
+            report.Check(gaveUp == JobResult.Failed,
+                "a trip that has stopped making progress is given up on",
+                $"result={gaveUp}");
+
+            report.Check(abandoned == who,
+                "and says what it gave up on, before the ending clears it",
+                $"abandoned={abandoned} target was {who}");
+
+            report.Check(state.Target.IsNone(),
+                "control: the trip really is released, not merely reported");
+
+            report.Check(!JobOutcomes.GiveUpIfStuck(villager, state, 0f, "that",
+                    out string _, out ZDOID _).HasValue,
+                "control: a trip that is making progress is left alone");
+
+            report.Check(!JobOutcomes.GiveUpIfStuck(villager, state,
+                    JobOutcomes.AbandonAfterSeconds - 1f, "that",
+                    out string _, out ZDOID _).HasValue,
+                "control: and is left alone right up to the limit",
+                $"limit={JobOutcomes.AbandonAfterSeconds:0}s");
             state.SetQueue(new List<string> { "first", "second" });
             state.SetQueuePosition(0);
             state.SetQueueAttempt(0);
@@ -5755,10 +5776,18 @@ namespace Kukolony.Debug
             colony.State.SetPresets(presets);
 
             JobPreset stored = colony.State.GetPresets().Find(p => p.Id == "order");
-            report.Check(stored != null && stored.Jobs.Count == 2 &&
-                         stored.Jobs[0] == "chop" && stored.Jobs[1] == "haul",
-                "a preset keeps the order it was given",
+            bool kept = stored != null && stored.Jobs.Count == 2 &&
+                        stored.Jobs[0] == "chop" && stored.Jobs[1] == "haul";
+            report.Check(kept, "a preset keeps the order it was given",
                 stored == null ? "missing" : string.Join(",", stored.Jobs.ToArray()));
+
+            if (!kept)
+            {
+                // Stopped here rather than read on. Everything below dereferences this, and a
+                // coroutine that throws never prints its report nor cleans up after itself.
+                colony.State.SetJobs(new List<JobDefinition>());
+                yield break;
+            }
 
             Villager villager = VillagerLifecycle.Spawn(colony);
             yield return new WaitForSecondsRealtime(.4f);

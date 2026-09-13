@@ -472,13 +472,17 @@ namespace Kukolony.Jobs.Chop
                     // going" for ever, and the queue ignores Running - so a villager that
                     // cannot get up a hillside would hold its job open and the next entry in
                     // its queue would never run.
-                    JobResult? stuck = JobOutcomes.GiveUpIfStuck(context.State,
-                        context.Walk.StalledFor, "that tree", out string gaveUp);
+                    JobResult? stuck = JobOutcomes.GiveUpIfStuck(context.Villager, context.State,
+                        context.Walk.StalledFor, "that tree", out string gaveUp, out ZDOID abandoned);
                     if (stuck.HasValue)
                     {
-                        // Refused for the session as well, or the next choose picks the same
-                        // unreachable tree and the villager spends its day on it.
-                        if (!context.State.Target.IsNone()) Refused(context).Add(context.State.Target);
+                        // Refused for the session, or the next choose picks the same
+                        // unreachable tree and the villager spends its day on it. Taken from
+                        // the ending rather than read back off the trip, which the ending has
+                        // already cleared.
+                        if (!abandoned.IsNone()) Refused(context).Add(abandoned);
+                        Reset(context, ZDOID.None);
+                        Settled.Remove(context.Villager.Id);
                         activity = gaveUp;
                         return stuck.Value;
                     }

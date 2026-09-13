@@ -79,20 +79,29 @@ namespace Kukolony.Jobs
         ///     walks can be asked to reach somewhere it cannot - and the rule this enforces is
         ///     stated on <see cref="Running" />: a wait that cannot make progress is not one.
         /// </remarks>
-        internal static JobResult? GiveUpIfStuck(VillagerState state, float stalledFor,
-            string what, out string activity)
+        internal static JobResult? GiveUpIfStuck(Villager villager, VillagerState state,
+            float stalledFor, string what, out string activity, out ZDOID abandoned)
         {
             activity = null;
+            abandoned = ZDOID.None;
             if (stalledFor < AbandonAfterSeconds) return null;
 
-            // Said out loud. A villager that quietly stops working looks identical to one with
-            // nothing to do, and this is the case a player most needs told about - it usually
-            // means the ground between here and there cannot be walked.
-            Core.Chatter.Say("stuck " + what,
-                $"Somebody cannot reach {what} and has given up on it for now.");
+            // Read before the ending clears it. Failed resets the whole trip, so a caller
+            // asking afterwards which target was abandoned is told "none" - which is how a
+            // refusal list built from it stayed permanently empty and the next choice was
+            // the same unreachable thing.
+            abandoned = state.Target;
 
-            return JobOutcomes.Failed(state,
-                $"cannot reach {what} - gave up after {stalledFor:0}s", out activity);
+            // Said out loud, and keyed per villager. A villager that quietly stops working
+            // looks identical to one with nothing to do, and this is the case a player most
+            // needs told about - it usually means the ground between here and there cannot be
+            // walked. Keyed by the thing alone, two villagers stuck on two different problems
+            // were folded into one tally and the second was never reported at all.
+            string name = villager != null ? villager.State.Name : "Somebody";
+            Core.Chatter.Say($"stuck {(villager == null ? "?" : villager.Id.ToString())}",
+                $"{name} cannot reach {what} and has given up on it for now.");
+
+            return Failed(state, $"cannot reach {what} - gave up after {stalledFor:0}s", out activity);
         }
 
         /// <summary>
