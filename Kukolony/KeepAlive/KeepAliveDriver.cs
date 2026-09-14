@@ -127,6 +127,8 @@ namespace Kukolony.KeepAlive
             Colonies.CraftCatalogue.Clear();
             Resources.Choppable.Clear();
             Resources.ChoppingGround.Clear();
+            Resources.Mineable.Clear();
+            Resources.MiningGround.Clear();
             Jobs.Chop.ChopJob.Clear();
             Jobs.Tend.TendJob.Clear();
             Jobs.Craft.CraftJob.Clear();

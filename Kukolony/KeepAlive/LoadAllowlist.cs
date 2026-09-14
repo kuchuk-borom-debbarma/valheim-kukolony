@@ -112,6 +112,17 @@ namespace Kukolony.KeepAlive
                 return true;
             }
 
+            // And what a pickaxe can break, for the same reason and at a higher price: a
+            // mountain holds far more rock than a forest holds trees, and this admits the loose
+            // Destructible tail as well as the ore, because keep-alive cannot ask which jobs a
+            // colony has - a zone is kept for whatever might want it. The alternative is a mine
+            // outpost that silently does nothing and looks perfect whenever anybody goes to
+            // check, which is the fault this mod guards hardest against.
+            if (Resources.Mineable.Classify(prefab) != Resources.MineKind.None)
+            {
+                return true;
+            }
+
             // And the colony itself.
             // The flag is a Piece already, but name it anyway: a marker that got filtered
             // out of its own kept zone would be an outpost nobody can interact with.
