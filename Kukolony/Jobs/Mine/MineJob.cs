@@ -263,9 +263,15 @@ namespace Kukolony.Jobs.Mine
 
             int tier = pick?.m_shared != null ? pick.m_shared.m_toolTier : 0;
 
+            // Counted while choosing, so "nothing to mine" can say which nothing it means. A
+            // settlement standing in a field of rock being told there is nothing to mine is a
+            // fair question, and the answer - they are loose rock and that is switched off, or
+            // they are outside the Kolony - is one the job already knows and used to throw away.
+            Tally tally = new Tally();
+
             foreach (WorkArea area in areas)
             {
-                ZDOID best = Nearest(context, area, candidates, here, tier);
+                ZDOID best = Nearest(context, area, candidates, here, tier, tally);
                 if (best.IsNone()) continue;
 
                 // A new target is a new walk and a new tolerance. Without the walk being told,
@@ -285,7 +291,49 @@ namespace Kukolony.Jobs.Mine
                 return JobResult.Running;
             }
 
-            return JobOutcomes.Skipped(context.State, "nothing to mine", out activity);
+            return JobOutcomes.Skipped(context.State, tally.Say(candidates.Count), out activity);
+        }
+
+        /// <summary>
+        ///     Why nothing was chosen, counted as the choosing happens.
+        /// </summary>
+        /// <remarks>
+        ///     Every count here is a question a player will ask out loud the first time a
+        ///     villager stands in a quarry saying it has nothing to do. The job knew all of
+        ///     these and said "nothing to mine" to all of them.
+        /// </remarks>
+        private sealed class Tally
+        {
+            internal int Outside;
+            internal int Loose;
+            internal int OtherOre;
+            internal int TooHard;
+            internal int Refused;
+            internal int Taken;
+
+            /// <summary>Which of the two ways a candidate can be the wrong sort of rock.</summary>
+            internal void Count(JobDefinition job, int prefabHash)
+            {
+                if (Mineable.Of(prefabHash) == MineKind.Boulder) Loose++;
+                else OtherOre++;
+            }
+
+            internal string Say(int seen)
+            {
+                if (seen == 0) return "no rock nearby";
+
+                // In the order a player can act on. Loose rock first: it is one switch, and it
+                // is the answer whenever somebody is looking at boulders while being told there
+                // is nothing there.
+                if (Loose > 0) return $"only loose rock here ({Loose}) - switch it on to break it";
+                if (OtherOre > 0) return $"no rock here has the ore asked for ({OtherOre} other)";
+                if (TooHard > 0) return $"the rock here needs a better pickaxe ({TooHard})";
+                if (Outside > 0) return $"the rock is outside where this job works ({Outside})";
+                if (Taken > 0) return "somebody else is working it";
+                if (Refused > 0) return "cannot get to the rock here";
+
+                return "nothing to mine";
+            }
         }
 
         /// <summary>
@@ -301,7 +349,7 @@ namespace Kukolony.Jobs.Mine
         ///     out to be spent.
         /// </remarks>
         private static ZDOID Nearest(MineContext context, WorkArea area, List<ZDOID> candidates,
-            Vector3 here, int tier)
+            Vector3 here, int tier, Tally tally = null)
         {
             HashSet<ZDOID> spent = null;
 
@@ -318,12 +366,35 @@ namespace Kukolony.Jobs.Mine
                     if (zdo == null || !zdo.IsValid()) continue;
 
                     Vector3 at = zdo.GetPosition();
-                    if (!area.Contains(at)) continue;
+                    if (!area.Contains(at))
+                    {
+                        if (tally != null) tally.Outside++;
+                        continue;
+                    }
 
-                    if (!Wanted(context.Job, zdo.GetPrefab())) continue;
-                    if (!Breakable(zdo.GetPrefab(), tier)) continue;
-                    if (Unreachable.Refuses(context.Villager.Id, id)) continue;
-                    if (TargetClaims.IsClaimedByOther(id, context.Villager)) continue;
+                    if (!Wanted(context.Job, zdo.GetPrefab()))
+                    {
+                        if (tally != null) tally.Count(context.Job, zdo.GetPrefab());
+                        continue;
+                    }
+
+                    if (!Breakable(zdo.GetPrefab(), tier))
+                    {
+                        if (tally != null) tally.TooHard++;
+                        continue;
+                    }
+
+                    if (Unreachable.Refuses(context.Villager.Id, id))
+                    {
+                        if (tally != null) tally.Refused++;
+                        continue;
+                    }
+
+                    if (TargetClaims.IsClaimedByOther(id, context.Villager))
+                    {
+                        if (tally != null) tally.Taken++;
+                        continue;
+                    }
 
                     float distance = Utils.DistanceXZ(at, here);
                     if (distance >= closest) continue;
