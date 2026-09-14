@@ -130,7 +130,12 @@ namespace Kukolony.Resources.Mining
         private float Health(int index)
         {
             ZDO zdo = View != null ? View.GetZDO() : null;
-            if (zdo == null || _rock == null) return 0f;
+
+            // Not zero, which reads as "this part is gone" in both of this class's callers.
+            // Unreachable today - Areas and Strike both return before this on a null rock - but
+            // it is the same hazard the untouched default was changed for, and leaving the one
+            // that bites in the sibling file is how it comes back.
+            if (zdo == null || _rock == null) return float.MaxValue;
 
             return zdo.GetFloat(("Health" + index).GetStableHashCode(), float.MaxValue);
         }

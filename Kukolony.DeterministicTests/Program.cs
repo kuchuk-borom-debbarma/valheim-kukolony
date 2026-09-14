@@ -1036,15 +1036,23 @@ static class Program
         Case("and nearest means nearest to where the villager stands",
             MineTargets.Nearest(vein, 12f, 0f, out Spot far) && far.Index == 0);
 
-        Case("distance is measured flat, so a part overhead is still at hand",
-            MineTargets.Nearest(new List<Spot> { new Spot(7, 0.5f, 0.5f) }, 0f, 0f, out Spot above) &&
-            above.Index == 7);
+        // Flat and three-dimensional must disagree here, or this asserts nothing: the part
+        // overhead is nearer in the plane and further in space, so only a flat measure picks it.
+        List<Spot> overhead = new List<Spot> { new Spot(7, 1f, 0f), new Spot(8, 2f, 0f) };
+        Case("distance is measured flat, so a part overhead is the one at hand",
+            MineTargets.Nearest(overhead, 0f, 0f, out Spot above) && above.Index == 7);
 
-        // A part that collapsed is simply not in the list - which is what makes "never
-        // remember an index" enforceable rather than merely advised.
-        List<Spot> collapsed = new List<Spot> { new Spot(2, 5f, 0f) };
-        Case("a part that fell on its own is not chosen again",
-            MineTargets.Nearest(collapsed, 0f, 0f, out Spot left) && left.Index == 2);
+        // The answer must *change* when the near part goes. Asserted as a pair, because the
+        // one-element version of this case was unfalsifiable: MineTargets holds no state, so
+        // there was nothing that could have remembered an index and nothing to catch.
+        List<Spot> before = new List<Spot> { new Spot(1, 2f, 0f), new Spot(2, 5f, 0f) };
+        List<Spot> after = new List<Spot> { new Spot(2, 5f, 0f) };
+
+        Case("the near part is chosen while it stands",
+            MineTargets.Nearest(before, 0f, 0f, out Spot near2) && near2.Index == 1);
+
+        Case("and the next one over is chosen once it falls",
+            MineTargets.Nearest(after, 0f, 0f, out Spot left) && left.Index == 2);
 
         // Stable under a tie, or a villager standing between two rocks shuffles between them.
         List<Spot> tied = new List<Spot> { new Spot(4, 3f, 0f), new Spot(9, -3f, 0f) };
@@ -1107,10 +1115,24 @@ static class Program
         Step("a deposit that was destroyed under it ends the trip",
             MineState.Mining, Mine(hasDeposit: false, atArea: true), MineAction.Complete);
 
+        // Deliberate, and previously unasserted: having enough stops a villager *starting*,
+        // never mid-vein. Abandoning half a deposit would leave the rock broken open and the
+        // ore unmined, and mining is the one job where that cannot be undone.
+        Step("a villager already at a vein finishes it even once the store is full",
+            MineState.Mining, Mine(hasDeposit: true, atArea: true, enough: true), MineAction.Strike);
+
+        Step("and finishes it even once it is tired",
+            MineState.Mining, Mine(hasDeposit: true, atArea: true, tired: true), MineAction.Strike);
+
         Step("an unknown state starts over", (MineState)99, Mine(), MineAction.ChooseWork);
 
-        // Every combination, against the things that must never happen.
-        int struckWithNothing = 0, struckEmpty = 0, struckFromAfar = 0, struckWithoutTool = 0, idle = 0;
+        // Every combination. The four "never" properties below are all counted inside
+        // `action == Strike`, so a table that never struck at all would satisfy every one of
+        // them - which is why the liveness counter and the two-way check beside them are not
+        // decoration. A suite that cannot tell a correct table from a dead one is not a suite.
+        int struckWithNothing = 0, struckEmpty = 0, struckFromAfar = 0, struckWithoutTool = 0;
+        int swung = 0, disagreed = 0, yieldedWithoutReason = 0;
+        bool[] reached = new bool[5];
         MineState[] states = { MineState.Choosing, MineState.Approaching, MineState.Mining };
 
         for (int bits = 0; bits < 64; bits++)
@@ -1127,15 +1149,37 @@ static class Program
             {
                 MineAction action = MineTransitions.Next(from, facts).Action;
 
+                reached[(int)action] = true;
+
                 if (action == MineAction.Strike)
                 {
+                    swung++;
                     if (!facts.HasDeposit) struckWithNothing++;
                     if (!facts.HasArea) struckEmpty++;
                     if (!facts.AtArea) struckFromAfar++;
                     if (!facts.HasTool) struckWithoutTool++;
                 }
 
-                if (!Enum.IsDefined(typeof(MineAction), action)) idle++;
+                // The same rule stated as an if-and-only-if, so it fails for a table that
+                // swings when it should not *and* for one that never swings. Written out here
+                // rather than derived from the table, which would only prove the table agrees
+                // with itself.
+                bool should = facts.HasTool && facts.HasDeposit && facts.HasArea && facts.AtArea &&
+                              (from != MineState.Choosing || (!facts.Enough && !facts.Tired));
+
+                if (should != (action == MineAction.Strike)) disagreed++;
+
+                // Yielding is for the three ordinary reasons and nothing else. Without this the
+                // stock rule could be ignored entirely and every other case would still pass.
+                //
+                // Not conditioned on the state it started in: losing the pickaxe mid-swing sends
+                // the villager back through the choosing arm and out again as a yield, which is
+                // the table working. Requiring it to have *started* in Choosing failed forty
+                // combinations that were all correct - the assertion was wrong, not the table.
+                if (action == MineAction.Yield && !facts.Tired && !facts.Enough && facts.HasTool)
+                {
+                    yieldedWithoutReason++;
+                }
             }
         }
 
@@ -1147,7 +1191,23 @@ static class Program
             struckFromAfar == 0);
         Case($"no combination ever swings without a pickaxe (did {struckWithoutTool})",
             struckWithoutTool == 0);
-        Case($"every combination produces an action (undefined in {idle})", idle == 0);
+
+        // The control the four above need. Every one of them is satisfied by a table that does
+        // nothing at all, which is a suite that cannot fail.
+        Case($"control: something does swing when everything is right (swung {swung} times)",
+            swung > 0);
+
+        Case($"swinging happens exactly when it should, and never otherwise ({disagreed} disagreed)",
+            disagreed == 0);
+
+        Case($"yielding is always for a reason ({yieldedWithoutReason} were not)",
+            yieldedWithoutReason == 0);
+
+        // Every arm is reachable. A reordered condition that made one dead - Complete, say -
+        // would leave a villager unable to finish and no other case would notice.
+        bool every = true;
+        foreach (MineAction action in Enum.GetValues(typeof(MineAction))) every &= reached[(int)action];
+        Case("every action the table can name is reached by some combination", every);
     }
 
     static void Appetite()

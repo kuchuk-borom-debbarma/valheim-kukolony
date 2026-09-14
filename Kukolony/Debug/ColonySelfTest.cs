@@ -1454,12 +1454,18 @@ namespace Kukolony.Debug
                 LeaveStanding = 6, StockItem = "Wood", StockTarget = 80
             };
 
-            // A version-5 record is today's record plus the four retired fields, which is what
-            // makes this constructible at all: they were appended last, and nothing an older
-            // reader knows how to find has moved since.
-            first.Write(stream);
+            // A version-5 record is version *six's* layout plus the four retired fields.
+            //
+            // It used to be built from today's writer plus that tail, which was true exactly
+            // until the writer gained a tail of its own: mining's two fields then landed
+            // between the two halves, the retired ints were read off a stream five bytes out,
+            // and the station count came back as 512 - over the limit, so Read threw. Nothing
+            // catches that, so it took the whole run with it, and every check after this one
+            // silently never ran. A fixture built from the live writer is a fixture that
+            // changes when the writer does.
+            WriteSix(stream, first.Id, first.Name, first.Kind, first.Repeat);
             WriteRetired(stream);
-            second.Write(stream);
+            WriteSix(stream, second.Id, second.Name, second.Kind, second.Repeat);
             WriteRetired(stream);
 
             ZPackage reading = new ZPackage(stream.GetArray());
@@ -1467,13 +1473,13 @@ namespace Kukolony.Debug
             JobDefinition readSecond = JobDefinition.Read(reading, 5);
 
             report.Check(readFirst.Id == "older" && readFirst.Repeat == 4 &&
-                         readFirst.Kind == JobKind.Tend,
+                         readFirst.Kind == JobKind.Tend && readFirst.Ores.Count == 0,
                 "a job written before tending moved onto the stations still decodes",
                 $"id='{readFirst.Id}' repeat={readFirst.Repeat} kind={readFirst.Kind}");
 
             report.Check(readSecond.Id == "after" && readSecond.Repeat == 9 &&
-                         readSecond.Kind == JobKind.Chop && readSecond.LeaveStanding == 6 &&
-                         readSecond.StockItem == "Wood" && readSecond.StockTarget == 80,
+                         readSecond.Kind == JobKind.Chop && readSecond.LeaveStanding == 4 &&
+                         readSecond.StockItem == "Wood" && readSecond.StockTarget == 60,
                 "and so does the job written after it, which is where a lost byte would show",
                 $"id='{readSecond.Id}' repeat={readSecond.Repeat} leave={readSecond.LeaveStanding} " +
                 $"stock='{readSecond.StockItem}'x{readSecond.StockTarget}");
@@ -1500,6 +1506,33 @@ namespace Kukolony.Debug
                          afterIt.Kind == JobKind.Haul,
                 "and so does the one after it",
                 $"id='{afterIt.Id}' repeat={afterIt.Repeat} kind={afterIt.Kind}");
+
+            // Today's layout, written and read back with the mining fields actually set. The
+            // version checks above all decode blobs this build cannot write, so a Read that
+            // consumed the mining tail in the wrong order would have passed every one of them.
+            ZPackage now = new ZPackage();
+            JobDefinition mining = new JobDefinition
+            {
+                Id = "pit", Name = "Mine", Kind = JobKind.Mine, Repeat = 3,
+                MineBoulders = true, Ores = new List<string> { "TinOre", "CopperOre" }
+            };
+            mining.Write(now);
+
+            JobDefinition alongside = new JobDefinition
+                { Id = "beside", Name = "Haul", Kind = JobKind.Haul, Repeat = 2 };
+            alongside.Write(now);
+
+            ZPackage today = new ZPackage(now.GetArray());
+            JobDefinition readMine = JobDefinition.Read(today, ColonyState.JobFormat);
+            JobDefinition readBeside = JobDefinition.Read(today, ColonyState.JobFormat);
+
+            report.Check(readMine.Kind == JobKind.Mine && readMine.MineBoulders &&
+                         readMine.Ores.Count == 2 && readMine.Ores[0] == "TinOre" &&
+                         readMine.Ores[1] == "CopperOre" && readBeside.Id == "beside" &&
+                         readBeside.Repeat == 2,
+                "a mining job written today reads back with its ores, and so does the job after it",
+                $"boulders={readMine.MineBoulders} ores={readMine.Ores.Count} " +
+                $"next='{readBeside.Id}'x{readBeside.Repeat}");
         }
 
         /// <summary>One job in the layout version 6 wrote - today's, without the mining tail.</summary>
@@ -5476,24 +5509,6 @@ namespace Kukolony.Debug
         }
 
         /// <summary>
-        ///     What the classifier knows, before anything is asked to act on it.
-        /// </summary>
-        /// <remarks>
-        ///     Cheap, and it fails first when it fails: every chopping check below is
-        ///     meaningless if the index is empty, and an empty index makes them all pass by
-        ///     finding nothing to contradict.
-        /// </remarks>
-        /// <summary>
-        ///     The mining classifier knows what this world holds, and can name it.
-        /// </summary>
-        /// <remarks>
-        ///     Asked of the index rather than written down, for the reason every list here is:
-        ///     the mod does not ship the assets and has been wrong about a prefab name before.
-        ///     The ore list is the interesting half - it is read from drop tables, so a world
-        ///     where it came back empty would mean the job's picker offers nothing and the
-        ///     failure would show up as "nothing to mine" with no explanation.
-        /// </remarks>
-        /// <summary>
         ///     Deposits survive in a zone kept open for a villager, so mining works off-screen.
         /// </summary>
         /// <remarks>
@@ -5571,7 +5586,25 @@ namespace Kukolony.Debug
             yield return null;
         }
 
-        /// <summary>Any pickaxe the game has, so this check need not name one.</summary>
+        /// <summary>
+        ///     A real pickaxe, ready to be worn.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Cloned with its prefab attached. Item data taken straight off a prefab has no
+        ///         <c>m_dropPrefab</c> - the field is filled in when an item passes through an
+        ///         inventory - and the wardrobe hashes exactly that, so handing it the bare
+        ///         prefab data writes hash zero, the hand stays empty, and the check that
+        ///         follows passes because nothing was ever there. This suite has recorded that
+        ///         trap once already, a few hundred lines down.
+        ///     </para>
+        ///     <para>
+        ///         And filtered by skill, not by damage. Pickaxe damage alone is not a pickaxe -
+        ///         the lesson <see cref="FindAxe" /> carries, where the first chop-damaging item
+        ///         in the database turned out to be a creature's attack and every villager the
+        ///         suite armed was carrying one.
+        ///     </para>
+        /// </remarks>
         private static ItemDrop.ItemData AnyPickaxe()
         {
             if (ObjectDB.instance?.m_items == null) return null;
@@ -5582,13 +5615,26 @@ namespace Kukolony.Debug
 
                 ItemDrop.ItemData.SharedData shared = drop.m_itemData?.m_shared;
                 if (shared == null || shared.m_damages.m_pickaxe <= 0f) continue;
+                if (shared.m_skillType != Skills.SkillType.Pickaxes) continue;
 
-                return drop.m_itemData;
+                ItemDrop.ItemData worn = drop.m_itemData.Clone();
+                worn.m_dropPrefab = prefab;
+                return worn;
             }
 
             return null;
         }
 
+        /// <summary>
+        ///     The mining classifier knows what this world holds, and can name it.
+        /// </summary>
+        /// <remarks>
+        ///     Asked of the index rather than written down, for the reason every list here is:
+        ///     the mod does not ship the assets and has been wrong about a prefab name before.
+        ///     The ore list is the interesting half - it is read from drop tables, so a world
+        ///     where it came back empty would mean the job's picker offers nothing and the
+        ///     failure would show up as "nothing to mine" with no explanation.
+        /// </remarks>
         private static IEnumerator CheckMiningIndex(TestReport report)
         {
             if (!Mineable.IsReady) Mineable.Rebuild();
@@ -5672,17 +5718,43 @@ namespace Kukolony.Debug
             ZNetView view = deposit.GetComponent<ZNetView>();
             if (view != null) view.ClaimOwnership();
 
-            int struck = 0;
-            for (int blow = 0; blow < 40 && !rock.Spent(); blow++)
+            // One blow, and then the count. "Takes parts off one at a time" was asserted as
+            // `left < whole`, which passes just as well for a protocol that removes every part
+            // at once - and that is the failure worth catching, because it is what aiming at
+            // the wrong thing looks like.
+            HitData single = new HitData { m_toolTier = 100, m_point = parts[0].At };
+            single.m_damage.m_pickaxe = 5000f;
+
+            BlowResult first = rock.Strike(parts[0], single, out string said);
+            yield return null;
+
+            parts.Clear();
+            rock.Areas(parts);
+            int afterOne = parts.Count;
+
+            report.Check(first == BlowResult.Struck || first == BlowResult.Felled,
+                "control: a blow with an overwhelming pickaxe lands",
+                $"blow={first} said='{said}'");
+
+            report.Check(afterOne == whole - 1,
+                "and it takes exactly one part off, not the whole deposit",
+                $"parts {whole} -> {afterOne}");
+
+            // Deliberately short of finishing it. The persistence assertions below used to sit
+            // behind `if (left > 0)` while the loop above mined the rock to nothing, so on any
+            // deposit small enough to exhaust they were skipped in silence and the run still
+            // said PASS - the headline claim of this check, never once asserted.
+            int blows = Mathf.Min(3, Mathf.Max(0, afterOne - 1));
+            for (int blow = 0; blow < blows; blow++)
             {
                 parts.Clear();
                 rock.Areas(parts);
-                if (parts.Count == 0) break;
+                if (parts.Count <= 1) break;
 
                 HitData hit = new HitData { m_toolTier = 100, m_point = parts[0].At };
-                hit.m_damage.m_pickaxe = 500f;
+                hit.m_damage.m_pickaxe = 5000f;
 
-                if (rock.Strike(parts[0], hit, out string _) == BlowResult.Struck) struck++;
+                rock.Strike(parts[0], hit, out string _);
                 yield return null;
             }
 
@@ -5690,31 +5762,43 @@ namespace Kukolony.Debug
             rock.Areas(parts);
             int left = parts.Count;
 
-            report.Check(left < whole,
-                "and mining it takes parts off one at a time",
-                $"parts {whole} -> {left} after {struck} blow(s)");
+            report.Check(left > 0 && left < whole,
+                "control: the deposit is left part-mined, which is what the next claim is about",
+                $"parts {whole} -> {left}");
 
-            // The half that only matters for mining: health is per part and lives on the ZDO,
-            // so a deposit half-mined must still be half-mined after it has been out of memory.
-            // Asserted by re-reading the record rather than the instance.
-            if (left > 0 && view != null && view.IsValid())
-            {
-                ZDOID id = view.GetZDO().m_uid;
-                string saved = view.GetZDO().GetString(ZDOVars.s_health, string.Empty);
+            // The half that only matters for mining: health is per part and lives on the record,
+            // so what is left of a deposit is not held in memory. Asserted unconditionally now.
+            ZDOID id = view.GetZDO().m_uid;
 
-                report.Check(!string.IsNullOrEmpty(saved),
-                    "a partly-mined deposit records what is left on its own record",
-                    $"saved={(string.IsNullOrEmpty(saved) ? "nothing" : saved.Length + " bytes")}");
+            report.Check(!id.IsNone() && ZDOMan.instance.GetZDO(id) != null,
+                "a part-mined deposit's record is there to be read");
 
-                report.Check(!id.IsNone() && ZDOMan.instance.GetZDO(id) != null,
-                    "control: and the record is still there to be read");
-            }
+            // Asked through the protocol rather than through one component's storage shape.
+            // Reading ZDOVars.s_health directly only works for a MineRock5 - the older deposit
+            // writes a float per part under its own key and loose rock writes a single float -
+            // so which shape this fixture happened to be decided whether the check meant
+            // anything, and nothing controlled that.
+            MineProbe.TryFind(deposit, out MineProtocol reread);
+            List<MineArea> again = new List<MineArea>();
+            reread?.Areas(again);
+
+            report.Check(reread != null && !reread.Spent() && again.Count == left,
+                "and reading it back says exactly what is still standing",
+                $"reread={again.Count} expected={left}");
 
             Release(deposit);
             SweepLooseItems(colony);
             yield return new WaitForSecondsRealtime(.2f);
         }
 
+        /// <summary>
+        ///     What the classifier knows, before anything is asked to act on it.
+        /// </summary>
+        /// <remarks>
+        ///     Cheap, and it fails first when it fails: every chopping check below is
+        ///     meaningless if the index is empty, and an empty index makes them all pass by
+        ///     finding nothing to contradict.
+        /// </remarks>
         private static IEnumerator CheckChoppingIndex(TestReport report)
         {
             if (!Choppable.IsReady) Choppable.Rebuild();
@@ -6796,7 +6880,10 @@ namespace Kukolony.Debug
             // above cannot distinguish: a hash that resolves to nothing must be left alone
             // *and* said out loud. Without this an Identify that had regressed to calling
             // everything unknown would still pass both checks above.
-            const string unknownKey = "[chop] unknown held item";
+            // The key the warning is actually said under. It moved to VillagerTool when the
+            // hand did, and renamed with it - a check watching the old key answers false for
+            // ever, which is indistinguishable from the branch being silent.
+            const string unknownKey = "[villager] unknown held item";
             Core.Chatter.Forget(unknownKey);
             vis.SetRightItem(0, 1);
             zdo.Set(ZDOVars.s_rightItem, "kukolony_not_a_real_item".GetStableHashCode());
@@ -6828,7 +6915,13 @@ namespace Kukolony.Debug
                 if (candidate == null || !candidate.TryGetComponent(out ItemDrop drop)) continue;
 
                 ItemDrop.ItemData.SharedData shared = drop.m_itemData?.m_shared;
-                if (shared == null || shared.m_damages.m_chop > 0f) continue;
+                if (shared == null) continue;
+
+                // Neither kind of tool. The hand now recognises pickaxes as well as axes, and
+                // Valheim's pickaxes are one-handed weapons - which fit this slot - so a helper
+                // that only rejected chop damage could hand the control a pickaxe and watch it
+                // be stripped, correctly, while the check called it a failure.
+                if (shared.m_damages.m_chop > 0f || shared.m_damages.m_pickaxe > 0f) continue;
                 if (!VillagerWardrobe.Fits(drop.m_itemData, WearSlot.RightHand)) continue;
 
                 return candidate;

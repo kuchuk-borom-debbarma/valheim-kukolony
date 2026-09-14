@@ -84,8 +84,18 @@ namespace Kukolony.Jobs.Mine
         /// </remarks>
         private static readonly Dictionary<ZDOID, ZDOID> Settled = new Dictionary<ZDOID, ZDOID>();
 
-        /// <summary>Fruitless blows landed on the deposit each villager is working.</summary>
-        private static readonly Dictionary<ZDOID, int> Fruitless = new Dictionary<ZDOID, int>();
+        /// <summary>
+        ///     Fruitless blows, and the deposit they were spent on.
+        /// </summary>
+        /// <remarks>
+        ///     The deposit is half the key, and has to be. Counting per villager alone means a
+        ///     run of blows started on rock that cannot be broken is spent against whatever the
+        ///     villager picks up next: three refusals on an obsidian vein, a trip that ends for
+        ///     an unrelated reason, and then one benign fruitless blow on a good copper vein
+        ///     writes it off for five minutes. Chopping keys its own count this way for exactly
+        ///     that reason.
+        /// </remarks>
+        private static readonly Dictionary<ZDOID, Blows> Fruitless = new Dictionary<ZDOID, Blows>();
 
         /// <summary>
         ///     The protocol for the deposit each villager holds, built once per deposit.
@@ -103,6 +113,13 @@ namespace Kukolony.Jobs.Mine
         private static readonly List<MineArea> Parts = new List<MineArea>();
 
         private static readonly List<Spot> Spots = new List<Spot>();
+
+        /// <summary>How many wasted blows a villager has landed, and on what.</summary>
+        private struct Blows
+        {
+            internal ZDOID On;
+            internal int Count;
+        }
 
         /// <summary>Dropped when a world unloads; none of these identities survive one.</summary>
         internal static void Clear()
@@ -236,13 +253,67 @@ namespace Kukolony.Jobs.Mine
             List<ZDOID> candidates = MiningGround.Near(context.Colony);
             Vector3 here = context.Villager.transform.position;
 
+            // What this villager could actually break, asked before it walks anywhere. Both
+            // numbers are asset data, so this costs a dictionary lookup and saves the whole
+            // round trip - and the alternative is a villager that walks to an obsidian vein
+            // with a bronze pickaxe, lands four refused blows, gives up, and comes back when
+            // the refusal lapses.
+            ItemDrop.ItemData pick = VillagerTool.Best(
+                context.Bag != null ? context.Bag.GetInventory() : null, ToolKind.Pickaxe);
+
+            int tier = pick?.m_shared != null ? pick.m_shared.m_toolTier : 0;
+
             foreach (WorkArea area in areas)
+            {
+                ZDOID best = Nearest(context, area, candidates, here, tier);
+                if (best.IsNone()) continue;
+
+                // A new target is a new walk and a new tolerance. Without the walk being told,
+                // its stall clock still holds the last target's timings and judges the first
+                // step of this one as already stuck.
+                context.Walk.Forget();
+                context.Walk.NewLeg();
+
+                // The latch belongs to the deposit that was walked to, so a new one starts
+                // un-arrived. Without this a villager re-choosing a deposit it had reached
+                // earlier is granted the wider working reach from the first tick and mines it
+                // from ten metres away, never walking in.
+                Settled.Remove(context.Villager.Id);
+                context.State.SetTarget(best);
+
+                activity = "off to mine";
+                return JobResult.Running;
+            }
+
+            return JobOutcomes.Skipped(context.State, "nothing to mine", out activity);
+        }
+
+        /// <summary>
+        ///     The nearest deposit in an area that is worth walking to.
+        /// </summary>
+        /// <remarks>
+        ///     <b>Emptiness is asked of the winner, not of every candidate.</b> Answering it
+        ///     means building a protocol, which walks a deposit's whole collider hierarchy - so
+        ///     asking it inside the distance loop put that cost on every rock in range, on every
+        ///     tick an idle miner spends choosing, which is the shape of cost the caching two
+        ///     files away was written to remove. The loop below asks the cheap questions of
+        ///     everything and the expensive one of one thing, retrying only when that one turns
+        ///     out to be spent.
+        /// </remarks>
+        private static ZDOID Nearest(MineContext context, WorkArea area, List<ZDOID> candidates,
+            Vector3 here, int tier)
+        {
+            HashSet<ZDOID> spent = null;
+
+            for (int attempt = 0; attempt < 4; attempt++)
             {
                 ZDOID best = ZDOID.None;
                 float closest = float.MaxValue;
 
                 foreach (ZDOID id in candidates)
                 {
+                    if (spent != null && spent.Contains(id)) continue;
+
                     ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(id) : null;
                     if (zdo == null || !zdo.IsValid()) continue;
 
@@ -250,9 +321,9 @@ namespace Kukolony.Jobs.Mine
                     if (!area.Contains(at)) continue;
 
                     if (!Wanted(context.Job, zdo.GetPrefab())) continue;
+                    if (!Breakable(zdo.GetPrefab(), tier)) continue;
                     if (Unreachable.Refuses(context.Villager.Id, id)) continue;
                     if (TargetClaims.IsClaimedByOther(id, context.Villager)) continue;
-                    if (!Worth(id)) continue;
 
                     float distance = Utils.DistanceXZ(at, here);
                     if (distance >= closest) continue;
@@ -261,20 +332,17 @@ namespace Kukolony.Jobs.Mine
                     best = id;
                 }
 
-                if (best.IsNone()) continue;
+                if (best.IsNone()) return ZDOID.None;
+                if (Worth(best)) return best;
 
-                // A new target is a new walk and a new tolerance. Without the walk being told,
-                // its stall clock still holds the last target's timings and judges the first
-                // step of this one as already stuck.
-                context.Walk.Forget();
-                context.Walk.NewLeg();
-                context.State.SetTarget(best);
-
-                activity = "off to mine";
-                return JobResult.Running;
+                // Hollowed out but still standing. Set aside and ask the next one - bounded,
+                // because a field of spent rock should cost a few checks rather than a full
+                // second pass per tick.
+                spent = spent ?? new HashSet<ZDOID>();
+                spent.Add(best);
             }
 
-            return JobOutcomes.Skipped(context.State, "nothing to mine", out activity);
+            return ZDOID.None;
         }
 
         /// <summary>
@@ -301,6 +369,21 @@ namespace Kukolony.Jobs.Mine
                 default:
                     return false;
             }
+        }
+
+        /// <summary>Whether a pickaxe of this tier can break this prefab at all.</summary>
+        /// <remarks>
+        ///     Read from the prefab rather than the instance, so it answers for a deposit before
+        ///     anybody has walked to it - which is the only point at which the answer is worth
+        ///     anything.
+        /// </remarks>
+        private static bool Breakable(int prefabHash, int tier)
+        {
+            GameObject prefab = ZNetScene.instance != null
+                ? ZNetScene.instance.GetPrefab(prefabHash)
+                : null;
+
+            return prefab == null || Mineable.TierOf(prefab) <= tier;
         }
 
         private static JobResult Strike(MineContext context, MineProtocol rock, MineArea part,
@@ -378,11 +461,16 @@ namespace Kukolony.Jobs.Mine
         ///         immediately is how a perfectly good deposit gets written off.
         ///     </para>
         ///     <para>
-        ///         <b>And when it is a verdict, it is a lasting one.</b> "This pickaxe cannot
-        ///         break this rock" stays true until the pickaxe changes, so the refusal is the
-        ///         long one rather than the twenty seconds meant for somebody standing in a
-        ///         doorway - otherwise the villager walks back every twenty seconds to be
-        ///         refused again.
+        ///         <b>And when it is a verdict, it lasts.</b> The long refusal rather than the
+        ///         twenty seconds meant for somebody standing in a doorway - otherwise the
+        ///         villager walks back every twenty seconds to be refused again. Long rather
+        ///         than permanent, and deliberately: a better pickaxe can arrive, and a
+        ///         settlement should notice that without being reloaded.
+        ///     </para>
+        ///     <para>
+        ///         Tier is checked before the walk now, so what reaches here is the rest: damage
+        ///         modifiers that reduce a blow to nothing on their own, which no number on the
+        ///         prefab announces in advance.
         ///     </para>
         ///     <para>
         ///         <b>Skipped, not completed.</b> Releasing the target sends the table to its
@@ -394,9 +482,14 @@ namespace Kukolony.Jobs.Mine
         private static JobResult Blunt(MineContext context, ZDOID miner, string what,
             out string activity)
         {
-            Fruitless.TryGetValue(miner, out int blows);
-            blows++;
-            Fruitless[miner] = blows;
+            if (miner.IsNone()) return JobOutcomes.Running(what, out activity);
+
+            ZDOID on = context.State.Target;
+            Fruitless.TryGetValue(miner, out Blows spent);
+
+            // A count against a different deposit says nothing about this one.
+            int blows = spent.On == on ? spent.Count + 1 : 1;
+            Fruitless[miner] = new Blows { On = on, Count = blows };
 
             if (blows < FruitlessBlowsAllowed) return JobOutcomes.Running(what, out activity);
 

@@ -151,8 +151,9 @@ namespace Kukolony.Resources
             IReadOnlyList<Vector4> flags = KolonyReach.FlagAreas(colony);
             for (int i = 0; i < flags.Count; i++)
             {
-                // Copied out immediately, and by index: that list is a shared scratch buffer
-                // rebuilt on the next ask by anyone.
+                // Copied out immediately, and by index: the list belongs to the colony and is
+                // rebuilt on its own schedule, so holding a reference across the loop below
+                // would be reading something that can change underneath it.
                 Vector4 flag = flags[i];
                 Anchors.Add(new Vector4(flag.x, flag.y, flag.z, bound));
             }
