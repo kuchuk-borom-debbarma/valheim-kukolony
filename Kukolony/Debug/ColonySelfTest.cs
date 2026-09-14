@@ -6,11 +6,13 @@ using System.Reflection;
 using Kukolony.Colonies;
 using Kukolony.Jobs;
 using Kukolony.Jobs.Chop;
+using Kukolony.Jobs.Farm;
 using Kukolony.Jobs.Forage;
 using Kukolony.Jobs.Mine;
 using Kukolony.Gui;
 using Kukolony.KeepAlive;
 using Kukolony.Resources;
+using Kukolony.Resources.Farming;
 using Kukolony.Resources.Foraging;
 using Kukolony.Resources.Mining;
 using Kukolony.Villagers;
@@ -235,6 +237,7 @@ namespace Kukolony.Debug
             yield return CheckChoppingFellsATree(report, colony, origin);
             yield return Mining(report, colony, origin);
             yield return Foraging(report, colony, origin);
+            yield return Farming(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
@@ -334,6 +337,11 @@ namespace Kukolony.Debug
                     yield return Foraging(report, colony, origin);
                     break;
 
+                case "farm":
+                    CheckStructureRecordsSurviveAVersion(report);
+                    yield return Farming(report, colony, origin);
+                    break;
+
                 case "queue":
                     yield return CheckAStuckTripEndsAndTheQueueMovesOn(report, colony);
                     yield return CheckAPresetKeepsItsOrder(report, colony);
@@ -349,7 +357,7 @@ namespace Kukolony.Debug
                     // Named but unknown. Failing beats running everything under a name that
                     // says otherwise, or running nothing and reporting a pass.
                     report.Check(false, $"'{wanted}' is not a slice this run knows",
-                        "known: chop, travel, queue, tend, craft, mine, forage, swing");
+                        "known: chop, travel, queue, tend, craft, mine, forage, farm, swing");
                     break;
             }
 
@@ -1426,6 +1434,85 @@ namespace Kukolony.Debug
                 "control: today's settings write and read back unchanged, orders and all",
                 $"inService={back.InService} repairs={back.Repairs} work={back.Work} " +
                 $"carries={back.Carries} orders={back.Orders.Count}");
+
+            // Version 4, which the field settings appended to. Built from the live writer's own
+            // version-4 half rather than by hand, because what has to be proven is that a record
+            // which stops after the orders decodes - and the bytes before the orders are the part
+            // this build still writes identically.
+            ZPackage four = new ZPackage();
+            WriteFour(four, "Barley", inService: false);
+            WriteFour(four, "Flax", inService: true);
+
+            ZPackage fours = new ZPackage(four.GetArray());
+            StructureSettings beforeFields = StructureSettings.Read(fours, 4);
+            StructureSettings afterIt = StructureSettings.Read(fours, 4);
+
+            report.Check(!beforeFields.InService && beforeFields.Orders.Count == 1 &&
+                         !beforeFields.MayCultivate && beforeFields.Sowing.Count == 0,
+                "a structure registered before fields existed decodes, with the field settings at their defaults",
+                $"inService={beforeFields.InService} orders={beforeFields.Orders.Count} " +
+                $"cultivate={beforeFields.MayCultivate} sowing={beforeFields.Sowing.Count}");
+
+            report.Check(afterIt.InService && afterIt.Orders.Count == 1 &&
+                         afterIt.Orders[0].Item == "Flax",
+                "and so does the record after it, which is where a lost byte would show",
+                $"inService={afterIt.InService} orders={afterIt.Orders.Count}");
+
+            // And today's, with a field actually configured. Every version check above decodes a
+            // blob this build cannot write, so a Read that consumed the field tail in the wrong
+            // order would have passed all of them.
+            StructureSettings sown = new StructureSettings { MayCultivate = true };
+            sown.Sowing.Add(new FieldOrder { Plant = "sapling_carrot", Mode = SowMode.Keep, Count = 20 });
+            sown.Sowing.Add(new FieldOrder { Plant = "Birch_Sapling", Mode = SowMode.Once, Count = 4, Sown = 3 });
+
+            ZPackage field = new ZPackage();
+            sown.Write(field);
+            StructureSettings beside = new StructureSettings { MayCultivate = false };
+            beside.Write(field);
+
+            ZPackage today = new ZPackage(field.GetArray());
+            StructureSettings readField = StructureSettings.Read(today, ColonyState.StructureFormat);
+            StructureSettings readBeside = StructureSettings.Read(today, ColonyState.StructureFormat);
+
+            report.Check(readField.MayCultivate && readField.Sowing.Count == 2 &&
+                         readField.Sowing[0].Plant == "sapling_carrot" &&
+                         readField.Sowing[0].Mode == SowMode.Keep && readField.Sowing[0].Count == 20 &&
+                         readField.Sowing[1].Mode == SowMode.Once && readField.Sowing[1].Sown == 3 &&
+                         !readBeside.MayCultivate && readBeside.Sowing.Count == 0,
+                "a field written today reads back with its crops, and so does the record after it",
+                $"cultivate={readField.MayCultivate} crops={readField.Sowing.Count} " +
+                $"next={readBeside.Sowing.Count}");
+        }
+
+        /// <summary>One structure in the layout version 4 wrote - today's, without the field tail.</summary>
+        /// <remarks>
+        ///     Built by hand for the reason every fixture here is: the writer only writes today's
+        ///     layout, and this is the branch that fails silently - a reader that ran past the end
+        ///     of a version-4 record would decode the next one from inside this and produce
+        ///     plausible nonsense rather than an error.
+        /// </remarks>
+        private static void WriteFour(ZPackage package, string item, bool inService)
+        {
+            package.Write(0);          // accepts
+            package.Write(true);       // may take from
+            package.Write(false);      // take unclaimed
+            package.Write(0);          // caps
+            package.Write(0);          // fuel
+            package.Write(0);          // input
+            package.Write(.5f);        // keep full
+            package.Write(ZDOID.None); // sleeper
+            package.Write(string.Empty);
+
+            package.Write(inService);
+            package.Write(false);      // repairs
+            package.Write(0);          // work
+            package.Write(0);          // carries
+
+            package.Write(1);          // orders
+            package.Write(item);
+            package.Write(10);
+            package.Write(0);
+            package.Write(false);
         }
 
         /// <summary>
@@ -5797,6 +5884,660 @@ namespace Kukolony.Debug
         ///         so a rock would only add a way for this to fail for an unrelated reason.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     Everything farming, in the order a failure is most useful in.
+        /// </summary>
+        /// <remarks>
+        ///     Shared by the slice and by the acceptance run rather than listed in both, as the
+        ///     mining and foraging blocks are. Index first, because every check below it is
+        ///     meaningless if the classifier is empty - and an empty classifier makes them all
+        ///     pass by finding nothing to contradict.
+        /// </remarks>
+        private static IEnumerator Farming(TestReport report, Colony colony, Vector3 origin)
+        {
+            yield return CheckPlantingIndex(report);
+            yield return CheckSaplingsAreKeptLoaded(report);
+            yield return CheckSowingRefusesBadGround(report, colony, origin);
+            yield return CheckTheWrongLandIsSaidNotWalked(report, colony, origin);
+            yield return CheckAFieldIsSown(report, colony, origin);
+        }
+
+        /// <summary>
+        ///     The planting classifier knows what this world can grow, and what each costs.
+        /// </summary>
+        /// <remarks>
+        ///     Every number the layout and the seed errand depend on is asset data read from a
+        ///     prefab, so a world where any of it came back empty would make the job silently do
+        ///     nothing. The spacing spread is asserted rather than assumed because the whole
+        ///     per-crop layout exists for it: if a sapling and a carrot wanted the same room,
+        ///     that work would be pointless.
+        /// </remarks>
+        private static IEnumerator CheckPlantingIndex(TestReport report)
+        {
+            if (!Planting.IsReady) Planting.Rebuild();
+
+            report.Check(Planting.IsReady, "the planting classifier found prefabs to classify");
+
+            string crop = Planting.Sample(wantsCultivated: true);
+            string tree = Planting.Sample(wantsCultivated: false);
+            string here = Player.m_localPlayer != null
+                ? Planting.SampleFor(Player.m_localPlayer.transform.position, wantsCultivated: true)
+                : string.Empty;
+
+            report.Check(!string.IsNullOrEmpty(crop),
+                "it can name a real crop, so checks need not guess at prefab names",
+                $"sample={crop}");
+
+            report.Check(!string.IsNullOrEmpty(tree),
+                "control: and something that grows in open ground, which is the other half",
+                $"crop={crop} open={tree}");
+
+            // The biome-aware answer, which is the one every check that actually plants uses. A
+            // world whose starting biome grows nothing would make those checks meaningless, and
+            // this is where that says so rather than showing up as a refusal nobody expected.
+            report.Check(!string.IsNullOrEmpty(here),
+                "and it can name one that grows where the player is standing",
+                $"here={here} {(Player.m_localPlayer != null ? Ground(Player.m_localPlayer.transform.position) : "no player")}");
+
+            Plantable first = Planting.Named(crop);
+
+            report.Check(first != null && !string.IsNullOrEmpty(first.Seed) && first.SeedCount > 0,
+                "a crop knows which seed it costs, which is what the errand fetches",
+                first == null ? "no record" : $"{crop} costs {first.SeedCount} x {first.Seed}");
+
+            report.Check(first != null && first.Yields.Count > 0,
+                "and what it grows into, which is how a player asks for it by crop",
+                first == null ? "no record" : $"{crop} -> {string.Join(",", first.Yields.ToArray())}");
+
+            report.Check(first != null && !string.IsNullOrEmpty(first.Label) && first.Label != crop,
+                "and what the build menu calls it, which is the only name a sapling has",
+                first == null ? "no record" : $"label='{first.Label}'");
+
+            // The spread the whole layout rests on. Asserted as a ratio rather than as numbers,
+            // because the numbers are the game's and may change - what must not change is that
+            // one pitch cannot serve both.
+            float tightest = float.MaxValue, widest = 0f;
+            foreach (Plantable plant in Planting.All)
+            {
+                if (plant.Spacing < tightest) tightest = plant.Spacing;
+                if (plant.Spacing > widest) widest = plant.Spacing;
+            }
+
+            report.Check(tightest > 0f && widest >= tightest * 2f,
+                "what plants need for room varies enough that one pitch could not serve them all",
+                $"tightest={tightest:0.##}m widest={widest:0.##}m over {Planting.All.Count} plants");
+
+            // The cultivator, which is the thing a probe found in the wrong list once already.
+            // Its absence is survivable and must be said rather than discovered as a villager
+            // standing in a field doing nothing.
+            GameObject cultivator = Planting.Cultivator();
+            report.Check(cultivator != null,
+                "the piece that breaks ground was found, which is not where prefabs usually live",
+                cultivator == null
+                    ? "none - villagers cannot cultivate in this game"
+                    : $"{cultivator.name}, {Planting.CultivateRadius():0.##}m across");
+
+            yield break;
+        }
+
+        private static IEnumerator CheckSaplingsAreKeptLoaded(TestReport report)
+        {
+            if (!LoadAllowlist.IsReady) LoadAllowlist.Rebuild();
+            if (!Planting.IsReady) Planting.Rebuild();
+
+            string crop = Planting.Sample(wantsCultivated: true);
+            if (string.IsNullOrEmpty(crop) || ZNetScene.instance == null)
+            {
+                report.Check(false, "kept-sapling check could name a crop");
+                yield break;
+            }
+
+            report.Check(LoadAllowlist.Contains(crop.GetStableHashCode()),
+                "what has been planted stays loaded, so a crop at an outfarm actually ripens",
+                $"crop={crop}");
+
+            report.Check(!LoadAllowlist.Contains("not_a_real_prefab".GetStableHashCode()),
+                "control: the allowlist still excludes what a colony has no use for");
+
+            yield break;
+        }
+
+        /// <summary>
+        ///     Ground that will not take a plant refuses it, and the seed is not spent.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The failure this guards is the expensive kind. A villager that tried a square
+        ///         it could not use and paid for the attempt would work through a settlement's
+        ///         whole seed store in a minute, planting nothing, while every individual decision
+        ///         looked correct - and seed is the one thing in this mod a job consumes.
+        ///     </para>
+        ///     <para>
+        ///         Driven straight rather than through a villager, because what is under test is
+        ///         the act and not the walk. Asserted in both directions, uncultivated first, so
+        ///         a version that refused everything could not pass.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckSowingRefusesBadGround(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            if (!Planting.IsReady) Planting.Rebuild();
+
+            Vector3 site = FarmSite(origin);
+            SweepPlants(site, 12f);
+
+            // Chosen for this ground rather than in the abstract. A crop that cannot grow in this
+            // biome is refused whatever the state of the soil, so it would prove nothing about
+            // cultivation - which is what this check is for.
+            string named = Planting.SampleFor(site, wantsCultivated: true);
+            Plantable crop = Planting.Named(named);
+
+            if (crop == null || string.IsNullOrEmpty(crop.Seed))
+            {
+                report.Check(false,
+                    "control: the sowing check could name a crop that grows in this biome",
+                    $"named={named} {Ground(site)}");
+                yield break;
+            }
+
+            Inventory bag = new Inventory("sowing check", null, 4, 4);
+            GameObject seedPrefab = ObjectDB.instance?.GetItemPrefab(crop.Seed);
+
+            if (seedPrefab == null)
+            {
+                report.Check(false, "control: the sowing check could find the seed it needs",
+                    $"seed={crop.Seed}");
+                yield break;
+            }
+
+            bag.AddItem(seedPrefab, 10);
+            int before = Spending.Held(bag, crop.Seed);
+
+            report.Check(before >= crop.SeedCount,
+                "control: the check is holding seed before any of this is asked",
+                $"held={before} of {crop.Seed}");
+
+            // What the ground actually is, printed whatever happens. A refusal that did not
+            // happen is only diagnosable with the numbers the decision was made from, and this
+            // check has already been wrong once about which of them was at fault.
+            string ground = Ground(site);
+
+            report.Check(crop.NeedsCultivated,
+                "control: the crop this check picked really does need broken ground",
+                $"{named} needsCultivated={crop.NeedsCultivated} wants={crop.Biomes}");
+
+            report.Check(!Sowing.GroundIsReady(crop, site),
+                "control: and the ground it is about to be offered is not broken yet",
+                $"ready={Sowing.GroundIsReady(crop, site)} {ground}");
+
+            // Uncultivated ground, which this crop needs and has not got.
+            SowResult bare = Sowing.Place(crop, site, bag, out string refused);
+            int afterRefusal = Spending.Held(bag, crop.Seed);
+
+            report.Check(bare == SowResult.Refused,
+                "a crop is refused by ground that has not been broken",
+                $"result={bare} said='{refused}' needs={crop.NeedsCultivated} " +
+                $"wants={crop.Biomes} {ground}");
+
+            report.Check(afterRefusal == before,
+                "and the seed is still in the bag, because a refusal must cost nothing",
+                $"held {before} -> {afterRefusal}");
+
+            // Nothing left standing either. A refused plant that stayed would litter the field
+            // and block the square it was refused on.
+            report.Check(StandingAt(site, 1.5f) == 0,
+                "control: and nothing was left standing where it was refused",
+                $"standing={StandingAt(site, 1.5f)}");
+
+            // Now break the ground and ask again. Without this arm the three above pass for an
+            // implementation that refuses everything.
+            if (!Sowing.Cultivate(site))
+            {
+                report.Check(true, "cultivating: this game has no piece that breaks ground");
+                yield break;
+            }
+
+            yield return new WaitForSecondsRealtime(.5f);
+
+            report.Check(Sowing.GroundIsReady(crop, site),
+                "control: cultivating really does break the ground",
+                $"cultivated={Sowing.GroundIsReady(crop, site)}");
+
+            SowResult sown = Sowing.Place(crop, site, bag, out string said);
+            int afterSowing = Spending.Held(bag, crop.Seed);
+
+            report.Check(sown == SowResult.Sown,
+                "and the same crop goes into the same square once it is broken",
+                $"result={sown} said='{said}'");
+
+            report.Check(afterSowing == before - crop.SeedCount,
+                "control: and that one did cost a seed",
+                $"held {before} -> {afterSowing}, costs {crop.SeedCount}");
+
+            SweepPlants(site, 12f);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A field told to grow what this land cannot is refused before anybody walks to it,
+        ///     and the villager says which land it is.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The farming half of mining's tier gate, and it exists for the same reason:
+        ///         both numbers are asset data, so the question is answerable before the walk.
+        ///         Without it a villager walks out, places, is refused, uproots, and does the
+        ///         whole thing again a second later - for ever, while the screen says it is
+        ///         sowing. That is the failure this mod guards hardest against, because it looks
+        ///         exactly like working.
+        ///     </para>
+        ///     <para>
+        ///         <b>What is asserted is the sentence, not only the silence.</b> A villager that
+        ///         refused and said "nothing to sow" would pass a check that only counted plants,
+        ///         and would send a player to look for a bug in the seed supply. The answer names
+        ///         the biome, because that is the thing they have to act on.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckTheWrongLandIsSaidNotWalked(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            SettlementIndex.ResetForTest();
+            FarmJob.Clear();
+            if (!Planting.IsReady) Planting.Rebuild();
+
+            Vector3 site = FarmSite(origin) + new Vector3(0f, 0f, -14f);
+            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(site, out float ground))
+            {
+                site.y = ground;
+            }
+
+            SweepPlants(site, 14f);
+
+            Heightmap tile = Heightmap.FindHeightmap(site);
+            if (tile == null)
+            {
+                report.Check(false, "control: the wrong-land check could read the ground it stands on");
+                yield break;
+            }
+
+            Heightmap.Biome land = tile.GetBiome(site);
+
+            // Something this land will not grow, taken from the world rather than named. A world
+            // whose every plant grows here cannot stage this and should say so rather than pass.
+            string foreign = string.Empty;
+            foreach (Plantable candidate in Planting.All)
+            {
+                if (candidate?.Prefab == null || string.IsNullOrEmpty(candidate.Seed)) continue;
+                if ((candidate.Biomes & land) != 0) continue;
+
+                foreign = candidate.Prefab.name;
+                break;
+            }
+
+            if (string.IsNullOrEmpty(foreign))
+            {
+                report.Check(true, $"wrong-land check: everything this world grows grows in {land}");
+                yield break;
+            }
+
+            GameObject marker = Spawn(FieldPrefab.PrefabName, site);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            StructureRecord field = marker == null ? null : Register(colony, marker, "The wrong field");
+            Colonies.Field placed = marker != null ? marker.GetComponent<Colonies.Field>() : null;
+
+            if (field == null || placed == null)
+            {
+                report.Check(false, "control: the wrong-land check could place and register a field",
+                    $"registered={(field != null)} component={(placed != null)}");
+                Release(marker);
+                yield break;
+            }
+
+            placed.SetRadius(Colonies.Field.MinRadius);
+
+            ColonyOperations.EditSettings(colony, field.Id, settings =>
+            {
+                settings.MayCultivate = true;
+                settings.Sowing.Clear();
+                settings.Sowing.Add(new FieldOrder { Plant = foreign, Mode = SowMode.Fill });
+            });
+
+            SettlementIndex.ResetForTest();
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "wrong", Name = "Farm", Kind = JobKind.Farm, Repeat = 30 }
+            });
+
+            // Seed it can carry, so "it did not plant" cannot be explained by an empty bag. That
+            // is the control that makes the assertion mean the biome and nothing else.
+            Villager farmer = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (farmer == null || !farmer.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "control: the wrong-land check could spawn a villager");
+                Cleanup(colony, null, null, marker, null);
+                colony.State.SetJobs(new List<JobDefinition>());
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+
+            Plantable plant = Planting.Named(foreign);
+            Container bag = VillagerInventory.Attach(farmer.gameObject, view);
+            Clear(bag.GetInventory());
+
+            GameObject seedPrefab = ObjectDB.instance?.GetItemPrefab(plant.Seed);
+            if (seedPrefab != null) bag.GetInventory().AddItem(seedPrefab, 10);
+            VillagerInventory.Persist(bag, view);
+
+            report.Check(Spending.Held(bag.GetInventory(), plant.Seed) > 0,
+                "control: the villager is carrying the seed, so an empty bag cannot explain this",
+                $"held={Spending.Held(bag.GetInventory(), plant.Seed)} of {plant.Seed}");
+
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "wrong" });
+            farmer.transform.position = site + new Vector3(1f, 0f, 1f);
+
+            string said = string.Empty;
+            float elapsed = 0f;
+
+            while (elapsed < 25f)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                elapsed += .5f;
+
+                if (farmer == null || !view.IsValid()) break;
+
+                string doing = farmer.Activity ?? string.Empty;
+                if (doing.IndexOf(land.ToString(), System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    said = doing;
+                }
+            }
+
+            int planted = StandingAt(site, Colonies.Field.MinRadius + 2f);
+
+            report.Check(planted == 0,
+                "a field told to grow what this land cannot is left alone",
+                $"planted={planted} of {foreign} in {land} after {elapsed:0}s");
+
+            report.Check(!string.IsNullOrEmpty(said),
+                "and the villager says which land it is, rather than 'nothing to sow'",
+                $"said='{(string.IsNullOrEmpty(said) ? (farmer != null ? farmer.Activity : "gone") : said)}' " +
+                $"expected to name {land}");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.RemoveStructure(field.Id);
+            Release(marker);
+            SweepPlants(site, 14f);
+            colony.State.SetJobs(new List<JobDefinition>());
+            SettlementIndex.ResetForTest();
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A villager fetches seed, finds a field, and sows it - without running over itself.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The whole chain, because the parts are checked separately above and what is
+        ///         left to prove is that they meet: a field that asks for something, an errand
+        ///         that fetches it, a layout that finds somewhere to put it, and a stopping rule
+        ///         that ends the trip.
+        ///     </para>
+        ///     <para>
+        ///         The spacing assertion is the one worth reading. Nothing else in this mod lays
+        ///         things out, and a layout that ignored the pitch would plant a field that looked
+        ///         perfect and grew nothing, because every plant would refuse its neighbour for
+        ///         room.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckAFieldIsSown(TestReport report, Colony colony, Vector3 origin)
+        {
+            SettlementIndex.ResetForTest();
+            FarmJob.Clear();
+            if (!Planting.IsReady) Planting.Rebuild();
+
+            Vector3 site = origin + new Vector3(-16f, 0f, 6f);
+            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(site, out float ground))
+            {
+                site.y = ground;
+            }
+
+            string named = Planting.SampleFor(site, wantsCultivated: true);
+            Plantable crop = Planting.Named(named);
+
+            if (crop == null || string.IsNullOrEmpty(crop.Seed))
+            {
+                report.Check(false, "control: the field check could name a crop that grows here",
+                    $"named={named} {Ground(site)}");
+                yield break;
+            }
+
+            SweepPlants(site, 16f);
+
+            GameObject marker = Spawn(FieldPrefab.PrefabName, site);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            StructureRecord field = marker == null ? null : Register(colony, marker, "The garden");
+            Colonies.Field placed = marker != null ? marker.GetComponent<Colonies.Field>() : null;
+
+            if (field == null || placed == null)
+            {
+                report.Check(false, "control: the field check could place and register a field",
+                    $"registered={(field != null)} component={(placed != null)} " +
+                    $"fromHearth={(marker == null ? -1f : Utils.DistanceXZ(site, colony.transform.position)):0}m");
+                Release(marker);
+                yield break;
+            }
+
+            report.Check((field.Capabilities & StructureCapability.Field) != 0,
+                "a field registers as a field", $"capabilities={field.Capabilities}");
+
+            placed.SetRadius(Colonies.Field.MinRadius);
+
+            // Told to grow, and told it may break its own ground - otherwise this would be a
+            // check of whether the player remembered to cultivate.
+            ColonyOperations.EditSettings(colony, field.Id, s =>
+            {
+                s.MayCultivate = true;
+                s.Sowing.Clear();
+                s.Sowing.Add(new FieldOrder { Plant = named, Mode = SowMode.Keep, Count = 3 });
+            });
+
+            SettlementIndex.ResetForTest();
+
+            report.Check(SettlementIndex.Fields(colony, site).Count == 1,
+                "and the settlement can find it, which is where the craft job once died",
+                $"found={SettlementIndex.Fields(colony, site).Count}");
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "sow", Name = "Farm", Kind = JobKind.Farm, Repeat = 30 }
+            });
+
+            // The seed goes in a chest rather than in the villager's bag, so the errand is part
+            // of what this proves. A farmer that cannot find seed is the commonest way this job
+            // does nothing.
+            GameObject chest = Spawn("piece_chest_wood", site + new Vector3(3f, 0f, 0f));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            StructureRecord shed = chest == null ? null : Register(colony, chest, "Seed store");
+            Container store = chest != null ? chest.GetComponentInChildren<Container>(true) : null;
+            GameObject seedPrefab = ObjectDB.instance?.GetItemPrefab(crop.Seed);
+
+            if (shed == null || store == null || seedPrefab == null)
+            {
+                report.Check(false, "control: the field check could stock a chest with seed",
+                    $"registered={(shed != null)} container={(store != null)} seed={crop.Seed}");
+                Cleanup(colony, null, null, marker, null);
+                Release(chest);
+                colony.State.SetJobs(new List<JobDefinition>());
+                yield break;
+            }
+
+            Clear(store.GetInventory());
+            store.GetInventory().AddItem(seedPrefab, 20);
+            SettlementIndex.ResetForTest();
+
+            Villager farmer = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (farmer == null || !farmer.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "control: the field check could spawn a villager");
+                Cleanup(colony, null, null, marker, null);
+                Release(chest);
+                colony.State.SetJobs(new List<JobDefinition>());
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+
+            Container bag = VillagerInventory.Attach(farmer.gameObject, view);
+            Clear(bag.GetInventory());
+            VillagerInventory.Persist(bag, view);
+
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "sow" });
+            farmer.transform.position = site + new Vector3(1f, 0f, 1f);
+
+            int planted = 0;
+            float elapsed = 0f;
+
+            while (elapsed < FarmSeconds && planted < 3)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                elapsed += .5f;
+
+                if (farmer == null || !view.IsValid()) break;
+                planted = StandingAt(site, Colonies.Field.MinRadius);
+            }
+
+            report.Check(planted > 0,
+                "a villager fetched seed, found the field and planted in it",
+                $"planted={planted} after {elapsed:0}s doing='{(farmer != null ? farmer.Activity : "gone")}' " +
+                $"seedLeft={StructureInventory.Count(shed.Id, crop.Seed)}");
+
+            // Spacing. The reason the pitch is per crop, and the thing no other check here can
+            // notice - a field planted too tight looks right and grows nothing.
+            float closest = ClosestPair(site, Colonies.Field.MinRadius);
+            report.Check(planted < 2 || closest >= crop.Spacing - .05f,
+                "and no two of them are closer than the crop needs, so all of them can grow",
+                $"closest={closest:0.##}m needs={crop.Spacing:0.##}m among {planted}");
+
+            report.Check(planted <= 3,
+                "and it stopped at the number the field asked for rather than filling it",
+                $"planted={planted} asked=3");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.RemoveStructure(shed.Id);
+            colony.RemoveStructure(field.Id);
+            Release(chest);
+            Release(marker);
+            SweepPlants(site, 16f);
+            colony.State.SetJobs(new List<JobDefinition>());
+            SettlementIndex.ResetForTest();
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>How long a villager is given to fetch seed and plant some of it.</summary>
+        private static float FarmSeconds => 120f;
+
+        /// <summary>What the ground at a point is, in the terms a plant is judged by.</summary>
+        /// <remarks>
+        ///     Read the way <c>Plant.UpdateHealth</c> reads it - through the heightmap tile the
+        ///     point falls in, because that is where both answers live. A point with no tile is
+        ///     worth saying out loud: it is the one state in which the plant's own check returns
+        ///     early and leaves its status at Healthy.
+        /// </remarks>
+        private static string Ground(Vector3 at)
+        {
+            Heightmap tile = Heightmap.FindHeightmap(at);
+            if (tile == null) return "NO HEIGHTMAP at this point";
+
+            return $"biome={tile.GetBiome(at)} cultivated={tile.IsCultivated(at)}";
+        }
+
+        /// <summary>Somewhere to farm, away from every other site this suite uses.</summary>
+        private static Vector3 FarmSite(Vector3 origin)
+        {
+            Vector3 site = origin + new Vector3(-24f, 0f, 24f);
+            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(site, out float ground))
+            {
+                site.y = ground;
+            }
+
+            return site;
+        }
+
+        /// <summary>How many plants stand within a radius of a point.</summary>
+        private static int StandingAt(Vector3 at, float radius)
+        {
+            if (ZNetScene.instance == null) return 0;
+
+            int count = 0;
+            foreach (ZNetView view in ZNetScene.instance.m_instances.Values)
+            {
+                if (view == null || !view.IsValid()) continue;
+                if (view.GetComponent<Plant>() == null) continue;
+                if (Utils.DistanceXZ(view.transform.position, at) > radius) continue;
+
+                count++;
+            }
+
+            return count;
+        }
+
+        /// <summary>The closest two plants near a point, or infinity when there are fewer than two.</summary>
+        private static float ClosestPair(Vector3 at, float radius)
+        {
+            List<Vector3> found = new List<Vector3>();
+            if (ZNetScene.instance == null) return float.MaxValue;
+
+            foreach (ZNetView view in ZNetScene.instance.m_instances.Values)
+            {
+                if (view == null || !view.IsValid()) continue;
+                if (view.GetComponent<Plant>() == null) continue;
+                if (Utils.DistanceXZ(view.transform.position, at) > radius) continue;
+
+                found.Add(view.transform.position);
+            }
+
+            float closest = float.MaxValue;
+            for (int i = 0; i < found.Count; i++)
+            {
+                for (int j = i + 1; j < found.Count; j++)
+                {
+                    float distance = Utils.DistanceXZ(found[i], found[j]);
+                    if (distance < closest) closest = distance;
+                }
+            }
+
+            return closest;
+        }
+
+        /// <summary>Clears plants from a patch, so a count of what stands means this run's.</summary>
+        private static void SweepPlants(Vector3 at, float radius)
+        {
+            if (ZNetScene.instance == null) return;
+
+            List<GameObject> doomed = new List<GameObject>();
+            foreach (ZNetView view in ZNetScene.instance.m_instances.Values)
+            {
+                if (view == null || !view.IsValid()) continue;
+                if (view.GetComponent<Plant>() == null) continue;
+                if (Utils.DistanceXZ(view.transform.position, at) > radius) continue;
+
+                doomed.Add(view.gameObject);
+            }
+
+            foreach (GameObject plant in doomed) Release(plant);
+        }
+
         private static IEnumerator CheckAVillagerFetchesItsOwnTool(TestReport report, Colony colony,
             Vector3 origin)
         {

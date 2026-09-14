@@ -213,6 +213,10 @@ namespace Kukolony.Gui
                     BuildRest(host, column, colony, record, settings);
                     break;
 
+                case StructureCapability.Field:
+                    BuildField(host, column, colony, record, settings);
+                    break;
+
                 default:
                     // A work flag configures itself on its own screen, and a capability with no
                     // panel says so rather than drawing an empty one that reads as a screen
@@ -243,7 +247,7 @@ namespace Kukolony.Gui
                      {
                          StructureCapability.Storage, StructureCapability.Processing,
                          StructureCapability.Crafting, StructureCapability.Rest,
-                         StructureCapability.WorkArea
+                         StructureCapability.Field, StructureCapability.WorkArea
                      })
             {
                 if ((capabilities & candidate) != 0) found.Add(candidate);
@@ -546,6 +550,178 @@ namespace Kukolony.Gui
             }
         }
 
+        /// <summary>
+        ///     What a field grows, how big it is, and whether villagers may break new ground.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The crop list is by <em>plant</em> rather than by what it yields, because the
+        ///         two are not one-to-one: a carrot and a carrot seed come from different saplings
+        ///         and cost each other as seed, so "carrot" cannot say which was meant. The picker
+        ///         shows what the build menu calls each one, which is the name a player has
+        ///         already read.
+        ///     </para>
+        ///     <para>
+        ///         The cultivate switch says plainly what it does. It is the only setting here
+        ///         that lets a villager change something unregistering cannot undo.
+        ///     </para>
+        /// </remarks>
+        private static void BuildField(ColonyScreen host, Column column, Colony colony,
+            StructureRecord record, StructureSettings settings)
+        {
+            if (Resources.Planting.All.Count == 0)
+            {
+                if (column.TryRow(out Row none))
+                {
+                    Widgets.Label(none, "Nothing known to grow here.", Color.gray);
+                }
+            }
+            else if (column.TryRow(out Row grow))
+            {
+                List<string> chosen = Sown(settings);
+                Widgets.Choice(grow, "Grows", chosen.Count == 0 ? "nothing" : SummariseCrops(chosen),
+                    () => host.Push(new PickerScreen("What to grow here", Crops, chosen, true,
+                        picked =>
+                        {
+                            ColonyOperations.EditSettings(colony, record.Id, s => ReconcileField(s, picked));
+                            host.Refresh();
+                        })));
+            }
+
+            foreach (FieldOrder order in settings.Sowing)
+            {
+                if (!column.TryRow(out Row row)) continue;
+
+                string plant = order.Plant;
+                Widgets.Choice(row, CropLabel(plant), Describe(order),
+                    () => host.Push(new FieldOrderScreen(record.PersistentId, record.Id, plant)));
+            }
+
+            if (column.TryRow(out Row size))
+            {
+                ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(record.Id) : null;
+                float radius = zdo != null ? Colonies.Field.RadiusOf(zdo) : Colonies.Field.DefaultRadius;
+
+                Widgets.Number(size, "How big", radius, Colonies.Field.MinRadius,
+                    Colonies.Field.MaxRadius, 2f,
+                    value => $"{value:F0} m",
+                    value =>
+                    {
+                        GameObject placed = ZNetScene.instance != null
+                            ? ZNetScene.instance.FindInstance(record.Id)
+                            : null;
+
+                        // Only while it is loaded. The radius lives on the field's own ZDO and
+                        // writing it needs ownership, which needs the object - and a field is
+                        // inside the Kolony's reach by construction, so this is the ordinary case
+                        // rather than a limitation anybody will meet.
+                        if (placed != null && placed.TryGetComponent(out Colonies.Field field))
+                        {
+                            field.SetRadius(value);
+                        }
+                        else
+                        {
+                            Report.Say("Walk out to the field to resize it.");
+                        }
+
+                        host.Refresh();
+                    });
+            }
+
+            if (column.TryRow(out Row breaking))
+            {
+                Widgets.Flag(breaking, "May break new ground", settings.MayCultivate, value =>
+                {
+                    ColonyOperations.EditSettings(colony, record.Id, s => s.MayCultivate = value);
+                    host.Refresh();
+                });
+            }
+
+            if (settings.MayCultivate && column.TryRow(out Row warn))
+            {
+                Widgets.Label(warn, "Cultivated ground stays cultivated - this cannot be undone.",
+                    Color.gray);
+            }
+        }
+
+        /// <summary>What a field order reads as on the list.</summary>
+        private static string Describe(FieldOrder order)
+        {
+            switch (order.Mode)
+            {
+                case SowMode.Keep: return order.Count <= 0 ? "none" : $"keep {order.Count} growing";
+                case SowMode.Once: return order.Count <= 0 ? "none" : $"sow {order.Count} ({order.Sown} done)";
+                default: return "fill the field";
+            }
+        }
+
+        /// <summary>What the build menu calls a plant, which is the only name a sapling has.</summary>
+        private static string CropLabel(string plant)
+        {
+            Resources.Plantable found = Resources.Planting.Named(plant);
+            return found != null && !string.IsNullOrEmpty(found.Label) ? found.Label : plant;
+        }
+
+        private static string SummariseCrops(List<string> plants)
+        {
+            if (plants.Count == 0) return "nothing";
+            if (plants.Count == 1) return CropLabel(plants[0]);
+
+            return $"{CropLabel(plants[0])} +{plants.Count - 1}";
+        }
+
+        private static List<string> Sown(StructureSettings settings)
+        {
+            List<string> plants = new List<string>();
+            foreach (FieldOrder order in settings.Sowing) plants.Add(order.Plant);
+            return plants;
+        }
+
+        /// <summary>Everything this world can grow, for the picker.</summary>
+        private static List<PickerScreen.Option> Crops(string filter)
+        {
+            List<PickerScreen.Option> options = new List<PickerScreen.Option>();
+
+            foreach (Resources.Plantable plant in Resources.Planting.All)
+            {
+                if (plant?.Prefab == null) continue;
+
+                string label = string.IsNullOrEmpty(plant.Label) ? plant.Prefab.name : plant.Label;
+                if (filter.Length > 0 &&
+                    label.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0 &&
+                    plant.Prefab.name.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                options.Add(new PickerScreen.Option(plant.Prefab.name, label));
+            }
+
+            return options;
+        }
+
+        /// <summary>
+        ///     Brings a field's crop list in line with what was picked, keeping what is already set.
+        /// </summary>
+        /// <remarks>
+        ///     The same rule the station's order list follows: a crop that was already there keeps
+        ///     its mode, its count and how many it has sown, because a player re-opening the
+        ///     picker to add a second crop has not asked to reset the first.
+        /// </remarks>
+        private static void ReconcileField(StructureSettings settings, List<string> picked)
+        {
+            List<FieldOrder> kept = new List<FieldOrder>();
+
+            foreach (string plant in picked)
+            {
+                FieldOrder existing = settings.Sowing.Find(o => o.Plant == plant);
+                kept.Add(existing ?? new FieldOrder { Plant = plant, Mode = SowMode.Fill });
+            }
+
+            settings.Sowing.Clear();
+            settings.Sowing.AddRange(kept);
+        }
+
         private static string Describe(StructureOrder order)
         {
             if (order.Count <= 0) return "none";
@@ -786,6 +962,161 @@ namespace Kukolony.Gui
             }
 
             StructureDetailScreen.BuildAspect(host, column, colony, record, _capability);
+        }
+    }
+
+    /// <summary>
+    ///     One crop on one field: what to grow, how many, and when to stop.
+    /// </summary>
+    /// <remarks>
+    ///     Keyed on the plant rather than on an index into the list, for the reason the station's
+    ///     order screen is: an index is only right until somebody else edits the field, and
+    ///     editing the crop that happened to slide into that slot is the kind of mistake nobody
+    ///     would ever see reported.
+    /// </remarks>
+    internal sealed class FieldOrderScreen : ScreenView
+    {
+        /// <summary>
+        ///     How much a nudge moves the count.
+        /// </summary>
+        /// <remarks>
+        ///     Five, not the station screen's ten. A field's numbers are counted in plants and
+        ///     bounded by the ground - twenty carrots is a large bed - where a station's are
+        ///     settlement-scale.
+        /// </remarks>
+        private const float Step = 5f;
+
+        private readonly string _token;
+        private readonly ZDOID _fallback;
+        private readonly string _plant;
+
+        internal FieldOrderScreen(string token, ZDOID fallback, string plant)
+        {
+            _token = token ?? string.Empty;
+            _fallback = fallback;
+            _plant = plant ?? string.Empty;
+        }
+
+        internal override string Title => "Crop";
+
+        internal override bool StillValid(ColonyScreen host) => host.Colony != null;
+
+        internal override void Build(ColonyScreen host, Column column)
+        {
+            Colony colony = host.Colony;
+            StructureRecord record = StructureDetailScreen.Find(colony, _token, _fallback);
+            FieldOrder order = record?.Settings.Sowing.Find(o => o.Plant == _plant);
+
+            if (order == null)
+            {
+                if (column.TryRow(out Row gone))
+                {
+                    Widgets.Label(gone, "This field no longer grows that.", Color.gray);
+                }
+
+                return;
+            }
+
+            Resources.Plantable plant = Resources.Planting.Named(_plant);
+
+            if (column.TryRow(out Row what))
+            {
+                Widgets.Caption(what, "Grows");
+                Widgets.Label(what, plant != null && !string.IsNullOrEmpty(plant.Label)
+                    ? plant.Label
+                    : _plant);
+            }
+
+            // What it costs and what comes of it, because a player choosing "keep twenty growing"
+            // is really deciding how much seed the settlement is about to bury.
+            if (plant != null && column.TryRow(out Row cost))
+            {
+                Widgets.Caption(cost, "Costs");
+                Widgets.Label(cost, string.IsNullOrEmpty(plant.Seed)
+                    ? "nothing"
+                    : $"{plant.SeedCount} x {ItemCatalogue.Label(plant.Seed)}");
+            }
+
+            if (plant != null && column.TryRow(out Row gives))
+            {
+                Widgets.Caption(gives, "Gives");
+
+                // A sapling grows into a tree, which is not picked - so it has nothing to give in
+                // the sense this row means, and saying so beats an empty cell that reads as a
+                // value nobody filled in.
+                Widgets.Label(gives, plant.Yields.Count == 0
+                    ? "a tree, in time"
+                    : ItemCatalogue.Label(plant.Yields[0]));
+            }
+
+            if (plant != null && column.TryRow(out Row room))
+            {
+                Widgets.Caption(room, "Room it needs");
+                Widgets.Label(room, $"{plant.Spacing:0.##} m");
+            }
+
+            if (column.TryRow(out Row mode))
+            {
+                // Spelled as what it does rather than as the enum's own words, as the station's
+                // order screen spells its modes: "Fill" and "Keep" are precise and mean nothing
+                // to somebody who has not read the code.
+                Widgets.Cycle(mode, "How many",
+                    new[] { "fill the field", "keep a number growing", "sow a number once" },
+                    order.Mode == SowMode.Keep ? 1 : order.Mode == SowMode.Once ? 2 : 0,
+                    index => Edit(host, colony, record, o =>
+                        o.Mode = index == 1 ? SowMode.Keep : index == 2 ? SowMode.Once : SowMode.Fill));
+            }
+
+            if (order.Mode != SowMode.Fill && column.TryRow(out Row many))
+            {
+                Widgets.Number(many, "How many", order.Count, 0f, 999f, Step,
+                    value => value <= 0f ? "none" : ((int)value).ToString(),
+                    value => Edit(host, colony, record, o => o.Count = (int)value));
+            }
+
+            if (order.Mode == SowMode.Once && column.TryRow(out Row state))
+            {
+                Widgets.Caption(state, "Sown");
+                Widgets.Label(state, order.Sown >= order.Count && order.Count > 0
+                    ? $"{order.Sown} - it will not start again"
+                    : $"{order.Sown} of {order.Count}",
+                    order.Count > 0 && order.Sown >= order.Count ? Color.gray : Color.white);
+            }
+
+            if (column.TryRow(out Row drop))
+            {
+                Widgets.Button(drop, "Stop growing this", 260f, () =>
+                {
+                    ColonyOperations.EditSettings(colony, record.Id,
+                        s => s.Sowing.RemoveAll(o => o.Plant == _plant));
+                    host.Pop();
+                });
+            }
+        }
+
+        /// <summary>
+        ///     Changes one crop, and un-finishes it.
+        /// </summary>
+        /// <remarks>
+        ///     Editing a line clears its count of what it has sown, for the reason the station's
+        ///     order screen clears its latch: a one-off that has been filled is finished for good,
+        ///     and the only way to ask for another twenty is to say so again. Without this,
+        ///     raising a finished order from twenty to forty would change a number nothing would
+        ///     ever read.
+        /// </remarks>
+        private void Edit(ColonyScreen host, Colony colony, StructureRecord record,
+            System.Action<FieldOrder> change)
+        {
+            ColonyOperations.EditSettings(colony, record.Id, s =>
+            {
+                FieldOrder order = s.Sowing.Find(o => o.Plant == _plant);
+                if (order == null) return;
+
+                change(order);
+                order.Sown = 0;
+            });
+
+            host.Refresh();
         }
     }
 

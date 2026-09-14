@@ -137,6 +137,7 @@ namespace Kukolony.KeepAlive
             Jobs.Craft.CraftJob.Clear();
             Jobs.Mine.MineJob.Clear();
             Jobs.Forage.ForageJob.Clear();
+            Jobs.Farm.FarmJob.Clear();
             Jobs.Unreachable.Clear();
             StopAllCoroutines();
         }

@@ -121,14 +121,30 @@ namespace Kukolony.Jobs.Farm
         ///     The first square nothing is standing in, or none when the field is full.
         /// </summary>
         /// <param name="taken">Whether a square already holds something, by its index.</param>
+        /// <param name="from">
+        ///     Where to start looking, wrapping round the end.
+        /// </param>
+        /// <remarks>
+        ///     <b>The start is how two villagers keep off each other's ground.</b> Scanning from
+        ///     the same corner every time would send everybody in a field to the same square, and
+        ///     the first one there would win while the rest walked for nothing. Starting each of
+        ///     them somewhere else costs nothing, needs no claim to go stale, and still fills the
+        ///     whole field because the scan wraps.
+        /// </remarks>
         internal static bool Next(IReadOnlyList<Furrow> squares, System.Func<int, bool> taken,
-            out Furrow furrow)
+            out Furrow furrow, int from = 0)
         {
             furrow = default;
-            if (squares == null || taken == null) return false;
+            if (squares == null || taken == null || squares.Count == 0) return false;
 
-            for (int i = 0; i < squares.Count; i++)
+            // Wrapped rather than clamped. A start past the end is an ordinary thing for a
+            // caller to produce - it comes from an id divided by a count that changes when the
+            // field is resized - and refusing it would leave that villager unable to work.
+            int begin = ((from % squares.Count) + squares.Count) % squares.Count;
+
+            for (int step = 0; step < squares.Count; step++)
             {
+                int i = (begin + step) % squares.Count;
                 if (taken(squares[i].Index)) continue;
 
                 furrow = squares[i];

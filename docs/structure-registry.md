@@ -14,6 +14,7 @@ is the whole of what a colony can do, and growing it is how the mod grows.
 | **Crafting** | `CraftingStation` | Things are made here by hand — workbench, forge, stonecutter, artisan and galdr tables, black forge, and the cauldron, which is why food recipes are craftable |
 | **Rest** | `Bed` | One villager can sleep here |
 | **Work area** | `WorkFlag` | Ground far from the hearth that the Kolony works |
+| **Field** | `Field` | Ground the Kolony grows things in — what to grow is written on the field rather than on the job |
 
 **Detected by component, never by prefab name** — the rule, and the reasoning behind it, is
 [components.md](components.md). A name list misses every modded chest and goes stale; a component
@@ -29,6 +30,13 @@ oven is also a fireplace and a fuelled cooking station is both.
 
 A **creature is never a structure**, and neither is a loose item, whatever components they
 carry.
+
+**A field is not exempt from the reach gate, and a work flag is.** That asymmetry is deliberate.
+Standing beyond reach is a flag's entire purpose; a field is somewhere the Kolony already is — and
+has to be, because a `Plant` only grows while its zone is loaded and the keep-alive holds open what
+the Kolony reaches. A field beyond it would be a farm that never ripens and looks perfectly healthy
+whenever anybody walks out to see it. An outfarm composes the other way round: plant a flag, then a
+field inside it.
 
 Cooking stations and fermenters were registerable under the previous design, were withdrawn
 because nothing could use them, and return here with the Tend job that gives them meaning.
@@ -155,6 +163,13 @@ costs nothing, and read from the colony's ZDO so another peer's edit invalidates
 
 Two chests claiming the same item is not a conflict: both are valid answers and the nearest
 usable one wins.
+
+**Whether something is exclusive is decided by who asks.** Hauling asks, so two villagers never
+target one stack; depositing does not, so any number share a chest. A **field** is the second kind
+and deliberately so — it is hundreds of squares, and the point of marking out a big one is that
+several people can work it. Farmers keep off each other's ground by starting their scan of the
+field's grid at different places, taken from each villager's own id, which costs nothing and leaves
+no claim to go stale.
 
 **Capacity is part of the question**, because discovering a chest is full on arrival wastes the
 walk. Capacity can only be read from a loaded container — see

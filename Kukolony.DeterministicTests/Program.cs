@@ -1535,6 +1535,28 @@ static class Program
 
         Case("a full field offers nothing", !FieldPlan.Next(squares, _ => true, out Furrow _));
 
+        // Two villagers in one field keep off each other's ground by starting somewhere else.
+        // There is no claim behind this, so if the start were ignored they would converge on the
+        // same square every tick and one of them would walk for nothing all afternoon.
+        Case("starting further along gives a different square",
+            FieldPlan.Next(squares, _ => false, out Furrow mine, 0) &&
+            FieldPlan.Next(squares, _ => false, out Furrow theirs, squares.Count / 2) &&
+            mine.Index != theirs.Index);
+
+        // And it still fills the whole field, because the scan wraps. Without this a villager
+        // starting near the end would work four squares and report the field full.
+        Case("and the scan wraps, so a late start still finds the early squares",
+            FieldPlan.Next(squares, index => index != squares[0].Index, out Furrow wrapped,
+                squares.Count - 1) && wrapped.Index == squares[0].Index);
+
+        // A start past the end is ordinary: it comes from an id divided by a count that changes
+        // whenever the field is resized. Refusing it would leave that villager unable to work.
+        Case("a start past the end is wrapped rather than refused",
+            FieldPlan.Next(squares, _ => false, out Furrow _, squares.Count * 3 + 2));
+
+        Case("and so is a negative one",
+            FieldPlan.Next(squares, _ => false, out Furrow _, -7));
+
         Case("and so does a field with no squares at all",
             !FieldPlan.Next(new List<Furrow>(), _ => false, out Furrow _));
 
@@ -1591,6 +1613,16 @@ static class Program
         Plant_("no seed is an ordinary answer, not a failure", FarmState.Choosing,
             Sow(hasSeed: false), FarmAction.Yield);
 
+        // The knot this job tied itself in once, and the reason the seed test comes second.
+        // Which seed a villager needs is a fact about the field it is working, so asking before
+        // one is chosen means no field, so no seed, so yield - and a villager stands in front of
+        // the field it was told to sow, reporting that no field is asking for anything.
+        Plant_("with no field, an empty bag does not stop it looking for one",
+            FarmState.Choosing, Sow(hasField: false, hasSeed: false), FarmAction.ChooseWork);
+
+        Plant_("nor does it stop it letting go of a field that wants nothing",
+            FarmState.Choosing, Sow(wantsSowing: false, hasSeed: false), FarmAction.ChooseWork);
+
         Plant_("and running out mid-field sends it back to be told so", FarmState.Sowing,
             Sow(atSpot: true, hasSeed: false), FarmAction.Yield);
 
@@ -1624,6 +1656,7 @@ static class Program
         // Every combination. The four "never" properties are all counted inside `action == Sow`,
         // so a table that never sowed at all would satisfy every one of them - which is why the
         // liveness counter and the two-way check beside them are not decoration.
+        int neverLooked = 0;
         int sowedWithoutField = 0, sowedUnwanted = 0, sowedWithoutSpot = 0;
         int sowedFromAfar = 0, sowedWithoutSeed = 0, sowedOnBareGround = 0;
         int cultivatedUnasked = 0, cultivatedFromAfar = 0;
@@ -1690,6 +1723,17 @@ static class Program
                 {
                     yieldedWithoutReason++;
                 }
+
+                // **A villager with no field must always go and look for one.** Every assertion
+                // above is about what happens once a field is held, so all of them were satisfied
+                // by a table that never chose a field at all - which is exactly the knot this job
+                // tied itself in: it yielded for want of a seed it could not name, because naming
+                // it needed the field it had not chosen.
+                if (!facts.HasField && !facts.Tired && action != FarmAction.ChooseWork &&
+                    action != FarmAction.Complete)
+                {
+                    neverLooked++;
+                }
             }
         }
 
@@ -1722,6 +1766,9 @@ static class Program
 
         Case($"yielding is always for a reason ({yieldedWithoutReason} were not)",
             yieldedWithoutReason == 0);
+
+        Case($"a villager with no field always goes and looks for one ({neverLooked} did not)",
+            neverLooked == 0);
 
         // Every arm is reachable. A reordered condition that made one dead - Cultivate, say -
         // would leave villagers unable to break ground and no other case would notice.

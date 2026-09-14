@@ -947,6 +947,36 @@ the plant itself, and undoes if the answer is not `Healthy`. This is the single-
 `HaveGrowSpace` and `HaveRoof` are private, and do not need to be reached: they are already
 summarised in the status.
 
+### `UpdateHealth(0)` answers *Healthy* to everything
+
+The trap, and the one that matters most, because it fails in the direction of doing something
+rather than refusing.
+
+`UpdateHealth(double timeSincePlanted)` gives a freshly planted thing a **grace period**. Called
+with a small number it sets `Healthy` and returns without evaluating biome, cultivation, heat,
+cold, roof or room. That is right for the game — a plant should not look sick the instant you
+place it — and it silently defeats every attempt to use the status as a pre-flight check.
+
+Measured, not guessed:
+
+```
+sapling_barley at (-92.8, 81.3, -173.2), ground biome=Meadows cultivated=False
+    UpdateHealth(0)        -> Healthy
+    UpdateHealth(1000000)  -> WrongBiome
+```
+
+Barley wants Plains and needs cultivated ground; the point was Meadow and unbroken. Asked as
+newly planted, the plant said it was fine.
+
+**So ask it as though it had been in the ground a while.** A day is past any grace a game could
+keep for something that takes at most eight thousand seconds to grow (an oak, the slowest here),
+and how much larger does not matter — the plant's own slow update recomputes the status from the
+real elapsed time a moment later, so the aged reading affects the decision and nothing else.
+
+There is no way to find this by reading the assembly: the grace is a comparison inside a method
+whose signature says only `double`. It showed up as a villager planting barley in a meadow, and
+only because a check asserted the refusal rather than the success.
+
 ### An unripe crop is not a `Plant`'s problem, and not a `Pickable`
 
 A planted seed is a `Plant`. When it ripens it calls `Grow()` and **replaces itself with a

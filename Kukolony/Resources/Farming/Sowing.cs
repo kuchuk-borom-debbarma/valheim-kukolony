@@ -46,6 +46,19 @@ namespace Kukolony.Resources.Farming
     internal static class Sowing
     {
         /// <summary>
+        ///     How old to tell a plant it is when asking whether it is healthy.
+        /// </summary>
+        /// <remarks>
+        ///     A day, which is past any grace a game could keep for a thing that takes at most
+        ///     eight thousand seconds to grow - an oak, the slowest this game ships. The number
+        ///     only has to be larger than the grace, and nothing here depends on how much larger:
+        ///     the status is recomputed from the real elapsed time by the plant's own slow update
+        ///     a moment later, so this reading affects the decision and nothing else.
+        /// </remarks>
+        private const double Settled = 86400d;
+
+
+        /// <summary>
         ///     Puts one plant in the ground at a point, or says why it would not grow there.
         /// </summary>
         /// <param name="bag">Where the seed comes from. Untouched unless the plant takes.</param>
@@ -79,10 +92,16 @@ namespace Kukolony.Resources.Farming
                 return SowResult.Unworkable;
             }
 
-            // The rulebook, asked of the thing itself. Zero seconds since planting, because that
-            // is true - and because the alternative, waiting for its own slow update, is several
-            // seconds during which a villager has no idea whether it worked.
-            plant.UpdateHealth(0d);
+            // The rulebook, asked of the thing itself - and asked as though it had been in the
+            // ground a while, which is the whole trick.
+            //
+            // <c>UpdateHealth</c> takes the seconds since planting and gives a freshly planted
+            // thing a grace period: called with zero it sets Healthy and returns without
+            // evaluating anything. That is right for the game, where a plant should not look
+            // sick the instant it is placed - and it silently defeats every use of it here. This
+            // was found the only way it could be, by a check watching barley take root in a
+            // Meadow it can never grow in: zero said Healthy, a million said WrongBiome.
+            plant.UpdateHealth(Settled);
             Plant.Status status = plant.GetStatus();
 
             if (status != Plant.Status.Healthy)

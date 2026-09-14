@@ -151,20 +151,28 @@ namespace Kukolony.Jobs.Farm
                 switch (state)
                 {
                     case FarmState.Choosing:
-                        // Being tired and having no seed are ordinary answers rather than
-                        // failures: nothing useful can be done, so the villager yields to the
-                        // next entry in its queue without spending a repetition on either.
                         if (facts.Tired) return new FarmStep(FarmAction.Yield, FarmState.Choosing);
-                        if (!facts.HasSeed) return new FarmStep(FarmAction.Yield, FarmState.Choosing);
 
                         // A field that wants nothing, or no field at all, is the same answer
                         // here: go and look for one. Asked in this arm as well as below because
                         // this is where a villager arrives holding a field that filled up while
                         // it was doing something else.
+                        //
+                        // **Before the seed, and that order is the whole of it.** Which seed a
+                        // villager needs is a fact about the field it is working - there is no
+                        // such thing as "the seed" until one is chosen. Asking first put the job
+                        // in a knot it could not get out of: no field, so no seed, so yield - and
+                        // a villager stood in front of a field it had been told to sow, reporting
+                        // that no field was asking for anything.
                         if (!facts.HasField || !facts.WantsSowing || !facts.HasSpot)
                         {
                             return new FarmStep(FarmAction.ChooseWork, FarmState.Approaching);
                         }
+
+                        // And now it is answerable. Having no seed is an ordinary answer rather
+                        // than a failure - the errand that fetches more is asked before this
+                        // table runs, so reaching here means the settlement has none either.
+                        if (!facts.HasSeed) return new FarmStep(FarmAction.Yield, FarmState.Choosing);
 
                         state = FarmState.Approaching;
                         continue;

@@ -254,6 +254,37 @@ namespace Kukolony.Resources
             return string.Empty;
         }
 
+        /// <summary>
+        ///     A real prefab name for something that will actually grow at a point.
+        /// </summary>
+        /// <remarks>
+        ///     The biome matters and the first sample forgot it, which made a check plant barley
+        ///     in a Meadow: the crop was a real crop and the ground was real ground, and nothing
+        ///     between them agreed. A check that means to prove a plant takes has to offer it
+        ///     somewhere it can live, and which somewhere that is depends on where the world put
+        ///     the player.
+        /// </remarks>
+        internal static string SampleFor(Vector3 at, bool wantsCultivated)
+        {
+            if (!IsReady) Rebuild();
+
+            Heightmap tile = Heightmap.FindHeightmap(at);
+            if (tile == null) return string.Empty;
+
+            Heightmap.Biome biome = tile.GetBiome(at);
+
+            foreach (Plantable plantable in Ordered)
+            {
+                if (plantable.NeedsCultivated != wantsCultivated) continue;
+                if (string.IsNullOrEmpty(plantable.Seed)) continue;
+                if ((plantable.Biomes & biome) == 0) continue;
+
+                return plantable.Prefab != null ? plantable.Prefab.name : string.Empty;
+            }
+
+            return string.Empty;
+        }
+
         /// <summary>Everything about one prefab, or null when it is not something to plant.</summary>
         private static Plantable Describe(GameObject prefab)
         {

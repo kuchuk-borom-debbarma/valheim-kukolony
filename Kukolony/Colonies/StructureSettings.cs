@@ -165,6 +165,33 @@ namespace Kukolony.Colonies
         /// </remarks>
         internal bool InService = true;
 
+        /// <summary>
+        ///     What this field has been told to grow.
+        /// </summary>
+        /// <remarks>
+        ///     Its own list rather than <see cref="Orders" />, and its own type - what a field
+        ///     counts is what stands <em>in the ground</em>, where a station's order counts what
+        ///     the settlement holds. One shape carrying both meanings is how two of them come to
+        ///     disagree without anybody noticing which was meant.
+        ///
+        ///     Empty means grow nothing, as a station's orders do and for the same reason: a
+        ///     field with no preference that grew whatever it could would empty the settlement's
+        ///     seed store into whatever the catalogue happened to list first.
+        /// </remarks>
+        internal readonly List<FieldOrder> Sowing = new List<FieldOrder>();
+
+        /// <summary>
+        ///     Whether villagers may break new ground inside this field.
+        /// </summary>
+        /// <remarks>
+        ///     Off by default, and it is the only setting in this mod that lets a villager do
+        ///     something a player cannot undo by unregistering a structure. Terrain is permanent;
+        ///     a chest switched off goes back to being a chest, and a cultivated hillside stays
+        ///     cultivated. Bounded by the field's own radius, which is drawn on the ground and
+        ///     visible - but off until somebody says otherwise.
+        /// </remarks>
+        internal bool MayCultivate;
+
         /// <summary>Who sleeps here. None until assigned.</summary>
         internal ZDOID Sleeper = ZDOID.None;
 
@@ -219,6 +246,21 @@ namespace Kukolony.Colonies
 
             package.Write(orders.Count);
             foreach (StructureOrder order in orders) WriteOrder(package, order);
+
+            // Version 5 and after. Appended last, for the reason everything above it was: nothing
+            // an older reader knows how to find has moved, which is what lets a version-4 record
+            // decode against this layout.
+            package.Write(MayCultivate);
+
+            List<FieldOrder> sowing = Sowing;
+            if (sowing.Count > MaxEntries)
+            {
+                Log.Warning($"[colony] a field holds {sowing.Count} crops - keeping the first {MaxEntries}.");
+                sowing = sowing.GetRange(0, MaxEntries);
+            }
+
+            package.Write(sowing.Count);
+            foreach (FieldOrder order in sowing) WriteSowing(package, order);
         }
 
         /// <summary>
@@ -289,7 +331,53 @@ namespace Kukolony.Colonies
             }
 
             for (int i = 0; i < orders; i++) settings.Orders.Add(ReadOrder(package));
+
+            if (version < 5) return settings;
+
+            settings.MayCultivate = package.ReadBool();
+
+            // Thrown for the reason every count here is: every record after this one is read from
+            // the same stream, so a count this wrong has already lost the position.
+            int sowing = package.ReadInt();
+            if (sowing < 0 || sowing > MaxEntries)
+            {
+                throw new System.IO.InvalidDataException($"field settings claim {sowing} crops");
+            }
+
+            for (int i = 0; i < sowing; i++) settings.Sowing.Add(ReadSowing(package));
             return settings;
+        }
+
+        /// <summary>
+        ///     A field order's bytes. Here rather than on the order itself, which is kept free of
+        ///     ZPackage so its arithmetic can be checked without a game.
+        /// </summary>
+        private static void WriteSowing(ZPackage package, FieldOrder order)
+        {
+            package.Write(order.Plant ?? string.Empty);
+            package.Write(order.Count);
+            package.Write((int)order.Mode);
+            package.Write(order.Sown);
+        }
+
+        private static FieldOrder ReadSowing(ZPackage package)
+        {
+            FieldOrder order = new FieldOrder
+            {
+                Plant = package.ReadString(),
+                Count = package.ReadInt()
+            };
+
+            // Compared rather than cast, for the reason every enum here is read this way: a blob
+            // written by a later build can carry a mode this one has never heard of, and casting
+            // an unknown number into an enum produces a value no branch handles and none rejects.
+            int mode = package.ReadInt();
+            order.Mode = mode == (int)SowMode.Keep ? SowMode.Keep
+                : mode == (int)SowMode.Once ? SowMode.Once
+                : SowMode.Fill;
+
+            order.Sown = package.ReadInt();
+            return order;
         }
 
         /// <summary>

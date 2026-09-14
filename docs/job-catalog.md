@@ -888,6 +888,125 @@ their defaults.
 
 ---
 
+# Farm — putting things in the ground
+
+Forage harvests a field. Nothing planted one. The same hole sat under chopping: villagers have
+felled trees since the second job and no villager had ever planted one. This is the job that closes
+both loops, and it is the first one whose settings live on a **place you build** rather than on the
+work.
+
+## What it does
+
+Finds a field that has asked for something, fetches the seed it costs, walks to a square nothing is
+standing in, breaks the ground if it is allowed to, and plants. What grows there is somebody else's
+job to pick.
+
+## The first job that consumes
+
+Every other job takes from the world and brings it home. This takes from the settlement and puts it
+in the ground — so a villager carries seed, a settlement whose only seed is already planted is a
+real state, and the job says so rather than standing in a field looking busy.
+
+Seed is fetched by the **shared errand** — the same rule that fetches axes and pickaxes. It was
+written for tools and everything in it was general except one question: *what counts as the thing*.
+Sowing needed the same walk for a seed, so that question became a predicate and the walk is now
+written once.
+
+## The plant is asked, never second-guessed
+
+`Plant.GetStatus()` and `Plant.UpdateHealth(double)` are both public, and between them they are the
+entire planting rulebook: biome, cultivated ground, heat, cold, roof, and room to grow. So a
+villager **places one, asks it, and takes it back out** if the answer is not `Healthy`. No copy of
+seven rules to go stale the day the game changes one.
+
+**But it has to be asked as though the plant had been in the ground a while.** `UpdateHealth` takes
+the seconds since planting and gives a new plant a grace period — called with zero it answers
+`Healthy` to everything, evaluating nothing. That is right for the game and fatal here, and it is
+invisible in the signature. A day is past any grace a game could keep for something that takes at
+most eight thousand seconds to grow.
+
+**And the seed is spent last.** A refused square costs nothing. The alternative is a settlement
+quietly eating its whole seed store on the same bad square all afternoon, which is exactly the kind
+of failure that looks like working.
+
+## Spacing, and why the pitch comes from the crop
+
+Measured across what this game ships:
+
+| | room it wants |
+|---|---|
+| every crop — carrot, turnip, onion, barley, flax, kale, oat | **0.5 m** |
+| magecap | 0.8 m |
+| vines | 0.5 m, plus a 1.8 m vine radius |
+| birch, beech, fir, pine | **2 m** |
+| oak | **3 m** |
+
+**Six to one.** One pitch for everything would either pack saplings so tight that none of them grow
+— each refusing its neighbour for room, in a field that looks perfectly planted — or scatter
+carrots at a sixth of the density the ground could hold.
+
+So a field's grid takes its pitch from **the widest thing that field grows**, not from the thing
+being planted at this moment: a carrot dropped into the gap between two oaks fits, and then stops
+the oak that square was for from ever growing.
+
+## A field is shared, not claimed
+
+Whether something is exclusive is decided by **who asks**. Hauling asks, so two villagers never
+target one stack; depositing does not, so any number share a chest. A field is the second kind —
+it is hundreds of squares, and the point of marking out a big one is that several people can work
+it.
+
+They keep off each other's ground by **starting their scan of the grid at different places**, taken
+from each villager's own id. No claim, no store, no release path to forget. Two can still land on
+one square, and that is fine: the world is the arbiter, and the loser finds it taken next tick.
+
+## Replanting is free
+
+The square is re-derived from the world every tick — the same doctrine mining uses for a vein's
+parts. So a crop that Forage harvested leaves an empty square, and the next pass fills it. There is
+no bookkeeping, no event and nothing to go stale, and *"replant what was harvested"* is not a
+feature so much as a thing that could not have failed to happen.
+
+## Settings — on the field, not on the job
+
+| Setting | Meaning |
+|---|---|
+| **Grows** — a list of crops | By plant rather than by yield, because the two are not one-to-one: a carrot and a carrot seed come from different saplings and cost each other as seed. Labelled by what the build menu calls each one |
+| Each crop's mode | **Fill** — as many as fit · **Keep** — this many growing, sown again whenever one is taken · **Once** — this many and then stop for good |
+| **How big** | The field's own radius, on its own ZDO, clamped |
+| **May break new ground** — off by default | The only setting in this mod that lets a villager do something unregistering cannot undo. Terrain is permanent; the screen says so |
+| **In service** | The existing per-structure switch, free |
+
+The **job** carries nothing but `Repeat`. That is the crafting arrangement, and it is the point of
+the field being a piece.
+
+A field is **not** exempt from the reach gate the way a work flag is. A flag is exempt because
+standing beyond reach is its whole purpose; a field is somewhere the Kolony already is — and has to
+be, because a `Plant` only grows while its zone is loaded and the keep-alive holds open what the
+Kolony reaches. A field outside it would be a farm that never ripens and looks perfectly healthy
+whenever anybody walks out to see it. An outfarm composes the other way: plant a flag, then a field
+inside it.
+
+## What it does not do
+
+**It does not decide where a field goes.** That is the piece, and the piece is the player's.
+
+**It does not know what is dangerous.** Same answer foraging gives: the field's edge is the control.
+
+**It does not count what the larder holds.** A field counts what stands *in the ground*, which is a
+different question from what the settlement has stored — *"keep twenty carrots growing"* is not
+*"keep twenty carrots in the chest"*. That is why a field's order is its own type rather than the
+station order it resembles.
+
+## Done when
+
+A villager fetches seed it did not have, finds a field, breaks its ground and plants in it; no two
+plants land closer than the crop needs; a crop refused by bad ground leaves nothing standing and
+costs no seed; *Keep* stops at its number and sows again when one is taken; and a version-4
+structure blob still decodes with the field settings at their defaults.
+
+---
+
 # The tool errand — a rule the tool-holding jobs share
 
 Not a job. Nothing queues it, nothing on any screen shows it, and it has no settings of its own.

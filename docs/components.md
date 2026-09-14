@@ -58,6 +58,13 @@ paragraphs above. The drift it invites is named in `Mineable`'s own docstring: a
 minable but unworkable is a villager walking to a rock it cannot work, and one that is workable
 but never kept loaded is an outpost that silently idles.
 
+**Farming asks the thing itself, which is the ideal this document argues for.** Whether something
+will grow in a spot is seven rules - biome, cultivated ground, heat, cold, roof, room, something to
+climb - and `Plant.GetStatus()` is all seven, public, already written. So a villager places one and
+asks it rather than carrying a copy that would be wrong the day the game changed any of them. The
+cost is one instantiate that may be destroyed a line later; the benefit is a predicate that cannot
+drift from the game, because it *is* the game's.
+
 **Foraging is what mining should have looked like.** One component, `Pickable`, and one public
 predicate on it, `CanBePicked()`, which answers *is there anything on this right now* for every
 surface that asks. `Forageable.Classify` still exists for the prefab-level question the keep-alive

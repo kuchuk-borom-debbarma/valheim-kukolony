@@ -31,6 +31,7 @@ namespace Kukolony.Colonies
             internal readonly List<StructureRecord> Processing = new List<StructureRecord>();
             internal readonly List<StructureRecord> Beds = new List<StructureRecord>();
             internal readonly List<StructureRecord> Crafting = new List<StructureRecord>();
+            internal readonly List<StructureRecord> Fields = new List<StructureRecord>();
         }
 
         private static readonly Dictionary<ZDOID, Snapshot> Snapshots = new Dictionary<ZDOID, Snapshot>();
@@ -122,6 +123,34 @@ namespace Kukolony.Colonies
             return answers;
         }
 
+        /// <summary>
+        ///     The fields this colony may work, nearest first.
+        /// </summary>
+        /// <remarks>
+        ///     <b>Not exclusive, and deliberately.</b> Whether something is claimed is decided by
+        ///     who asks - hauling asks so two villagers never target one stack, and depositing
+        ///     does not so any number may share a chest. A field is the second kind: it is a patch
+        ///     of ground with hundreds of squares in it, and the point of marking out a big one is
+        ///     that several people can work it. Two villagers land on different squares because
+        ///     each starts its scan of the grid somewhere else, not because anything is held.
+        /// </remarks>
+        internal static List<StructureRecord> Fields(Colony colony, Vector3 from)
+        {
+            List<StructureRecord> answers = new List<StructureRecord>();
+            if (colony == null) return answers;
+
+            foreach (StructureRecord record in Current(colony).Fields)
+            {
+                if (!record.WorkableIn(colony)) continue;
+                if (record.Settings.Sowing.Count == 0) continue;
+
+                answers.Add(record);
+            }
+
+            Sort(answers, from);
+            return answers;
+        }
+
         /// <summary>Which processing stations are configured and below what they should hold.</summary>
         internal static List<StructureRecord> WhatWantsFeeding(Colony colony, Vector3 from)
         {
@@ -180,7 +209,8 @@ namespace Kukolony.Colonies
             // read that as "it wants nothing" and looped for ever while saying it was working.
             Snapshot snapshot = Current(colony);
             return FindIn(snapshot.Storage, id) ?? FindIn(snapshot.Processing, id)
-                ?? FindIn(snapshot.Beds, id) ?? FindIn(snapshot.Crafting, id);
+                ?? FindIn(snapshot.Beds, id) ?? FindIn(snapshot.Crafting, id)
+                ?? FindIn(snapshot.Fields, id);
         }
 
         private static StructureRecord FindIn(List<StructureRecord> records, ZDOID id)
@@ -343,6 +373,7 @@ namespace Kukolony.Colonies
             snapshot.Processing.Clear();
             snapshot.Beds.Clear();
             snapshot.Crafting.Clear();
+            snapshot.Fields.Clear();
 
             foreach (StructureRecord record in colony.State.GetStructures())
             {
@@ -350,11 +381,13 @@ namespace Kukolony.Colonies
                 if ((record.Capabilities & StructureCapability.Processing) != 0) snapshot.Processing.Add(record);
                 if ((record.Capabilities & StructureCapability.Rest) != 0) snapshot.Beds.Add(record);
                 if ((record.Capabilities & StructureCapability.Crafting) != 0) snapshot.Crafting.Add(record);
+                if ((record.Capabilities & StructureCapability.Field) != 0) snapshot.Fields.Add(record);
             }
 
             Log.Debug($"[index] rebuilt '{colony.State.Name}' at revision {revision}: " +
                       $"{snapshot.Storage.Count} storage, {snapshot.Processing.Count} processing, " +
-                      $"{snapshot.Beds.Count} beds, {snapshot.Crafting.Count} crafting");
+                      $"{snapshot.Beds.Count} beds, {snapshot.Crafting.Count} crafting, " +
+                      $"{snapshot.Fields.Count} field(s)");
             return snapshot;
         }
 

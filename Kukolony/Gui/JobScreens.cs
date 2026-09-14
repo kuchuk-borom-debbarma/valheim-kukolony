@@ -770,6 +770,10 @@ namespace Kukolony.Gui
                 case JobKind.Mine: return Resources.MiningGround.SearchRadius;
                 case JobKind.Forage: return Resources.ForagingGround.SearchRadius;
 
+                // Farming is bounded by its fields rather than by a sweep: a field is a place
+                // with an edge drawn on the ground, and the job never looks outside one.
+                case JobKind.Farm: return 0f;
+
                 // Nothing bounds the rest: hauling, tending and crafting work from the
                 // settlement's own records rather than from a sweep of the loaded world.
                 default: return 0f;

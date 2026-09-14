@@ -52,7 +52,11 @@ namespace Kukolony.Colonies
         /// <summary>
         ///     The structure record format this build writes. Readers accept 3 upwards.
         /// </summary>
-        internal const int StructureFormat = 4;
+        /// <remarks>
+        ///     Version 4 appended what a structure's own configuration needs when tending and
+        ///     crafting moved onto the stations; version 5 appends what a field needs.
+        /// </remarks>
+        internal const int StructureFormat = 5;
 
         /// <summary>
         ///     The job record format this build writes. Readers accept 2 upwards.

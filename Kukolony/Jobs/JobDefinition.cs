@@ -23,7 +23,10 @@ namespace Kukolony.Jobs
         Mine = 4,
 
         /// <summary>Pick what is there to be picked, wild or planted.</summary>
-        Forage = 5
+        Forage = 5,
+
+        /// <summary>Put things in the ground, and keep them there.</summary>
+        Farm = 6
     }
 
     /// <summary>
@@ -480,6 +483,7 @@ namespace Kukolony.Jobs
                 case JobKind.Craft: return "Craft";
                 case JobKind.Mine: return "Mine";
                 case JobKind.Forage: return "Forage";
+                case JobKind.Farm: return "Farm";
                 default: return string.Empty;
             }
         }
