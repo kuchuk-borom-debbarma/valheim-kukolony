@@ -17,7 +17,10 @@ namespace Kukolony.Jobs
         Tend = 2,
 
         /// <summary>Make what the settlement's stations have been told to make.</summary>
-        Craft = 3
+        Craft = 3,
+
+        /// <summary>Break rock for what is in it.</summary>
+        Mine = 4
     }
 
     /// <summary>
@@ -138,6 +141,30 @@ namespace Kukolony.Jobs
         ///     a full woodshed beside a bare hillside is the failure this one prevents.
         /// </remarks>
         internal int LeaveStanding;
+
+        /// <summary>
+        ///     Which ores this job goes after. Empty means all of them.
+        /// </summary>
+        /// <remarks>
+        ///     By what a deposit <em>yields</em> rather than by which rock it is, because "mine
+        ///     tin" is the sentence a player has in mind and "mine the small rock that appears
+        ///     in the Black Forest" is not. A deposit's drop table is public on its prefab, so
+        ///     this is answerable with nothing loaded - and it covers a modded deposit that
+        ///     drops copper without this mod ever hearing of it.
+        /// </remarks>
+        internal List<string> Ores = new List<string>();
+
+        /// <summary>
+        ///     Whether loose rock counts as work, as well as ore deposits.
+        /// </summary>
+        /// <remarks>
+        ///     Off by default, and for the same reason <see cref="ChopUndergrowth" /> is: the
+        ///     game offers no way to tell a boulder from a crate - DestructibleType is None,
+        ///     Default, Tree and Character, with no Stone - so this admits a great deal of
+        ///     scenery along with the stone somebody wanted. A settlement should not quietly
+        ///     flatten its own surroundings because something had a Destructible on it.
+        /// </remarks>
+        internal bool MineBoulders;
 
         /// <summary>What the settlement is gathering, for the purpose of knowing when to stop.</summary>
         internal string StockItem = string.Empty;
@@ -342,6 +369,7 @@ namespace Kukolony.Jobs
                 case JobKind.Chop: return "Chop";
                 case JobKind.Tend: return "Tend";
                 case JobKind.Craft: return "Craft";
+                case JobKind.Mine: return "Mine";
                 default: return string.Empty;
             }
         }

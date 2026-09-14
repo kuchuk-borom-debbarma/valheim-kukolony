@@ -255,7 +255,7 @@ namespace Kukolony.Villagers
         /// </summary>
         private void PutAxeAway()
         {
-            Jobs.Chop.ChopJob.PutAxeAway(_visEquipment,
+            VillagerTool.PutAway(_visEquipment,
                 _nview != null && _nview.IsValid() ? _nview.GetZDO() : null);
 
             // The rig's own hands, as well as the visible slot. Left set, the villager keeps
@@ -744,7 +744,13 @@ namespace Kukolony.Villagers
             // visible right hand, so anything else being current - a haul entry, or a chop
             // job the player deleted - has to put the axe away, or the villager carries one
             // for the rest of the session with nothing left to write the slot again.
-            if (job == null || job.Kind != Jobs.JobKind.Chop) PutAxeAway();
+            // Any job that holds a tool keeps it; everything else bares the hand. Written as
+            // the set rather than as "not chop", because the next tool-using job would have
+            // been added to the enum and quietly had its pickaxe put away every tick.
+            if (job == null || (job.Kind != Jobs.JobKind.Chop && job.Kind != Jobs.JobKind.Mine))
+            {
+                PutAxeAway();
+            }
 
             if (job == null)
             {
@@ -837,6 +843,20 @@ namespace Kukolony.Villagers
                         Bag = _bag,
                         Walk = _walk,
                         Animation = _animation,
+                        Job = job,
+                        State = state,
+                        DeltaTime = deltaTime
+                    }, out doing);
+
+                case Jobs.JobKind.Mine:
+                    return Jobs.Mine.MineJob.Tick(new Jobs.Mine.MineContext
+                    {
+                        Villager = this,
+                        Colony = colony,
+                        Bag = _bag,
+                        Walk = _walk,
+                        Animation = _animation,
+                        Equipment = _visEquipment,
                         Job = job,
                         State = state,
                         DeltaTime = deltaTime

@@ -6466,7 +6466,7 @@ namespace Kukolony.Debug
                 "control: the villager is visibly holding the axe",
                 $"worn={VillagerWardrobe.Worn(zdo, WearSlot.RightHand)}");
 
-            ChopJob.PutAxeAway(vis, zdo);
+            VillagerTool.PutAway(vis, zdo);
 
             report.Check(VillagerWardrobe.Worn(zdo, WearSlot.RightHand) == 0,
                 "an axe is put away when the villager is no longer chopping");
@@ -6490,7 +6490,7 @@ namespace Kukolony.Debug
                 report.Check(before != 0, "control: the villager is visibly holding it",
                     $"item={keepsake.name} worn={before}");
 
-                ChopJob.PutAxeAway(vis, zdo);
+                VillagerTool.PutAway(vis, zdo);
 
                 report.Check(VillagerWardrobe.Worn(zdo, WearSlot.RightHand) == before,
                     "control: gear the player chose is left alone - only an axe is taken back",
@@ -6509,7 +6509,7 @@ namespace Kukolony.Debug
             zdo.Set(ZDOVars.s_rightItem, "kukolony_not_a_real_item".GetStableHashCode());
 
             int mystery = VillagerWardrobe.Worn(zdo, WearSlot.RightHand);
-            ChopJob.PutAxeAway(vis, zdo);
+            VillagerTool.PutAway(vis, zdo);
 
             report.Check(VillagerWardrobe.Worn(zdo, WearSlot.RightHand) == mystery,
                 "an item it cannot identify is left in place rather than taken",

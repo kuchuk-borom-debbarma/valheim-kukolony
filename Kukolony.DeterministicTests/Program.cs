@@ -7,6 +7,7 @@ using Kukolony.Jobs.Haul;
 using Kukolony.Jobs.Chop;
 using Kukolony.Jobs.Tend;
 using Kukolony.Jobs.Craft;
+using Kukolony.Jobs.Mine;
 
 /// <summary>
 ///     Verification for logic that needs no game running.
@@ -69,6 +70,8 @@ static class Program
         OrderArithmetic();
         CraftingPlan();
         Crafting();
+        MiningParts();
+        Mining();
         Tending();
 
         Console.WriteLine(_failed == 0
@@ -998,6 +1001,155 @@ static class Program
     ///     passes for a function that always answers zero, so the case after it asks the same
     ///     question of a station that <em>is</em> running and requires a number back.
     /// </remarks>
+
+    /// <summary>
+    ///     Which part of a deposit to work next.
+    /// </summary>
+    /// <remarks>
+    ///     The one idea mining has that chopping does not: a tree is a target, a silver vein is
+    ///     forty targets wearing one name. Worth checking without a game because the failure is
+    ///     invisible - a villager that keeps choosing a part which is no longer there looks
+    ///     exactly like one that is working.
+    /// </remarks>
+    static void MiningParts()
+    {
+        Console.WriteLine("mining parts");
+
+        List<Spot> none = new List<Spot>();
+        Case("a deposit with no parts left is finished", MineTargets.Finished(none));
+        Case("and offers nothing to hit", !MineTargets.Nearest(none, 0f, 0f, out Spot _));
+
+        List<Spot> vein = new List<Spot>
+        {
+            new Spot(0, 10f, 0f),
+            new Spot(1, 2f, 0f),
+            new Spot(2, 5f, 0f)
+        };
+
+        Case("control: a deposit with parts is not finished", !MineTargets.Finished(vein));
+
+        Case("the nearest part is the one chosen",
+            MineTargets.Nearest(vein, 0f, 0f, out Spot near) && near.Index == 1);
+
+        // Nearest to the *villager*, not to the deposit: the whole point is that a villager
+        // works the rock in front of it and follows the face round as parts fall.
+        Case("and nearest means nearest to where the villager stands",
+            MineTargets.Nearest(vein, 12f, 0f, out Spot far) && far.Index == 0);
+
+        Case("distance is measured flat, so a part overhead is still at hand",
+            MineTargets.Nearest(new List<Spot> { new Spot(7, 0.5f, 0.5f) }, 0f, 0f, out Spot above) &&
+            above.Index == 7);
+
+        // A part that collapsed is simply not in the list - which is what makes "never
+        // remember an index" enforceable rather than merely advised.
+        List<Spot> collapsed = new List<Spot> { new Spot(2, 5f, 0f) };
+        Case("a part that fell on its own is not chosen again",
+            MineTargets.Nearest(collapsed, 0f, 0f, out Spot left) && left.Index == 2);
+
+        // Stable under a tie, or a villager standing between two rocks shuffles between them.
+        List<Spot> tied = new List<Spot> { new Spot(4, 3f, 0f), new Spot(9, -3f, 0f) };
+        Case("a tie goes to the first, so the answer does not flicker",
+            MineTargets.Nearest(tied, 0f, 0f, out Spot first) && first.Index == 4 &&
+            MineTargets.Nearest(tied, 0f, 0f, out Spot again) && again.Index == 4);
+    }
+
+    static MineFacts Mine(bool hasTool = true, bool hasDeposit = false, bool hasArea = true,
+        bool atArea = false, bool enough = false, bool tired = false) =>
+        new MineFacts(hasTool, hasDeposit, hasArea, atArea, enough, tired);
+
+    static void Step(string what, MineState state, MineFacts facts, MineAction expected)
+    {
+        MineAction actual = MineTransitions.Next(state, facts).Action;
+        Case($"{what} (got {actual})", actual == expected);
+    }
+
+    /// <summary>The mining state machine, exhaustively.</summary>
+    static void Mining()
+    {
+        Console.WriteLine("mining");
+
+        Step("with nothing chosen it looks for work", MineState.Choosing, Mine(), MineAction.ChooseWork);
+
+        Step("with a deposit chosen it walks to the part it is working",
+            MineState.Choosing, Mine(hasDeposit: true), MineAction.MoveToArea);
+
+        Step("standing at it, it swings",
+            MineState.Approaching, Mine(hasDeposit: true, atArea: true), MineAction.Strike);
+
+        Step("and goes on swinging",
+            MineState.Mining, Mine(hasDeposit: true, atArea: true), MineAction.Strike);
+
+        // The difference from chopping, in three cases. A deposit outlives its last part, so
+        // "the rock is still there" is not "there is something to hit".
+        Step("a deposit whose last part fell is finished, not walked to",
+            MineState.Approaching, Mine(hasDeposit: true, hasArea: false), MineAction.Complete);
+
+        Step("and finished mid-swing too",
+            MineState.Mining, Mine(hasDeposit: true, hasArea: false, atArea: true), MineAction.Complete);
+
+        Step("a deposit chosen and already empty is dropped before the walk starts",
+            MineState.Choosing, Mine(hasDeposit: true, hasArea: false), MineAction.ChooseWork);
+
+        // Parts fall that nobody struck, so the walk is re-aimed between blows rather than only
+        // on arrival - the villager follows the face round the vein.
+        Step("the part being worked can move, so it walks again between blows",
+            MineState.Mining, Mine(hasDeposit: true, atArea: false), MineAction.MoveToArea);
+
+        Step("no pickaxe is an ordinary answer, not a failure",
+            MineState.Choosing, Mine(hasTool: false), MineAction.Yield);
+
+        Step("losing the pickaxe mid-swing sends it back to be told there is nothing to do",
+            MineState.Mining, Mine(hasTool: false, hasDeposit: true, atArea: true), MineAction.Yield);
+
+        Step("having enough stops it", MineState.Choosing, Mine(enough: true), MineAction.Yield);
+        Step("being tired stops it", MineState.Choosing, Mine(tired: true), MineAction.Yield);
+
+        Step("a deposit that was destroyed under it ends the trip",
+            MineState.Mining, Mine(hasDeposit: false, atArea: true), MineAction.Complete);
+
+        Step("an unknown state starts over", (MineState)99, Mine(), MineAction.ChooseWork);
+
+        // Every combination, against the things that must never happen.
+        int struckWithNothing = 0, struckEmpty = 0, struckFromAfar = 0, struckWithoutTool = 0, idle = 0;
+        MineState[] states = { MineState.Choosing, MineState.Approaching, MineState.Mining };
+
+        for (int bits = 0; bits < 64; bits++)
+        {
+            MineFacts facts = new MineFacts(
+                hasTool: (bits & 1) != 0,
+                hasDeposit: (bits & 2) != 0,
+                hasArea: (bits & 4) != 0,
+                atArea: (bits & 8) != 0,
+                enough: (bits & 16) != 0,
+                tired: (bits & 32) != 0);
+
+            foreach (MineState from in states)
+            {
+                MineAction action = MineTransitions.Next(from, facts).Action;
+
+                if (action == MineAction.Strike)
+                {
+                    if (!facts.HasDeposit) struckWithNothing++;
+                    if (!facts.HasArea) struckEmpty++;
+                    if (!facts.AtArea) struckFromAfar++;
+                    if (!facts.HasTool) struckWithoutTool++;
+                }
+
+                if (!Enum.IsDefined(typeof(MineAction), action)) idle++;
+            }
+        }
+
+        Case($"no combination ever swings at a deposit it has not got (did {struckWithNothing})",
+            struckWithNothing == 0);
+        Case($"no combination ever swings at a deposit with nothing left (did {struckEmpty})",
+            struckEmpty == 0);
+        Case($"no combination ever swings from away from the rock (did {struckFromAfar})",
+            struckFromAfar == 0);
+        Case($"no combination ever swings without a pickaxe (did {struckWithoutTool})",
+            struckWithoutTool == 0);
+        Case($"every combination produces an action (undefined in {idle})", idle == 0);
+    }
+
     static void Appetite()
     {
         Console.WriteLine("station appetite");
