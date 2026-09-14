@@ -799,3 +799,64 @@ than as a repetition spent on work it never did.
 A deposit comes apart part by part, what is left survives being unloaded, a pickaxe too weak is
 refused and said, the ore filter leaves the wrong rock alone, loose rock is untouched until it is
 asked for, the stock rule stops it, and two villagers never work one vein.
+
+---
+
+# The tool errand — a rule the tool-holding jobs share
+
+Not a job. Nothing queues it, nothing on any screen shows it, and it has no settings of its own.
+It is what anybody does before starting work: if the job needs a tool and the bag has none, go and
+get one.
+
+## Why it is not a job
+
+Written as a job it would need a queue entry per tool, per villager — and a chopper walking to a
+chest for an axe would be reporting *"no axe"* the whole way, which reads as broken. It is also
+the wrong shape: every job that holds a tool needs exactly this, and none of them needs it
+differently.
+
+## Where it runs
+
+**Before the state machine, not inside it.** Both `ChopJob.Tick` and `MineJob.Tick` ask it first,
+and it answers `null` when there is nothing to fetch — at which point the table gives the answer
+it always gave. That is what keeps *"the settlement has no pickaxe"* an honest report instead of a
+missing feature.
+
+Two things are asked before it:
+
+- **The stock rule.** A villager about to stand down because the store is full does not first walk
+  across the settlement for a tool it will never swing.
+- **Nothing else.** In particular it is not gated on there being work, because the walk to the
+  chest is long enough that work can appear during it.
+
+## Which chest
+
+The nearest one in `SettlementIndex.WhatMayBeTidied` that holds a tool of the right kind — which
+is already the list of containers the settlement may take from. **A chest switched to *villagers
+may not use what is here* keeps its tools**, and that is exactly what a player means by putting
+their own axe in one.
+
+`VillagerTool.Best` decides on both sides — the chest and the bag — so a tool the errand would
+fetch is always a tool the job will then find. Asking two different questions there would be a
+villager fetching an axe for ever and never seeing it.
+
+## It keeps no state
+
+The chest is found again every tick rather than remembered. The alternative is a third set of
+target fields living beside the job's own and going stale in ways only this errand would know
+about; re-deciding costs one lookup against a cached snapshot, and buys the case where somebody
+else took the axe first for free.
+
+## What it does not do
+
+- **It does not upgrade.** A villager holding a flint axe does not cross the settlement for a
+  bronze one; the errand only runs when the hand is empty.
+- **It does not take from a player's inventory**, or from anything that is not a registered
+  container the settlement may take from.
+- **It does not haul.** A bag with no room for a tool is a bag that needs emptying, which is
+  hauling's business.
+
+## Done when
+
+A villager with an empty bag fetches a pickaxe from a registered chest and mines with it — and
+does not touch the same chest while it is marked as one villagers may not take from.

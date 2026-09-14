@@ -152,14 +152,30 @@ namespace Kukolony.Jobs.Mine
             if (lost) state.ClearTarget();
 
             ItemDrop.ItemData pick = Pickaxe(context);
+
+            bool enough = Enough(context);
+
+            // Fetch one before doing anything else. Asked here rather than inside the table
+            // because the table's answer - yield, there is no pickaxe - stays right when the
+            // settlement has none either, and this returns null in exactly that case.
+            //
+            // Not when the store is already full, though. A villager that is about to stand
+            // down should not first walk across the settlement for a pickaxe it will never
+            // swing, and the stopping rule is the one answer that holds whatever is in hand.
+            if (pick == null && !enough)
+            {
+                JobResult? fetching = ToolErrand.Run(context.Villager, context.Colony, context.Bag,
+                    context.Walk, state, context.DeltaTime, ToolKind.Pickaxe, out activity);
+
+                if (fetching.HasValue) return fetching.Value;
+            }
+
             MineProtocol rock = Working(context, target);
 
             // The part to work, chosen afresh from what is standing. This is the line the whole
             // job is arranged around: everything below asks about *this* part, and next tick it
             // may be a different one because the rock moved under it.
             bool has = Part(context, rock, out MineArea part);
-
-            bool enough = Enough(context);
 
             MineFacts facts = new MineFacts(
                 hasTool: pick != null,

@@ -5714,10 +5714,138 @@ namespace Kukolony.Debug
             yield return CheckMiningIndex(report);
             yield return CheckRockIsKeptLoaded(report);
             yield return CheckThePickaxeIsPutAway(report, colony);
+            yield return CheckAVillagerFetchesItsOwnTool(report, colony, origin);
             yield return CheckMineSettings(report);
             yield return CheckMineStoppingRules(report, colony, origin);
             yield return CheckAVeinIsMinedPartByPart(report, colony, origin);
             yield return CheckMiningBreaksADeposit(report, colony, origin);
+        }
+
+        /// <summary>
+        ///     A villager with an empty bag goes and gets a pickaxe out of a chest.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>The errand is a rule, not a job</b>, so nothing queues it and nothing on
+        ///         any screen shows it running. That makes it exactly the kind of behaviour that
+        ///         can rot unnoticed: both tool-holding jobs already yield politely when there is
+        ///         no tool, so an errand that silently stopped working would look like a
+        ///         settlement with no pickaxes rather than like a bug.
+        ///     </para>
+        ///     <para>
+        ///         <b>Written as an if-and-only-if</b>, in that order. The chest is first marked
+        ///         as one villagers may not take from and the bag must stay empty - which is the
+        ///         arm that fails if the errand simply raids every container it can see, and it
+        ///         is the arm a player cares about, because a chest switched off is where
+        ///         somebody keeps their own gear. Only then is the setting flipped, with the same
+        ///         chest and the same villager, so the second arm cannot pass by accident.
+        ///     </para>
+        ///     <para>
+        ///         No deposit is placed. The errand runs before the state machine is consulted,
+        ///         so a rock would only add a way for this to fail for an unrelated reason.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckAVillagerFetchesItsOwnTool(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            Vector3 site = MiningSite(origin) + new Vector3(0f, 0f, 30f);
+
+            GameObject chest = Spawn("piece_chest_wood", site + new Vector3(4f, 0f, 0f));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            StructureRecord shed = Register(colony, chest, "Tool shed");
+            Container store = chest != null ? chest.GetComponentInChildren<Container>(true) : null;
+            ItemDrop.ItemData spare = AnyPickaxe();
+
+            if (shed == null || store == null || spare == null)
+            {
+                report.Check(false, "control: the tool errand check could stock a registered chest",
+                    $"registered={(shed != null)} container={(store != null)} pickaxe={(spare != null)}");
+                Release(chest);
+                yield break;
+            }
+
+            Clear(store.GetInventory());
+            store.GetInventory().AddItem(spare);
+
+            // Off first. This is the arm that matters most, and putting it second would let a
+            // villager that had already fetched one pass it holding the earlier pickaxe.
+            ColonyOperations.EditSettings(colony, shed.Id, settings => settings.MayTakeFrom = false);
+            SettlementIndex.ResetForTest();
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "errand", Name = "Mine", Kind = JobKind.Mine, Repeat = 30 }
+            });
+
+            Villager miner = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (miner == null || !miner.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "control: the tool errand check could spawn a villager");
+                colony.RemoveStructure(shed.Id);
+                Release(chest);
+                colony.State.SetJobs(new List<JobDefinition>());
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+
+            Container bag = VillagerInventory.Attach(miner.gameObject, view);
+            Clear(bag.GetInventory());
+            VillagerInventory.Persist(bag, view);
+
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "errand" });
+            miner.transform.position = site;
+
+            report.Check(VillagerTool.Best(bag.GetInventory(), ToolKind.Pickaxe) == null,
+                "control: the villager starts with nothing in its bag");
+
+            // Long enough to walk four metres several times over, so "it did not go" is the
+            // reading rather than "it had not got there yet".
+            for (float waited = 0f; waited < 10f; waited += .5f)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+            }
+
+            bool raided = miner != null && VillagerTool.Best(bag.GetInventory(), ToolKind.Pickaxe) != null;
+
+            report.Check(!raided,
+                "a chest marked as one villagers may not take from keeps its tools",
+                $"tookIt={raided} doing='{(miner != null ? miner.Activity : "gone")}' " +
+                $"inChest={Count(store.GetInventory(), spare.m_dropPrefab != null ? spare.m_dropPrefab.name : string.Empty)}");
+
+            ColonyOperations.EditSettings(colony, shed.Id, settings => settings.MayTakeFrom = true);
+            SettlementIndex.ResetForTest();
+
+            bool fetched = false;
+            float elapsed = 0f;
+
+            while (elapsed < 45f && !fetched)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                elapsed += .5f;
+
+                if (miner == null || !view.IsValid()) break;
+                fetched = VillagerTool.Best(bag.GetInventory(), ToolKind.Pickaxe) != null;
+            }
+
+            report.Check(fetched,
+                "and once it may, a villager with no pickaxe walks to the chest and takes one",
+                $"after={elapsed:0}s doing='{(miner != null ? miner.Activity : "gone")}' " +
+                $"leftInChest={(store != null ? store.GetInventory().NrOfItems() : -1)}");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.RemoveStructure(shed.Id);
+            Release(chest);
+            colony.State.SetJobs(new List<JobDefinition>());
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
         }
 
         private static IEnumerator CheckMiningBreaksADeposit(TestReport report, Colony colony,

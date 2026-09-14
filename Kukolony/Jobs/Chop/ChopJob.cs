@@ -202,6 +202,20 @@ namespace Kukolony.Jobs.Chop
             // store was empty and went and felled another one past the stopping rule.
             bool enough = Enough(context);
 
+            // Fetch an axe before doing anything else, as mining does. The table's answer when
+            // there is no axe stays right when the settlement has none either, and the errand
+            // returns null in exactly that case.
+            //
+            // Not when the store is already full, though: walking across the settlement for an
+            // axe that is about to be put away again is the one errand nobody wants to watch.
+            if (axe == null && !enough)
+            {
+                JobResult? fetching = ToolErrand.Run(context.Villager, context.Colony, context.Bag,
+                    context.Walk, context.State, context.DeltaTime, ToolKind.Axe, out activity);
+
+                if (fetching.HasValue) return fetching.Value;
+            }
+
             ChopFacts facts = new ChopFacts(
                 hasTool: axe != null,
                 hasTarget: !state.Target.IsNone(),
