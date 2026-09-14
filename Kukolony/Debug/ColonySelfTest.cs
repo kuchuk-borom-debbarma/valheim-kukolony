@@ -6463,15 +6463,27 @@ namespace Kukolony.Debug
         }
 
         /// <summary>Somewhere to farm, away from every other site this suite uses.</summary>
-        private static Vector3 FarmSite(Vector3 origin)
+        private static Vector3 FarmSite(Vector3 origin) => OnGround(origin + new Vector3(-24f, 0f, 24f));
+
+        /// <summary>
+        ///     A point put on the terrain.
+        /// </summary>
+        /// <remarks>
+        ///     Every fixture that places a built piece needs this and not every one had it. A
+        ///     piece spawned above or below the ground has nothing holding it up and WearNTear
+        ///     takes it down seconds later - and a check whose chest quietly collapsed reports
+        ///     everything it was counting as zero, which reads as the job under test doing
+        ///     nothing at all. The crafting check spent a run saying exactly that while the log
+        ///     recorded five pickaxes being made.
+        /// </remarks>
+        private static Vector3 OnGround(Vector3 at)
         {
-            Vector3 site = origin + new Vector3(-24f, 0f, 24f);
-            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(site, out float ground))
+            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(at, out float ground))
             {
-                site.y = ground;
+                at.y = ground;
             }
 
-            return site;
+            return at;
         }
 
         /// <summary>How many plants stand within a radius of a point.</summary>
@@ -7065,16 +7077,7 @@ namespace Kukolony.Debug
         }
 
         /// <summary>Somewhere to forage, away from the chopping and mining sites.</summary>
-        private static Vector3 ForagingSite(Vector3 origin)
-        {
-            Vector3 site = ChoppingSite(origin) + new Vector3(-80f, 0f, 0f);
-            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(site, out float ground))
-            {
-                site.y = ground;
-            }
-
-            return site;
-        }
+        private static Vector3 ForagingSite(Vector3 origin) => OnGround(ChoppingSite(origin) + new Vector3(-80f, 0f, 0f));
 
         private static IEnumerator CheckMiningBreaksADeposit(TestReport report, Colony colony,
             Vector3 origin)
@@ -8825,16 +8828,7 @@ namespace Kukolony.Debug
         ///     Where mining fixtures go: beside ground three other checks already use, on an
         ///     offset none of them does.
         /// </summary>
-        private static Vector3 MiningSite(Vector3 origin)
-        {
-            Vector3 site = ChoppingSite(origin) + new Vector3(-40f, 0f, 0f);
-            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(site, out float ground))
-            {
-                site.y = ground;
-            }
-
-            return site;
-        }
+        private static Vector3 MiningSite(Vector3 origin) => OnGround(ChoppingSite(origin) + new Vector3(-40f, 0f, 0f));
 
         /// <summary>Clears loose items from a patch, so a count of what fell means this run's.</summary>
         private static void SweepDrops(Vector3 site, float radius)
@@ -8862,16 +8856,7 @@ namespace Kukolony.Debug
             return true;
         }
 
-        private static Vector3 ChoppingSite(Vector3 origin)
-        {
-            Vector3 site = origin + new Vector3(90f, 0f, -90f);
-            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(site, out float ground))
-            {
-                site.y = ground;
-            }
-
-            return site;
-        }
+        private static Vector3 ChoppingSite(Vector3 origin) => OnGround(origin + new Vector3(90f, 0f, -90f));
 
         /// <summary>
         ///     How long to allow for felling one tree and cutting up its log.
@@ -9296,8 +9281,13 @@ namespace Kukolony.Debug
             SweepLooseItems(colony);
             SettlementIndex.ResetForTest();
 
-            GameObject bench = SpawnFirst(origin + new Vector3(7f, 0f, 7f), "piece_workbench");
-            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(4f, 0f, 7f));
+            // On the ground, both of them. A built piece spawned above or below the terrain has
+            // nothing holding it up, and WearNTear takes it down a few seconds later - which this
+            // check read as a settlement that crafted nothing, because everything it counted was
+            // counted inside a chest that no longer existed. The log said otherwise: five
+            // pickaxes made, and then "Craft store was destroyed".
+            GameObject bench = SpawnFirst(OnGround(origin + new Vector3(7f, 0f, 7f)), "piece_workbench");
+            GameObject chest = Spawn("piece_chest_wood", OnGround(origin + new Vector3(4f, 0f, 7f)));
             yield return new WaitForSecondsRealtime(.4f);
 
             CraftingStation component = bench != null ? bench.GetComponentInChildren<CraftingStation>(true) : null;
@@ -9433,6 +9423,22 @@ namespace Kukolony.Debug
             }
 
             int filed = CountIn(box, product);
+
+            // Whether the chest is still there at all, because it has not always been. A run that
+            // made five pickaxes reported none: everything this check counts is counted inside
+            // that chest, so a chest that dies mid-run reads as a settlement that crafted nothing
+            // - an accusation against the job under test, from a check whose own fixture failed.
+            bool chestAlive = chest != null;
+            ZDO chestRecord = chestAlive && chest.TryGetComponent(out ZNetView chestView) && chestView.IsValid()
+                ? chestView.GetZDO()
+                : null;
+
+            bool stillRegistered = colony.State.GetStructures().Exists(r => r.Id == store.Id);
+
+            report.Check(chestAlive && chestRecord != null && stillRegistered,
+                "control: the chest this check counts in is still there to count in",
+                $"object={chestAlive} zdo={(chestRecord != null)} registered={stillRegistered}");
+
             report.Check(filed >= target,
                 "control: back in service, the order is made and a hauler files it",
                 $"{product}={filed} target={target} maker='{maker.Activity}' hauler='{mover.Activity}'");
