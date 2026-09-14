@@ -69,6 +69,17 @@ namespace Kukolony.Jobs.Craft
         /// </remarks>
         private const int HighestLevel = 4;
 
+        /// <summary>
+        ///     Marks a trip as a repair rather than a craft.
+        /// </summary>
+        /// <remarks>
+        ///     Cargo holds what the trip is for, and the two kinds of trip need to be told apart
+        ///     from one string. A prefix rather than a second ZDO field because the distinction
+        ///     is the villager's own business for the length of one errand - nothing outside
+        ///     this job reads it, and a persisted field would be one more thing to keep true.
+        /// </remarks>
+        private const string RepairMark = "repair:";
+
         private static readonly Dictionary<ZDOID, float> NextCraft = new Dictionary<ZDOID, float>();
 
         /// <summary>Dropped when a world unloads; none of these identities survive one.</summary>
@@ -92,23 +103,40 @@ namespace Kukolony.Jobs.Craft
             if (targetLost) state.ClearTarget();
             if (supplyLost) state.SetDestination(ZDOID.None);
 
-            string product = state.Cargo ?? string.Empty;
-            Recipe recipe = CraftCatalogue.RecipeFor(product);
-            List<CraftNeed> needs = Needs(recipe);
+            string cargo = state.Cargo ?? string.Empty;
+            bool repairing = cargo.StartsWith(RepairMark, System.StringComparison.Ordinal);
+            string product = repairing ? cargo.Substring(RepairMark.Length) : cargo;
+
+            Recipe recipe = repairing ? null : CraftCatalogue.RecipeFor(product);
+
+            // A repair carries one thing and spends nothing, so its "recipe" is the item itself.
+            // That is what lets the fetching half of this job be shared without a branch in it.
+            List<CraftNeed> needs = repairing
+                ? new List<CraftNeed> { new CraftNeed(product, 1) }
+                : Needs(recipe);
 
             StructureRecord record = SettlementIndex.Find(context.Colony, state.Target);
             CraftStation station = Station(target);
             Inventory bag = context.Bag.GetInventory();
 
             CraftFacts facts = new CraftFacts(
-                hasStation: !state.Target.IsNone() && recipe != null,
+                hasStation: !state.Target.IsNone() && (recipe != null || repairing),
                 hasSupply: !state.Destination.IsNone(),
                 atSupply: Within(context, supply),
                 atStation: Within(context, target),
-                hasMaterials: recipe != null && CraftPlan.Enough(needs, item => Held(bag, item)),
-                stationUsable: station != null && station.Usable(out string _) && Level(station, recipe),
-                wantsMade: record != null && Wanted(context.Colony, record, product),
-                bagRoom: recipe != null && Room(bag, recipe) > 0,
+                hasMaterials: (recipe != null || repairing) &&
+                              CraftPlan.Enough(needs, item => Held(bag, item)),
+                stationUsable: station != null && station.Usable(out string _) &&
+                               (repairing || Level(station, recipe)),
+
+                // A repair wants doing while the station still offers to do it and the thing is
+                // still worn; a craft wants doing while its order is short.
+                wantsMade: repairing
+                    ? record != null && record.Settings.Repairs && Repairing.Anything(bag, station)
+                    : record != null && Wanted(context.Colony, record, product),
+
+                // Nothing comes out of a repair, so there is always room for it.
+                bagRoom: repairing || (recipe != null && Room(bag, recipe) > 0),
                 tired: false);
 
             // Anything held that this recipe does not need is finished work, and a hauler is
@@ -133,7 +161,7 @@ namespace Kukolony.Jobs.Craft
                     return Record(state, step, Walk(context, supply, "fetching", out activity));
 
                 case CraftAction.Collect:
-                    return Record(state, step, Collect(context, supply, needs, out activity));
+                    return Record(state, step, Collect(context, supply, needs, repairing, out activity));
 
                 case CraftAction.MoveToStation:
                     BeginLeg(context, CraftState.Delivering);
@@ -141,7 +169,9 @@ namespace Kukolony.Jobs.Craft
                         ItemCatalogue.Label(product), out activity));
 
                 case CraftAction.Craft:
-                    return Record(state, step, Make(context, station, recipe, needs, out activity));
+                    return Record(state, step, repairing
+                        ? Mend(context, station, out activity)
+                        : Make(context, station, recipe, needs, out activity));
 
                 case CraftAction.Complete:
                     Rest(context);
@@ -247,6 +277,18 @@ namespace Kukolony.Jobs.Craft
                 }
             }
 
+            // Nothing to make anywhere. Only now is mending worth looking for: crafting is
+            // what a player asked for by writing an order, and a settlement that mended axes
+            // while a standing order went unmade would be answering a question nobody asked.
+            if (Repairing.Find(context.Colony, areas, context.Villager,
+                    out StructureRecord bench, out StructureRecord kept, out string worn))
+            {
+                Begin(context, bench.Id, RepairMark + worn);
+                state.SetDestination(kept.Id);
+                activity = "fetching " + ItemCatalogue.Label(worn) + " to mend";
+                return JobResult.Running;
+            }
+
             // Nothing to make. Anything carried is left in the bag for a hauler, which is where
             // it was always going to end up.
             state.ClearTarget();
@@ -332,7 +374,7 @@ namespace Kukolony.Jobs.Craft
         ///     chest for whatever it is still short of - the station stays claimed throughout.
         /// </remarks>
         private static JobResult Collect(CraftContext context, GameObject chest,
-            List<CraftNeed> needs, out string activity)
+            List<CraftNeed> needs, bool repairing, out string activity)
         {
             VillagerState state = context.State;
 
@@ -366,7 +408,13 @@ namespace Kukolony.Jobs.Craft
                 // full chest and reports the iron gone.
                 while (short_of > 0)
                 {
-                    ItemDrop.ItemData item = from.GetItem(need.Item, isPrefabName: true);
+                    // A repair fetches the *worn* one. Asking by name alone would as happily
+                    // carry a pristine axe to the bench, find nothing to mend, and carry it
+                    // back - which looks exactly like a villager doing something useful.
+                    ItemDrop.ItemData item = repairing
+                        ? Damaged(from, need.Item)
+                        : from.GetItem(need.Item, isPrefabName: true);
+
                     if (item == null) break;
 
                     switch (Carrying.TakeFromContainer(container, item, bag, out string _))
@@ -498,6 +546,59 @@ namespace Kukolony.Jobs.Craft
         }
 
         /// <summary>
+        ///     Mends one worn thing at a station that mends.
+        /// </summary>
+        /// <remarks>
+        ///     Paced like a craft, and for the same reason: a villager that silently restored a
+        ///     chest's worth of gear in one frame would be indistinguishable from one that did
+        ///     nothing at all. Costs no materials, which is vanilla's rule rather than a
+        ///     simplification of it.
+        /// </remarks>
+        private static JobResult Mend(CraftContext context, CraftStation station, out string activity)
+        {
+            VillagerState state = context.State;
+
+            if (station == null)
+            {
+                state.ClearTarget();
+                activity = "it was gone";
+                return JobResult.Running;
+            }
+
+            if (!station.Usable(out string why))
+            {
+                state.ClearTarget();
+                activity = why;
+                return JobResult.Running;
+            }
+
+            ZDOID who = context.Villager.Id;
+            station.PokeInUse();
+            context.Animation.Crafting(station.UseAnimation);
+
+            if (NextCraft.TryGetValue(who, out float next) && Time.time < next)
+            {
+                activity = "mending";
+                return JobResult.Running;
+            }
+
+            NextCraft[who] = Time.time + SecondsPerCraft;
+
+            if (!Repairing.Mend(context.Bag.GetInventory(), station, out string mended))
+            {
+                // Nothing left worn. The trip is over, and the gear goes back in a chest the way
+                // everything else a villager holds does - a hauler collects it.
+                state.SetCargo(string.Empty);
+                activity = "nothing left to mend";
+                return JobResult.Running;
+            }
+
+            Report.Say($"{state.Name} mended {Localization.instance.Localize(mended)}.");
+            activity = "mending";
+            return JobResult.Running;
+        }
+
+        /// <summary>
         ///     Marks a one-off order finished, once it is.
         /// </summary>
         /// <remarks>
@@ -597,6 +698,18 @@ namespace Kukolony.Jobs.Craft
             }
 
             return false;
+        }
+
+        /// <summary>The first worn one of a kind in a chest, or null when they are all sound.</summary>
+        private static ItemDrop.ItemData Damaged(Inventory inventory, string prefab)
+        {
+            foreach (ItemDrop.ItemData item in inventory.GetAllItems())
+            {
+                if (Carrying.NameOf(item) != prefab) continue;
+                if (Repairing.Worn(item)) return item;
+            }
+
+            return null;
         }
 
         /// <summary>What one craft consumes, in prefab names.</summary>
