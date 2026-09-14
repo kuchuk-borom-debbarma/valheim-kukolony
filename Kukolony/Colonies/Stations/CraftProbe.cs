@@ -68,12 +68,21 @@ namespace Kukolony.Colonies.Stations
         ///     that needs it, so the component test lives beside the other one and the two
         ///     cannot quietly come to disagree about what a crafting station is.
         /// </remarks>
-        internal static string NameOfPrefab(GameObject prefab)
-        {
-            if (prefab == null) return string.Empty;
+        internal static string NameOfPrefab(GameObject prefab) =>
+            Of(prefab) is CraftingStation station ? station.m_name : string.Empty;
 
-            CraftingStation station = prefab.GetComponentInChildren<CraftingStation>(true);
-            return station != null ? station.m_name : string.Empty;
-        }
+        /// <summary>
+        ///     Whether this kind of station also offers the recipes that need no station.
+        /// </summary>
+        /// <remarks>
+        ///     Vanilla's own rule: <c>Player.RequiredCraftingStation</c> accepts a recipe naming
+        ///     no station unless the station being used says otherwise. It is what makes a stone
+        ///     axe appear at a workbench.
+        /// </remarks>
+        internal static bool ShowsBasic(GameObject prefab) =>
+            Of(prefab) is CraftingStation station && station.m_showBasicRecipies;
+
+        private static CraftingStation Of(GameObject prefab) =>
+            prefab != null ? prefab.GetComponentInChildren<CraftingStation>(true) : null;
     }
 }

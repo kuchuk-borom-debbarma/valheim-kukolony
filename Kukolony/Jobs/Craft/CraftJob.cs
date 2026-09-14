@@ -253,15 +253,19 @@ namespace Kukolony.Jobs.Craft
                         Recipe recipe = CraftCatalogue.RecipeFor(order.Item);
                         if (recipe == null) continue;
 
-                        // The level is the station's, not the prefab's, so this is the first
-                        // point the question can be answered - and answering it here rather
-                        // than on arrival saves a walk to a bench that cannot do the work.
-                        if (!Level(Station(ZNetScene.instance != null
-                                ? ZNetScene.instance.FindInstance(record.Id)
-                                : null), recipe))
-                        {
-                            continue;
-                        }
+                        // Answered here rather than on arrival, which saves a walk to a bench
+                        // that cannot do the work - and the level is the *station's* rather than
+                        // the prefab's, so this is also the first point it can be answered at
+                        // all. An order can outlive the reason it made sense: a station renamed
+                        // by a game update, or a basic recipe on a bench that stopped offering
+                        // them, would otherwise be fetched for and carried to for ever.
+                        CraftStation workshop = Station(ZNetScene.instance != null
+                            ? ZNetScene.instance.FindInstance(record.Id)
+                            : null);
+
+                        if (workshop == null) continue;
+                        if (!CraftCatalogue.MadeAt(recipe, workshop.StationName, workshop.ShowsBasic)) continue;
+                        if (!Level(workshop, recipe)) continue;
 
                         List<CraftNeed> wanted = Needs(recipe);
                         Inventory bag = context.Bag.GetInventory();

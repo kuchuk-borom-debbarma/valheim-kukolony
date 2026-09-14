@@ -36,6 +36,9 @@ namespace Kukolony
         /// <summary>How near a player must be for a travelling villager to walk rather than reckon.</summary>
         internal static ConfigEntry<float> TravelObservedRange { get; private set; }
 
+        /// <summary>Whether a crafting station only offers what this player has discovered.</summary>
+        internal static ConfigEntry<bool> OnlyKnownRecipes { get; private set; }
+
         /// <summary>Energy spent per action, successful or not.</summary>
         internal static ConfigEntry<float> EnergyPerAction { get; private set; }
 
@@ -111,6 +114,14 @@ namespace Kukolony
                 true,
                 "Villagers keep a small area around themselves loaded, so Kolonies carry on "
                 + "working when no player is nearby. Disable to compare against vanilla behaviour.");
+
+            OnlyKnownRecipes = config.Bind(
+                "4 - Work",
+                nameof(OnlyKnownRecipes),
+                true,
+                "A crafting station offers only recipes this player has discovered, as their own "
+                + "crafting menu does. Turn off to order anything the station could make - useful "
+                + "on a server where the discoveries belong to somebody else.");
 
             EnergyPerAction = config.Bind(
                 "4 - Work",

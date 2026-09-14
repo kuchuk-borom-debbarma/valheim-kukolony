@@ -50,15 +50,73 @@ namespace Kukolony.Colonies
 
         private static readonly Dictionary<string, Recipe> Recipes = new Dictionary<string, Recipe>();
 
+        /// <summary>
+        ///     Recipes that need no station at all.
+        /// </summary>
+        /// <remarks>
+        ///     The stone axe, the club, the hammer, the torch - the things a player makes with
+        ///     bare hands. They were being dropped entirely, because a catalogue keyed by station
+        ///     name has nowhere to file a recipe that names no station, and the result was a
+        ///     workbench that could not be asked for a stone axe.
+        ///
+        ///     Vanilla shows them at a station when that station says so. <c>Player.RequiredCraftingStation</c>
+        ///     accepts a recipe with no station unless <c>m_showBasicRecipies</c> is false on the
+        ///     one being used, which is the rule copied here rather than invented.
+        /// </remarks>
+        private static readonly List<CraftOption> Basic = new List<CraftOption>();
+
         private static ObjectDB _owner;
 
-        /// <summary>Everything the named kind of station can make, in display order.</summary>
-        internal static List<CraftOption> For(string stationName)
+        /// <summary>
+        ///     Everything a station can make, in display order.
+        /// </summary>
+        /// <param name="stationName">
+        ///     The station's own name - "$piece_workbench" - which is what a recipe names.
+        /// </param>
+        /// <param name="withBasic">
+        ///     Whether this station also offers the recipes that need no station, as vanilla's
+        ///     <c>m_showBasicRecipies</c> decides.
+        /// </param>
+        internal static List<CraftOption> For(string stationName, bool withBasic)
         {
             Build();
-            return !string.IsNullOrEmpty(stationName) && ByStation.TryGetValue(stationName, out List<CraftOption> found)
-                ? found
-                : new List<CraftOption>();
+
+            List<CraftOption> found = new List<CraftOption>();
+            if (!string.IsNullOrEmpty(stationName) && ByStation.TryGetValue(stationName, out List<CraftOption> mine))
+            {
+                found.AddRange(mine);
+            }
+
+            if (withBasic) found.AddRange(Basic);
+
+            found.Sort((a, b) => string.Compare(a.Display, b.Display, System.StringComparison.OrdinalIgnoreCase));
+            return found;
+        }
+
+        /// <summary>
+        ///     Everything a registered structure can make, read from its prefab.
+        /// </summary>
+        /// <remarks>
+        ///     Both halves of the question - which station is this, and does it show the basic
+        ///     recipes - come off the prefab, so an outpost's forge answers with nothing loaded.
+        /// </remarks>
+        internal static List<CraftOption> ForStructure(string prefabName)
+        {
+            GameObject prefab = !string.IsNullOrEmpty(prefabName) && ZNetScene.instance != null
+                ? ZNetScene.instance.GetPrefab(prefabName)
+                : null;
+
+            return For(Stations.CraftProbe.NameOfPrefab(prefab), Stations.CraftProbe.ShowsBasic(prefab));
+        }
+
+        /// <summary>Whether a station may be asked to make this, by the rule vanilla uses.</summary>
+        internal static bool MadeAt(Recipe recipe, string stationName, bool withBasic)
+        {
+            if (recipe == null) return false;
+
+            return recipe.m_craftingStation != null
+                ? recipe.m_craftingStation.m_name == stationName
+                : withBasic;
         }
 
         /// <summary>The recipe that makes an item, or null when nothing villagers may use does.</summary>
@@ -70,23 +128,10 @@ namespace Kukolony.Colonies
                 : null;
         }
 
-        /// <summary>
-        ///     The station name a registered structure's prefab carries, or empty.
-        /// </summary>
-        /// <remarks>
-        ///     Read from the prefab so it answers for a station nobody is standing near. The
-        ///     record already stores the prefab name for exactly this kind of question.
-        /// </remarks>
-        internal static string StationNameOf(string prefabName)
-        {
-            if (string.IsNullOrEmpty(prefabName) || ZNetScene.instance == null) return string.Empty;
-
-            return Stations.CraftProbe.NameOfPrefab(ZNetScene.instance.GetPrefab(prefabName));
-        }
-
         internal static void Clear()
         {
             ByStation.Clear();
+            Basic.Clear();
             Recipes.Clear();
             _owner = null;
         }
@@ -97,6 +142,7 @@ namespace Kukolony.Colonies
             if (ReferenceEquals(_owner, ObjectDB.instance) && ByStation.Count > 0) return;
 
             ByStation.Clear();
+            Basic.Clear();
             Recipes.Clear();
             _owner = ObjectDB.instance;
 
@@ -107,13 +153,17 @@ namespace Kukolony.Colonies
             {
                 if (!Offerable(recipe, ref skipped)) continue;
 
-                string station = recipe.m_craftingStation.m_name;
                 string item = recipe.m_item.gameObject.name;
 
-                if (!ByStation.TryGetValue(station, out List<CraftOption> options))
+                List<CraftOption> options;
+                if (recipe.m_craftingStation == null)
+                {
+                    options = Basic;
+                }
+                else if (!ByStation.TryGetValue(recipe.m_craftingStation.m_name, out options))
                 {
                     options = new List<CraftOption>();
-                    ByStation[station] = options;
+                    ByStation[recipe.m_craftingStation.m_name] = options;
                 }
 
                 options.Add(new CraftOption
@@ -139,7 +189,10 @@ namespace Kukolony.Colonies
                     System.StringComparison.OrdinalIgnoreCase));
             }
 
-            Log.Info($"[craft] {Recipes.Count} recipe(s) across {ByStation.Count} kind(s) of station" +
+            Basic.Sort((a, b) => string.Compare(a.Display, b.Display, System.StringComparison.OrdinalIgnoreCase));
+
+            Log.Info($"[craft] {Recipes.Count} recipe(s) across {ByStation.Count} kind(s) of station, " +
+                     $"{Basic.Count} needing none" +
                      (skipped > 0 ? $", {skipped} left out" : string.Empty));
         }
 
@@ -163,7 +216,11 @@ namespace Kukolony.Colonies
         private static bool Offerable(Recipe recipe, ref int skipped)
         {
             if (recipe == null || !recipe.m_enabled || recipe.m_item == null) return false;
-            if (recipe.m_craftingStation == null || string.IsNullOrEmpty(recipe.m_craftingStation.m_name))
+
+            // A recipe naming no station is kept, not dropped: those are the things made by
+            // hand, and a station that shows the basic recipes can be asked for them. A recipe
+            // naming an *unnamed* station is dropped, because nothing can ever match it.
+            if (recipe.m_craftingStation != null && string.IsNullOrEmpty(recipe.m_craftingStation.m_name))
                 return false;
 
             if (recipe.m_noCraftOnlyUpgrade || recipe.m_requireOnlyOneIngredient)

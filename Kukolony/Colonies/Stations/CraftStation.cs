@@ -58,6 +58,9 @@ namespace Kukolony.Colonies.Stations
         /// </remarks>
         internal int Level => Station != null ? Station.GetLevel() : 0;
 
+        /// <summary>Whether this station also offers the recipes that need no station.</summary>
+        internal bool ShowsBasic => Station != null && Station.m_showBasicRecipies;
+
         /// <summary>Which crafting animation the rig should play here.</summary>
         internal int UseAnimation => Station != null ? Station.m_useAnimation : 0;
 

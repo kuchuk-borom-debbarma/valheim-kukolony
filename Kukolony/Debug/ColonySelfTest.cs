@@ -7053,7 +7053,7 @@ namespace Kukolony.Debug
 
             Recipe recipe = null;
             CraftOption making = null;
-            foreach (CraftOption option in CraftCatalogue.For(component.m_name))
+            foreach (CraftOption option in CraftCatalogue.For(component.m_name, component.m_showBasicRecipies))
             {
                 Recipe candidate = CraftCatalogue.RecipeFor(option.Item);
                 if (candidate?.m_resources == null || option.MinLevel > 1) continue;
@@ -7067,7 +7067,7 @@ namespace Kukolony.Debug
             if (recipe == null)
             {
                 report.Check(false, "control: this bench knows how to make something simple",
-                    $"station='{component.m_name}' options={CraftCatalogue.For(component.m_name).Count}");
+                    $"station='{component.m_name}' options={CraftCatalogue.For(component.m_name, component.m_showBasicRecipies).Count}");
                 Release(bench);
                 Release(chest);
                 yield break;

@@ -709,6 +709,16 @@ the prefab, so an outpost forge can be given orders from home; recipes needing a
 level are listed and *marked* rather than hidden, because the level depends on extensions standing
 beside it that may not be loaded.
 
+**A station offers what a player standing at it would see.** Its own recipes, plus the ones that
+need no station at all when it says it shows them (`m_showBasicRecipies`) — that second half is
+what puts a stone axe on a workbench, and leaving it out meant a catalogue keyed by station name
+silently dropped every hand-made thing in the game. And only recipes this player has discovered,
+which is the same test their own crafting menu makes (`m_knownRecipes` against the item's shared
+name). Anything already ordered stays listed whatever that says, because a setting that cannot be
+unpicked is worse than one that can never be picked — and on a server the order may have been
+placed by somebody who knows something this player does not. `OnlyKnownRecipes` turns the gate
+off for exactly that case.
+
 ## What it does not do
 
 **It does not upgrade, and it does not craft above quality 1.** Vanilla's upgrade path rolls a

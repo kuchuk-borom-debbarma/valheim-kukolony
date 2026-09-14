@@ -393,7 +393,7 @@ namespace Kukolony.Gui
         private static void BuildCrafting(ColonyScreen host, Column column, Colony colony,
             StructureRecord record, StructureSettings settings)
         {
-            List<CraftOption> catalogue = CraftCatalogue.For(CraftCatalogue.StationNameOf(record.Prefab));
+            List<CraftOption> catalogue = CraftCatalogue.ForStructure(record.Prefab);
 
             if (catalogue.Count == 0)
             {
@@ -407,7 +407,7 @@ namespace Kukolony.Gui
                 List<string> ordered = Ordered(settings);
                 Widgets.Choice(make, "Makes", ordered.Count == 0 ? "nothing" : Summarise(ordered),
                     () => host.Push(new PickerScreen("What to make here",
-                        filter => CraftOptions(catalogue, filter), ordered, true, chosen =>
+                        filter => CraftOptions(catalogue, ordered, filter), ordered, true, chosen =>
                         {
                             ColonyOperations.EditSettings(colony, record.Id, s => Reconcile(s, chosen));
                             host.Refresh();
@@ -471,11 +471,39 @@ namespace Kukolony.Gui
             }
         }
 
-        private static List<PickerScreen.Option> CraftOptions(List<CraftOption> catalogue, string filter)
+        /// <summary>
+        ///     The catalogue as a picker, narrowed to what this player knows how to make.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The same gate the player's own crafting menu uses -
+        ///         <c>Player.GetAvailableRecipes</c> tests <c>m_knownRecipes</c> against the
+        ///         item's shared name - so a station offers what you could make standing at it
+        ///         and nothing you have not discovered yet.
+        ///     </para>
+        ///     <para>
+        ///         <b>Anything already ordered stays listed</b>, whatever the gate says. A
+        ///         setting that cannot be unpicked is worse than one that can never be picked,
+        ///         and a discovery belongs to a player rather than to a settlement: on a server
+        ///         an order may have been placed by somebody who knows something this player
+        ///         does not.
+        ///     </para>
+        ///     <para>
+        ///         With no local player there is nothing to ask, so nothing is hidden. That is
+        ///         also the switch's off position, for a host configuring a settlement whose
+        ///         discoveries are not theirs.
+        ///     </para>
+        /// </remarks>
+        private static List<PickerScreen.Option> CraftOptions(List<CraftOption> catalogue,
+            List<string> ordered, string filter)
         {
+            Player player = ModConfig.OnlyKnownRecipes.Value ? Player.m_localPlayer : null;
+
             List<PickerScreen.Option> options = new List<PickerScreen.Option>();
             foreach (CraftOption option in catalogue)
             {
+                if (player != null && !ordered.Contains(option.Item) && !Known(player, option)) continue;
+
                 string label = option.MinLevel > 1
                     ? $"{option.Display} (level {option.MinLevel})"
                     : option.Display;
@@ -491,6 +519,20 @@ namespace Kukolony.Gui
             }
 
             return options;
+        }
+
+        /// <summary>Whether this player has discovered how to make it.</summary>
+        private static bool Known(Player player, CraftOption option)
+        {
+            Recipe recipe = CraftCatalogue.RecipeFor(option.Item);
+            string named = recipe?.m_item?.m_itemData?.m_shared?.m_name;
+
+            if (string.IsNullOrEmpty(named)) return false;
+
+            // The world can be told every recipe is known, and a station should say the same
+            // thing the player's own menu would.
+            return player.IsRecipeKnown(named) ||
+                   (ZoneSystem.instance != null && ZoneSystem.instance.GetGlobalKey(GlobalKeys.AllRecipesUnlocked));
         }
 
         /// <summary>
