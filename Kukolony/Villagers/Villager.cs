@@ -746,7 +746,8 @@ namespace Kukolony.Villagers
             // Any job that holds a tool keeps it; everything else bares the hand. Written as
             // the set rather than as "not chop", because the next tool-using job would have
             // been added to the enum and quietly had its pickaxe put away every tick.
-            if (job == null || (job.Kind != Jobs.JobKind.Chop && job.Kind != Jobs.JobKind.Mine))
+            if (job == null || (job.Kind != Jobs.JobKind.Chop && job.Kind != Jobs.JobKind.Mine &&
+                                job.Kind != Jobs.JobKind.Repair))
             {
                 PutToolAway();
             }
@@ -882,6 +883,20 @@ namespace Kukolony.Villagers
                         Bag = _bag,
                         Walk = _walk,
                         Animation = _animation,
+                        Job = job,
+                        State = state,
+                        DeltaTime = deltaTime
+                    }, out doing);
+
+                case Jobs.JobKind.Repair:
+                    return Jobs.Repair.RepairJob.Tick(new Jobs.Repair.RepairContext
+                    {
+                        Villager = this,
+                        Colony = colony,
+                        Bag = _bag,
+                        Walk = _walk,
+                        Animation = _animation,
+                        Equipment = _visEquipment,
                         Job = job,
                         State = state,
                         DeltaTime = deltaTime

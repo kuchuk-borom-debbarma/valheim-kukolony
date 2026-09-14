@@ -18,6 +18,7 @@
     <Compile Include="../Kukolony/Jobs/Forage/ForageTransitions.cs" Link="ForageTransitions.cs" />
     <Compile Include="../Kukolony/Jobs/Farm/FieldPlan.cs" Link="FieldPlan.cs" />
     <Compile Include="../Kukolony/Jobs/Farm/FarmTransitions.cs" Link="FarmTransitions.cs" />
+    <Compile Include="../Kukolony/Jobs/Repair/RepairTransitions.cs" Link="RepairTransitions.cs" />
     <Compile Include="../Kukolony/Jobs/Tend/TendTransitions.cs" Link="TendTransitions.cs" />
     <Compile Include="../Kukolony/Jobs/Craft/CraftTransitions.cs" Link="CraftTransitions.cs" />
     <Compile Include="../Kukolony/Jobs/Craft/CraftPlan.cs" Link="CraftPlan.cs" />

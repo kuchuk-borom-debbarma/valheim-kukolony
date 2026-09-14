@@ -10,7 +10,15 @@ namespace Kukolony.Villagers
         Axe,
 
         /// <summary>Something that breaks rock - a pickaxe.</summary>
-        Pickaxe
+        Pickaxe,
+
+        /// <summary>Something that mends what is built - a hammer.</summary>
+        /// <remarks>
+        ///     The odd one out: an axe and a pickaxe are told apart by the damage they do, and a
+        ///     hammer does none worth speaking of. What makes it a hammer is that it carries a
+        ///     build menu which can take a piece down again - see <see cref="Does" />.
+        /// </remarks>
+        Hammer
     }
 
     /// <summary>What a villager is holding, as far as can be told.</summary>
@@ -163,7 +171,36 @@ namespace Kukolony.Villagers
                 : HandItem.Other;
         }
 
-        private static bool Does(ItemDrop.ItemData.SharedData shared, ToolKind kind) =>
-            kind == ToolKind.Axe ? shared.m_damages.m_chop > 0f : shared.m_damages.m_pickaxe > 0f;
+        /// <summary>
+        ///     Whether an item does this kind of work.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         By what the item <em>does</em> rather than by what it is called, which is the
+        ///         rule that lets a modded axe work with no change here - and the one that once
+        ///         had a villager carrying a creature's attack because it happened to deal chop
+        ///         damage. Damage alone is not enough on its own; the checks that arm a villager
+        ///         filter by skill as well.
+        ///     </para>
+        ///     <para>
+        ///         <b>A hammer cannot be recognised that way</b>, because mending is not damage.
+        ///         What separates it from the hoe and the cultivator - which also carry build
+        ///         menus - is that its menu can take a piece down again. That is the game's own
+        ///         distinction rather than a name, so a modded hammer is a hammer here.
+        ///     </para>
+        /// </remarks>
+        private static bool Does(ItemDrop.ItemData.SharedData shared, ToolKind kind)
+        {
+            switch (kind)
+            {
+                case ToolKind.Axe: return shared.m_damages.m_chop > 0f;
+                case ToolKind.Pickaxe: return shared.m_damages.m_pickaxe > 0f;
+
+                case ToolKind.Hammer:
+                    return shared.m_buildPieces != null && shared.m_buildPieces.m_canRemovePieces;
+
+                default: return false;
+            }
+        }
     }
 }

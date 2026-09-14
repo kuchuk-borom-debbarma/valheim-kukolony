@@ -112,6 +112,7 @@ namespace Kukolony.Villagers
             Jobs.Mine.MineJob.Forget(villager);
             Jobs.Forage.ForageJob.Forget(villager);
             Jobs.Farm.FarmJob.Forget(villager);
+            Jobs.Repair.RepairJob.Forget(villager);
             Jobs.Unreachable.Forget(villager);
 
             Log.Info($"Villager removed from colony '{colony.State.Name}'");

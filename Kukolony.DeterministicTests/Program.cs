@@ -10,6 +10,7 @@ using Kukolony.Jobs.Craft;
 using Kukolony.Jobs.Mine;
 using Kukolony.Jobs.Forage;
 using Kukolony.Jobs.Farm;
+using Kukolony.Jobs.Repair;
 
 /// <summary>
 ///     Verification for logic that needs no game running.
@@ -92,6 +93,7 @@ static class Program
         FieldOrders_();
         FieldLayout();
         Farming();
+        Mending();
         Tending();
 
         Console.WriteLine(_failed == 0
@@ -1774,6 +1776,188 @@ static class Program
         // would leave villagers unable to break ground and no other case would notice.
         bool every = true;
         foreach (FarmAction action in Enum.GetValues(typeof(FarmAction))) every &= reached[(int)action];
+        Case("every action the table can name is reached by some combination", every);
+    }
+
+    static RepairFacts Mend(bool hasTool = true, bool hasTarget = true, bool damaged = true,
+        bool atTarget = false, bool inStationRange = true, bool tired = false) =>
+        new RepairFacts(hasTool, hasTarget, damaged, atTarget, inStationRange, tired);
+
+    static void Swing(string what, RepairState state, RepairFacts facts, RepairAction expected)
+    {
+        RepairAction actual = RepairTransitions.Next(state, facts).Action;
+        Case($"{what} (got {actual})", actual == expected);
+    }
+
+    /// <summary>
+    ///     The mending state machine, exhaustively.
+    /// </summary>
+    /// <remarks>
+    ///     Two things here are not in any other table. A mended wall is still a wall, so finishing
+    ///     is "it is whole" rather than "it is gone" - the distinction foraging draws about a
+    ///     picked bush. And the station rule is a fact rather than a discovery, so it has to be
+    ///     honoured in every arm: a bench can come down while a villager is walking to the wall
+    ///     that depended on it.
+    /// </remarks>
+    static void Mending()
+    {
+        Console.WriteLine("mending");
+
+        Swing("with nothing chosen it looks for work", RepairState.Choosing,
+            Mend(hasTarget: false), RepairAction.ChooseWork);
+
+        Swing("with something chosen it walks to it", RepairState.Choosing, Mend(),
+            RepairAction.MoveToTarget);
+
+        Swing("standing at it, it mends", RepairState.Approaching, Mend(atTarget: true),
+            RepairAction.Mend);
+
+        Swing("and goes on mending while it is still worn", RepairState.Mending,
+            Mend(atTarget: true), RepairAction.Mend);
+
+        // The ending this job shares with foraging and with no other: the thing outlives the work.
+        Swing("a piece that is whole again is finished", RepairState.Mending,
+            Mend(atTarget: true, damaged: false), RepairAction.Complete);
+
+        Swing("one mended by somebody else while walking is dropped, not completed",
+            RepairState.Approaching, Mend(damaged: false), RepairAction.ChooseWork);
+
+        Swing("and one already whole when chosen is never walked to", RepairState.Choosing,
+            Mend(damaged: false), RepairAction.ChooseWork);
+
+        // The other ending: a troll took it down, or the player did.
+        Swing("something destroyed under it ends the trip", RepairState.Mending,
+            Mend(hasTarget: false, atTarget: true), RepairAction.Complete);
+
+        Swing("no hammer is an ordinary answer, not a failure", RepairState.Choosing,
+            Mend(hasTool: false), RepairAction.Yield);
+
+        Swing("and losing it mid-swing sends it back to be told so", RepairState.Mending,
+            Mend(hasTool: false, atTarget: true), RepairAction.Yield);
+
+        // The station rule, in all three arms. A bench is a piece too, so it can come down while
+        // the villager that depends on it is halfway to the wall.
+        Swing("a piece out of reach of the station it needs is never chosen",
+            RepairState.Choosing, Mend(inStationRange: false), RepairAction.ChooseWork);
+
+        Swing("and one whose bench came down mid-walk is let go of", RepairState.Approaching,
+            Mend(inStationRange: false), RepairAction.ChooseWork);
+
+        Swing("and one whose bench came down mid-swing is let go of too", RepairState.Mending,
+            Mend(inStationRange: false, atTarget: true), RepairAction.ChooseWork);
+
+        Swing("shoved away from it, it walks back", RepairState.Mending, Mend(atTarget: false),
+            RepairAction.MoveToTarget);
+
+        Swing("being tired stops it", RepairState.Choosing, Mend(tired: true), RepairAction.Yield);
+
+        // Deliberate, and the call every other job makes: tiredness stops a villager starting,
+        // never mid-swing. Walking away from a half-mended wall wastes the walk.
+        Swing("a villager already at a wall finishes it even once tired", RepairState.Mending,
+            Mend(atTarget: true, tired: true), RepairAction.Mend);
+
+        Swing("an unknown state starts over", (RepairState)99, Mend(hasTarget: false),
+            RepairAction.ChooseWork);
+
+        // Every combination. The five "never" properties are all counted inside
+        // `action == Mend`, so a table that never mended at all would satisfy every one of them -
+        // which is why the liveness counter and the two-way check beside them are not decoration.
+        int mendedWithoutTool = 0, mendedNothing = 0, mendedWhole = 0;
+        int mendedFromAfar = 0, mendedOutOfRange = 0, neverLooked = 0;
+        int mended = 0, disagreed = 0, yieldedWithoutReason = 0, completedWhileWorn = 0;
+        bool[] reached = new bool[5];
+        RepairState[] states = { RepairState.Choosing, RepairState.Approaching, RepairState.Mending };
+
+        for (int bits = 0; bits < 64; bits++)
+        {
+            RepairFacts facts = new RepairFacts(
+                hasTool: (bits & 1) != 0,
+                hasTarget: (bits & 2) != 0,
+                damaged: (bits & 4) != 0,
+                atTarget: (bits & 8) != 0,
+                inStationRange: (bits & 16) != 0,
+                tired: (bits & 32) != 0);
+
+            foreach (RepairState from in states)
+            {
+                RepairAction action = RepairTransitions.Next(from, facts).Action;
+
+                reached[(int)action] = true;
+
+                if (action == RepairAction.Mend)
+                {
+                    mended++;
+                    if (!facts.HasTool) mendedWithoutTool++;
+                    if (!facts.HasTarget) mendedNothing++;
+                    if (!facts.Damaged) mendedWhole++;
+                    if (!facts.AtTarget) mendedFromAfar++;
+                    if (!facts.InStationRange) mendedOutOfRange++;
+                }
+
+                // Finishing means it is whole or it is gone. A table that reported a worn piece as
+                // done would mend nothing and look busy the entire time.
+                if (action == RepairAction.Complete && facts.HasTarget && facts.Damaged)
+                {
+                    completedWhileWorn++;
+                }
+
+                // A villager with nothing chosen must always go and look. Every assertion above is
+                // about what happens once something is held, so all of them are satisfied by a
+                // table that never chooses - which is the knot the farm job tied itself in twice.
+                if (!facts.HasTarget && !facts.Tired && facts.HasTool &&
+                    action != RepairAction.ChooseWork && action != RepairAction.Complete)
+                {
+                    neverLooked++;
+                }
+
+                // The same rule stated as an if-and-only-if, so it fails for a table that mends
+                // when it should not *and* for one that never mends. Written out here rather than
+                // derived from the table, which would only prove the table agrees with itself.
+                bool should = facts.HasTool && facts.HasTarget && facts.Damaged &&
+                              facts.AtTarget && facts.InStationRange &&
+                              (from != RepairState.Choosing || !facts.Tired);
+
+                if (should != (action == RepairAction.Mend)) disagreed++;
+
+                // Yielding is for the two ordinary reasons and nothing else. Without this the
+                // hammer rule could be ignored entirely and every other case would still pass.
+                if (action == RepairAction.Yield && !facts.Tired && facts.HasTool)
+                {
+                    yieldedWithoutReason++;
+                }
+            }
+        }
+
+        Case($"no combination ever mends without a hammer (did {mendedWithoutTool})",
+            mendedWithoutTool == 0);
+        Case($"no combination ever mends something it has not got (did {mendedNothing})",
+            mendedNothing == 0);
+        Case($"no combination ever mends what is already whole (did {mendedWhole})",
+            mendedWhole == 0);
+        Case($"no combination ever mends from away from it (did {mendedFromAfar})",
+            mendedFromAfar == 0);
+        Case($"no combination ever mends out of reach of the station it needs (did {mendedOutOfRange})",
+            mendedOutOfRange == 0);
+        Case($"nothing is reported finished while it is still worn (did {completedWhileWorn})",
+            completedWhileWorn == 0);
+        Case($"a villager with nothing chosen always goes and looks ({neverLooked} did not)",
+            neverLooked == 0);
+
+        // The control the lines above need. Every one of them is satisfied by a table that does
+        // nothing at all, which is a suite that cannot fail.
+        Case($"control: something does get mended when everything is right (mended {mended} times)",
+            mended > 0);
+
+        Case($"mending happens exactly when it should, and never otherwise ({disagreed} disagreed)",
+            disagreed == 0);
+
+        Case($"yielding is always for a reason ({yieldedWithoutReason} were not)",
+            yieldedWithoutReason == 0);
+
+        // Every arm is reachable. A reordered condition that made one dead - Complete, say - would
+        // leave a villager unable to finish and no other case would notice.
+        bool every = true;
+        foreach (RepairAction action in Enum.GetValues(typeof(RepairAction))) every &= reached[(int)action];
         Case("every action the table can name is reached by some combination", every);
     }
 

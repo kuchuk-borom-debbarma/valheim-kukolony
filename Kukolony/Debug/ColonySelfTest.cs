@@ -9,6 +9,7 @@ using Kukolony.Jobs.Chop;
 using Kukolony.Jobs.Farm;
 using Kukolony.Jobs.Forage;
 using Kukolony.Jobs.Mine;
+using Kukolony.Jobs.Repair;
 using Kukolony.Gui;
 using Kukolony.KeepAlive;
 using Kukolony.Resources;
@@ -238,6 +239,7 @@ namespace Kukolony.Debug
             yield return Mining(report, colony, origin);
             yield return Foraging(report, colony, origin);
             yield return Farming(report, colony, origin);
+            yield return Mending(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
@@ -342,6 +344,11 @@ namespace Kukolony.Debug
                     yield return Farming(report, colony, origin);
                     break;
 
+                case "repair":
+                    CheckJobsSurviveAVersion(report);
+                    yield return Mending(report, colony, origin);
+                    break;
+
                 case "queue":
                     yield return CheckAStuckTripEndsAndTheQueueMovesOn(report, colony);
                     yield return CheckAPresetKeepsItsOrder(report, colony);
@@ -357,7 +364,7 @@ namespace Kukolony.Debug
                     // Named but unknown. Failing beats running everything under a name that
                     // says otherwise, or running nothing and reporting a pass.
                     report.Check(false, $"'{wanted}' is not a slice this run knows",
-                        "known: chop, travel, queue, tend, craft, mine, forage, farm, swing");
+                        "known: chop, travel, queue, tend, craft, mine, forage, farm, repair, swing");
                     break;
             }
 
@@ -6549,6 +6556,495 @@ namespace Kukolony.Debug
 
             foreach (GameObject plant in doomed) Release(plant);
         }
+
+        /// <summary>
+        ///     Everything mending, in the order a failure is most useful in.
+        /// </summary>
+        /// <remarks>
+        ///     Shared by the slice and by the acceptance run rather than listed in both, as the
+        ///     mining, foraging and farming blocks are. Index first, because every check below it
+        ///     is meaningless if the classifier is empty - and an empty classifier makes them all
+        ///     pass by finding nothing to contradict.
+        /// </remarks>
+        private static IEnumerator Mending(TestReport report, Colony colony, Vector3 origin)
+        {
+            yield return CheckRepairIndex(report);
+            yield return CheckTheStationRuleBindsVillagersToo(report, origin);
+            yield return CheckAWornPieceIsMended(report, colony, origin);
+            yield return CheckMendingStaysWhereItIs(report, colony, origin);
+        }
+
+        /// <summary>
+        ///     The repair classifier knows what wears out, and tells it from what was born broken.
+        /// </summary>
+        /// <remarks>
+        ///     The ruins are the point. Eight hundred prefabs in this game carry WearNTear and a
+        ///     quarter of them are scenery - pots, altars, and a run whose whole purpose is to
+        ///     look wrecked. A classifier that admitted those would send villagers out to mend
+        ///     ruins that are supposed to be ruins, which is work that never ends and never looks
+        ///     wrong from a distance.
+        /// </remarks>
+        private static IEnumerator CheckRepairIndex(TestReport report)
+        {
+            if (!Repairable.IsReady) Repairable.Rebuild();
+
+            report.Check(Repairable.IsReady, "the repair classifier found prefabs to classify");
+
+            string needing = Repairable.Sample(needingStation: true);
+            string free = Repairable.Sample(needingStation: false);
+
+            report.Check(!string.IsNullOrEmpty(needing),
+                "it can name something that needs a station, so checks need not guess",
+                $"sample={needing}");
+
+            report.Check(!string.IsNullOrEmpty(free),
+                "control: and something that needs none, which is the other half of that rule",
+                $"needs={needing} free={free}");
+
+            // Built and breakable, not merely breakable. Asked of a real prefab this world ships
+            // rather than of a name, because the mod does not ship the assets.
+            int built = 0, scenery = 0;
+            foreach (GameObject prefab in ZNetScene.instance.m_prefabs)
+            {
+                if (prefab == null || prefab.GetComponent<WearNTear>() == null) continue;
+
+                if (Repairable.Classify(prefab)) built++;
+                else scenery++;
+            }
+
+            report.Check(scenery > 0 && built > 0,
+                "and it keeps what somebody built apart from what the world generated",
+                $"built={built} scenery={scenery}");
+
+            yield break;
+        }
+
+        /// <summary>
+        ///     A piece out of reach of the station it needs is refused, and the villager says so.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Vanilla will not let a player mend a stone wall away from a stonecutter, and a
+        ///         villager is held to the same rule - which is a rule a player cannot see and
+        ///         will never guess, so the answer has to name it.
+        ///     </para>
+        ///     <para>
+        ///         Driven through the job's own predicate rather than by staging a villager,
+        ///         because what is under test is the rule and not the walk. A check that wrote the
+        ///         rule out again would pass while the job quietly ignored it.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckTheStationRuleBindsVillagersToo(TestReport report, Vector3 origin)
+        {
+            if (!Repairable.IsReady) Repairable.Rebuild();
+
+            string needing = Repairable.Sample(needingStation: true);
+            string free = Repairable.Sample(needingStation: false);
+
+            if (string.IsNullOrEmpty(needing) || string.IsNullOrEmpty(free))
+            {
+                report.Check(false, "control: the station check could name both kinds of piece",
+                    $"needs={needing} free={free}");
+                yield break;
+            }
+
+            // Far from anything anybody has built, so no station is near by accident.
+            Vector3 site = OnGround(origin + new Vector3(52f, 0f, -52f));
+
+            GameObject alone = Spawn(needing, site);
+            GameObject anywhere = Spawn(free, site + new Vector3(3f, 0f, 0f));
+            yield return new WaitForSecondsRealtime(.4f);
+
+            ZDO lonely = Zdo(alone);
+            ZDO easy = Zdo(anywhere);
+
+            if (lonely == null || easy == null)
+            {
+                report.Check(false, "control: the station check could place its two pieces",
+                    $"needing={(alone != null)} free={(anywhere != null)}");
+                Release(alone);
+                Release(anywhere);
+                yield break;
+            }
+
+            report.Check(!RepairJob.HasStation(lonely),
+                "a piece that needs a station is refused where there is none",
+                $"{needing} at {site}");
+
+            report.Check(RepairJob.HasStation(easy),
+                "control: and one that needs none is not",
+                $"{free}");
+
+            // And the other way round, which is what stops the line above passing for a rule that
+            // refuses everything.
+            GameObject bench = SpawnFirst(site + new Vector3(1f, 0f, 1f), "piece_workbench");
+            yield return new WaitForSecondsRealtime(.5f);
+
+            report.Check(bench == null || RepairJob.HasStation(lonely),
+                "control: and accepted once a bench stands beside it",
+                bench == null ? "no workbench prefab in this world" : $"{needing} with a bench 1.4m away");
+
+            Release(bench);
+            Release(alone);
+            Release(anywhere);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A villager fetches a hammer, walks to a worn piece, and puts it right.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Asserted on the health, read from the record either side, because
+        ///         <c>WearNTear.Repair()</c> returning true says the call was made and not that
+        ///         anything moved - the same doctrine mining uses for a blow and tending for a
+        ///         feed.
+        ///     </para>
+        ///     <para>
+        ///         And the batch, which is the thing that makes this job bearable to watch: a
+        ///         base is hundreds of pieces and a repair is one swing, so several worn things
+        ///         around one spot must go right on one visit rather than one walk each.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckAWornPieceIsMended(TestReport report, Colony colony, Vector3 origin)
+        {
+            SettlementIndex.ResetForTest();
+            RepairJob.Clear();
+            RepairGround.ResetForTest();
+            if (!Repairable.IsReady) Repairable.Rebuild();
+
+            string named = Repairable.Sample(needingStation: false);
+            if (string.IsNullOrEmpty(named))
+            {
+                report.Check(false, "control: the mending check could name a piece needing no station");
+                yield break;
+            }
+
+            Vector3 site = OnGround(origin + new Vector3(-30f, 0f, -12f));
+
+            // Three of them, close together, so the batch has something to prove.
+            List<GameObject> pieces = new List<GameObject>();
+            for (int i = 0; i < 3; i++) pieces.Add(Spawn(named, site + new Vector3(i * 1.5f, 0f, 0f)));
+
+            yield return new WaitForSecondsRealtime(.5f);
+
+            List<float> before = new List<float>();
+            foreach (GameObject piece in pieces)
+            {
+                ZDO zdo = Zdo(piece);
+                if (zdo == null) continue;
+
+                // Worn by hand, because waiting for weather would take the rest of the day.
+                Mendable kind = Repairable.Of(zdo.GetPrefab());
+                zdo.Set(ZDOVars.s_health, kind.Full * .4f);
+                before.Add(Repairable.Wear(zdo));
+            }
+
+            report.Check(before.Count == 3 && before.TrueForAll(w => w < .5f),
+                "control: three pieces stand here and all of them are worn",
+                $"worn={before.Count} first={(before.Count > 0 ? before[0] : -1f):0.00}");
+
+            GameObject flag = Spawn(WorkFlagPrefab.PrefabName, site);
+            yield return new WaitForSecondsRealtime(.3f);
+
+            WorkFlag planted = flag != null ? flag.GetComponent<WorkFlag>() : null;
+            if (planted == null || ColonyOperations.AssignFlag(colony.Id, planted) != RegisterOutcome.Registered)
+            {
+                report.Check(false, "control: the mending check could plant and claim a flag");
+                Release(flag);
+                foreach (GameObject piece in pieces) Release(piece);
+                yield break;
+            }
+
+            StructureRecord flagRecord = colony.State.GetStructures().Find(r => r.Id == planted.Id);
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition
+                {
+                    Id = "mend", Name = "Repair", Kind = JobKind.Repair, Repeat = 30,
+                    Areas = new List<string> { flagRecord?.PersistentId ?? string.Empty },
+                    WorkRadius = 16f
+                }
+            });
+
+            // The hammer goes in a chest, so the errand is part of what this proves.
+            GameObject chest = Spawn("piece_chest_wood", OnGround(site + new Vector3(4f, 0f, 4f)));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            StructureRecord shed = chest == null ? null : Register(colony, chest, "Tool shed");
+            Container store = chest != null ? chest.GetComponentInChildren<Container>(true) : null;
+            GameObject hammer = FindHammer();
+
+            if (shed == null || store == null || hammer == null)
+            {
+                report.Check(false, "control: the mending check could stock a chest with a hammer",
+                    $"registered={(shed != null)} container={(store != null)} hammer={(hammer != null)}");
+                Cleanup(colony, planted, null, flag, null);
+                Release(chest);
+                foreach (GameObject piece in pieces) Release(piece);
+                colony.State.SetJobs(new List<JobDefinition>());
+                yield break;
+            }
+
+            Clear(store.GetInventory());
+            if (hammer.TryGetComponent(out ItemDrop hammerDrop))
+            {
+                ItemDrop.ItemData one = hammerDrop.m_itemData.Clone();
+                one.m_dropPrefab = hammer;
+                store.GetInventory().AddItem(one);
+            }
+
+            SettlementIndex.ResetForTest();
+            RepairGround.ResetForTest();
+
+            Villager mender = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (mender == null || !mender.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "control: the mending check could spawn a villager");
+                Cleanup(colony, planted, null, flag, null);
+                Release(chest);
+                foreach (GameObject piece in pieces) Release(piece);
+                colony.State.SetJobs(new List<JobDefinition>());
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+
+            Container bag = VillagerInventory.Attach(mender.gameObject, view);
+            Clear(bag.GetInventory());
+            VillagerInventory.Persist(bag, view);
+
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "mend" });
+            mender.transform.position = site + new Vector3(2f, 0f, 3f);
+
+            int whole = 0;
+            float elapsed = 0f;
+
+            while (elapsed < MendSeconds && whole < 3)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                elapsed += .5f;
+
+                if (mender == null || !view.IsValid()) break;
+
+                whole = 0;
+                foreach (GameObject piece in pieces)
+                {
+                    ZDO zdo = Zdo(piece);
+                    if (zdo != null && Repairable.Wear(zdo) > .9f) whole++;
+                }
+            }
+
+            report.Check(whole > 0,
+                "a villager fetched a hammer and put right what was worn",
+                $"whole={whole} of 3 after {elapsed:0}s doing='{(mender != null ? mender.Activity : "gone")}'");
+
+            // The batch. Three pieces within two metres of each other must not be three trips.
+            report.Check(whole == 3,
+                "and it put right everything worn within reach on the one visit",
+                $"whole={whole} of 3 in {elapsed:0}s");
+
+            VillagerLifecycle.Remove(colony, who);
+            colony.RemoveStructure(shed.Id);
+            Cleanup(colony, planted, null, flag, null);
+            Release(chest);
+            foreach (GameObject piece in pieces) Release(piece);
+            colony.State.SetJobs(new List<JobDefinition>());
+            SettlementIndex.ResetForTest();
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A villager does not cross the settlement while there is work where it stands.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The one rule this job has that no other does. Every other job takes its work
+        ///         areas strictly in the order the player set, which is right when the work is a
+        ///         copse you visit and clear. Mending is spread over a whole settlement and never
+        ///         finishes, so the ordinary rule would have a villager at the far outpost walk
+        ///         home the moment a plank near the hearth dipped below the threshold - and then
+        ///         walk back, and then home again.
+        ///     </para>
+        ///     <para>
+        ///         Staged as the thing it guards against: damage in two places, the near one
+        ///         listed <em>second</em>, and the villager standing in it. Listing it first would
+        ///         let the ordinary rule pass this check.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckMendingStaysWhereItIs(TestReport report, Colony colony, Vector3 origin)
+        {
+            SettlementIndex.ResetForTest();
+            RepairJob.Clear();
+            RepairGround.ResetForTest();
+            if (!Repairable.IsReady) Repairable.Rebuild();
+
+            string named = Repairable.Sample(needingStation: false);
+            if (string.IsNullOrEmpty(named))
+            {
+                report.Check(false, "control: the wandering check could name a piece");
+                yield break;
+            }
+
+            Vector3 far = OnGround(origin + new Vector3(-64f, 0f, 20f));
+            Vector3 near = OnGround(origin + new Vector3(-20f, 0f, 30f));
+
+            GameObject farFlag = Spawn(WorkFlagPrefab.PrefabName, far);
+            GameObject nearFlag = Spawn(WorkFlagPrefab.PrefabName, near);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            WorkFlag farPlanted = farFlag != null ? farFlag.GetComponent<WorkFlag>() : null;
+            WorkFlag nearPlanted = nearFlag != null ? nearFlag.GetComponent<WorkFlag>() : null;
+
+            if (farPlanted == null || nearPlanted == null ||
+                ColonyOperations.AssignFlag(colony.Id, farPlanted) != RegisterOutcome.Registered ||
+                ColonyOperations.AssignFlag(colony.Id, nearPlanted) != RegisterOutcome.Registered)
+            {
+                report.Check(false, "control: the wandering check could plant two flags");
+                Release(farFlag);
+                Release(nearFlag);
+                yield break;
+            }
+
+            List<StructureRecord> records = colony.State.GetStructures();
+            StructureRecord farRecord = records.Find(r => r.Id == farPlanted.Id);
+            StructureRecord nearRecord = records.Find(r => r.Id == nearPlanted.Id);
+
+            GameObject farPiece = Spawn(named, far + new Vector3(2f, 0f, 0f));
+            GameObject nearPiece = Spawn(named, near + new Vector3(2f, 0f, 0f));
+            yield return new WaitForSecondsRealtime(.4f);
+
+            ZDO farZdo = Zdo(farPiece);
+            ZDO nearZdo = Zdo(nearPiece);
+
+            if (farZdo == null || nearZdo == null)
+            {
+                report.Check(false, "control: the wandering check could place a piece in each area");
+                Release(farFlag);
+                Release(nearFlag);
+                Release(farPiece);
+                Release(nearPiece);
+                yield break;
+            }
+
+            Mendable kind = Repairable.Of(farZdo.GetPrefab());
+            farZdo.Set(ZDOVars.s_health, kind.Full * .4f);
+            nearZdo.Set(ZDOVars.s_health, kind.Full * .4f);
+
+            // The far place first in the list, which is what makes this check mean something: the
+            // ordinary rule would send the villager there.
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition
+                {
+                    Id = "mend", Name = "Repair", Kind = JobKind.Repair, Repeat = 30,
+                    Areas = new List<string>
+                    {
+                        farRecord?.PersistentId ?? string.Empty,
+                        nearRecord?.PersistentId ?? string.Empty
+                    },
+                    WorkRadius = 16f
+                }
+            });
+
+            SettlementIndex.ResetForTest();
+            RepairGround.ResetForTest();
+
+            Villager mender = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (mender == null || !mender.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "control: the wandering check could spawn a villager");
+                Release(farFlag);
+                Release(nearFlag);
+                Release(farPiece);
+                Release(nearPiece);
+                colony.State.SetJobs(new List<JobDefinition>());
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+
+            Container bag = VillagerInventory.Attach(mender.gameObject, view);
+            Clear(bag.GetInventory());
+            GameObject hammer = FindHammer();
+            if (hammer != null && hammer.TryGetComponent(out ItemDrop drop))
+            {
+                ItemDrop.ItemData one = drop.m_itemData.Clone();
+                one.m_dropPrefab = hammer;
+                bag.GetInventory().AddItem(one);
+            }
+
+            VillagerInventory.Persist(bag, view);
+
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "mend" });
+
+            // Standing in the second area, which is the whole point.
+            mender.transform.position = near + new Vector3(3f, 0f, 0f);
+
+            bool nearFixed = false, farFixedFirst = false;
+            float elapsed = 0f;
+
+            while (elapsed < MendSeconds && !nearFixed)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                elapsed += .5f;
+
+                if (mender == null || !view.IsValid()) break;
+
+                if (Repairable.Wear(farZdo) > .9f && !nearFixed) farFixedFirst = true;
+                if (Repairable.Wear(nearZdo) > .9f) nearFixed = true;
+            }
+
+            report.Check(nearFixed,
+                "a villager mends what is where it stands",
+                $"near={Repairable.Wear(nearZdo):0.00} far={Repairable.Wear(farZdo):0.00} " +
+                $"after {elapsed:0}s doing='{(mender != null ? mender.Activity : "gone")}'");
+
+            report.Check(!farFixedFirst,
+                "and does not cross the settlement to the first place on the list to do it",
+                $"far was mended first={farFixedFirst}, though its area is listed first");
+
+            VillagerLifecycle.Remove(colony, who);
+            Cleanup(colony, farPlanted, null, farFlag, null);
+            Cleanup(colony, nearPlanted, null, nearFlag, null);
+            Release(farPiece);
+            Release(nearPiece);
+            colony.State.SetJobs(new List<JobDefinition>());
+            SettlementIndex.ResetForTest();
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>How long a villager is given to fetch a hammer and mend something.</summary>
+        private static float MendSeconds => 120f;
+
+        /// <summary>A real hammer, found by what it does rather than by what it is called.</summary>
+        private static GameObject FindHammer()
+        {
+            if (ObjectDB.instance?.m_items == null) return null;
+
+            foreach (GameObject item in ObjectDB.instance.m_items)
+            {
+                if (item == null || !item.TryGetComponent(out ItemDrop drop)) continue;
+
+                PieceTable table = drop.m_itemData?.m_shared?.m_buildPieces;
+                if (table != null && table.m_canRemovePieces) return item;
+            }
+
+            return null;
+        }
+
+        /// <summary>A live record for an object, or null.</summary>
+        private static ZDO Zdo(GameObject target) =>
+            target != null && target.TryGetComponent(out ZNetView view) && view.IsValid()
+                ? view.GetZDO()
+                : null;
 
         private static IEnumerator CheckAVillagerFetchesItsOwnTool(TestReport report, Colony colony,
             Vector3 origin)

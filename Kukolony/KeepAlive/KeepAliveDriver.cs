@@ -132,12 +132,15 @@ namespace Kukolony.KeepAlive
             Resources.Forageable.Clear();
             Resources.ForagingGround.Clear();
             Resources.Planting.Clear();
+            Resources.Repairable.Clear();
+            Resources.RepairGround.Clear();
             Jobs.Chop.ChopJob.Clear();
             Jobs.Tend.TendJob.Clear();
             Jobs.Craft.CraftJob.Clear();
             Jobs.Mine.MineJob.Clear();
             Jobs.Forage.ForageJob.Clear();
             Jobs.Farm.FarmJob.Clear();
+            Jobs.Repair.RepairJob.Clear();
             Jobs.Unreachable.Clear();
             StopAllCoroutines();
         }

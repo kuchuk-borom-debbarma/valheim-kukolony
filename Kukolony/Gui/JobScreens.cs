@@ -335,6 +335,7 @@ namespace Kukolony.Gui
             if (job.Kind == JobKind.Craft) BuildCraft(host, column, colony, job);
             if (job.Kind == JobKind.Mine) BuildMine(host, column, job);
             if (job.Kind == JobKind.Forage) BuildForage(host, column, job);
+            if (job.Kind == JobKind.Repair) BuildRepair(host, column, job);
 
             // Where it works. The Kolony itself and its work-area flags, and nothing else:
             // any registered thing can still serve as a centre, but offering every chest and
@@ -601,6 +602,38 @@ namespace Kukolony.Gui
             BuildStock(host, column, job);
         }
 
+        /// <summary>
+        ///     How worn something must be before a villager walks to it.
+        /// </summary>
+        /// <remarks>
+        ///     One row, because one number is all this job has. There is no stopping rule and
+        ///     nothing to narrow by kind: mending cannot strip a region the way chopping can, and
+        ///     the work areas already say where. The line beneath it says the thing a player
+        ///     cannot see - that vanilla wants a workbench near what is being mended, and a
+        ///     villager is held to the same rule they are.
+        /// </remarks>
+        private void BuildRepair(ColonyScreen host, Column column, JobDefinition job)
+        {
+            float below = job.RepairBelow <= 0f ? JobDefinition.DefaultRepairBelow : job.RepairBelow;
+
+            if (column.TryRow(out Row worn))
+            {
+                Widgets.Number(worn, "Mend below", below * 100f, 5f, 100f, 5f,
+                    value => $"{value:F0}% worn",
+                    value =>
+                    {
+                        Edit(host, j => j.RepairBelow = Mathf.Clamp01(value / 100f));
+                        host.Refresh();
+                    });
+            }
+
+            if (column.TryRow(out Row rule))
+            {
+                Widgets.Label(rule, "Needs a hammer, and a workbench near what is being mended.",
+                    Color.gray);
+            }
+        }
+
         /// <summary>Everything anything in this world can be picked for, for the picker.</summary>
         private static List<PickerScreen.Option> SearchHarvest(string filter)
         {
@@ -769,6 +802,7 @@ namespace Kukolony.Gui
                 case JobKind.Chop: return Resources.ChoppingGround.SearchRadius;
                 case JobKind.Mine: return Resources.MiningGround.SearchRadius;
                 case JobKind.Forage: return Resources.ForagingGround.SearchRadius;
+                case JobKind.Repair: return Resources.RepairGround.SearchRadius;
 
                 // Farming is bounded by its fields rather than by a sweep: a field is a place
                 // with an edge drawn on the ground, and the job never looks outside one.

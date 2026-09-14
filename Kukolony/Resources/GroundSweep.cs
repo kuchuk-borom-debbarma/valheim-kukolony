@@ -70,6 +70,7 @@ namespace Kukolony.Resources
         private readonly Action _ensureReady;
         private readonly Func<bool> _ready;
         private readonly Func<int, bool> _wanted;
+        private readonly Func<ZDO, bool> _worth;
 
         /// <param name="ensureReady">
         ///     Builds this sweep's classifier if it has not been built. Called at the point of
@@ -81,11 +82,30 @@ namespace Kukolony.Resources
         /// </param>
         /// <param name="wanted">Whether a prefab hash is something this sweep is looking for.</param>
         /// <param name="ready">Whether the classifier could be built at all.</param>
-        internal GroundSweep(Action ensureReady, Func<bool> ready, Func<int, bool> wanted)
+        /// <param name="worth">
+        ///     Whether one particular instance is worth returning, asked of its record.
+        /// </param>
+        /// <remarks>
+        ///     <para>
+        ///         <paramref name="worth" /> is optional and chopping, mining and foraging all
+        ///         pass nothing. They ask a question about a <em>kind</em> of thing - is this a
+        ///         tree - which a prefab hash answers with an integer compare. Repair asks about
+        ///         a particular one: is <em>this</em> wall damaged, which is per-instance state.
+        ///     </para>
+        ///     <para>
+        ///         Given the record rather than the object, deliberately. Health lives on the ZDO,
+        ///         so the question is a float read and needs nothing instantiated - which is what
+        ///         makes it affordable to ask of every piece in a base rather than of a handful
+        ///         of trees.
+        ///     </para>
+        /// </remarks>
+        internal GroundSweep(Action ensureReady, Func<bool> ready, Func<int, bool> wanted,
+            Func<ZDO, bool> worth = null)
         {
             _ensureReady = ensureReady;
             _ready = ready;
             _wanted = wanted;
+            _worth = worth;
         }
 
         /// <summary>Dropped when a world unloads; a colony's identity does not survive one.</summary>
@@ -165,6 +185,11 @@ namespace Kukolony.Resources
                 ZDO zdo = view.GetZDO();
                 if (!_wanted(zdo.GetPrefab())) continue;
                 if (!WithinAnyAnchor(zdo.GetPosition())) continue;
+
+                // The cheap questions first, in the order they get cheaper to answer: a prefab
+                // hash is an integer compare, a position is arithmetic, and only what survives
+                // both is asked the per-instance question.
+                if (_worth != null && !_worth(zdo)) continue;
 
                 cache.Found.Add(zdo.m_uid);
             }

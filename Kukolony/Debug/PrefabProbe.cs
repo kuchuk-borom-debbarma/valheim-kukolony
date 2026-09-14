@@ -55,6 +55,100 @@ namespace Kukolony.Debug
             ReportStationContracts(prefabs);
             ReportPlantables(prefabs);
             ReportCultivators(prefabs);
+            ReportRepairables(prefabs);
+            ReportBuildTools();
+        }
+
+        /// <summary>
+        ///     What decays, what it is worth, and what station it needs to be mended.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Two questions the assembly cannot answer. <c>Piece.m_craftingStation</c> is a
+        ///         scene reference, and a reference on a <em>prefab</em> may well be null even
+        ///         though the piece plainly needs a workbench - if it is, the station rule has to
+        ///         be read some other way and finding that out after building the job would be a
+        ///         rule that silently never fires.
+        ///     </para>
+        ///     <para>
+        ///         And how wide the net is. <c>WearNTear</c> is on walls and roofs, but also on
+        ///         carts, ships and a good deal of world scenery, and a job pointed at all of it
+        ///         is a villager maintaining the countryside. Counted by whether the thing is a
+        ///         Piece as well, because that is the difference between what somebody built and
+        ///         what was always there.
+        ///     </para>
+        /// </remarks>
+        private static void ReportRepairables(List<GameObject> prefabs)
+        {
+            int total = 0, built = 0, loose = 0, needingStation = 0;
+            List<string> sample = new List<string>();
+            List<string> unbuilt = new List<string>();
+
+            foreach (GameObject prefab in prefabs)
+            {
+                if (prefab == null || !prefab.TryGetComponent(out WearNTear wear)) continue;
+
+                total++;
+
+                bool isPiece = prefab.TryGetComponent(out Piece piece);
+                if (isPiece) built++;
+                else loose++;
+
+                string station = isPiece && piece.m_craftingStation != null
+                    ? piece.m_craftingStation.m_name
+                    : string.Empty;
+
+                if (station.Length > 0) needingStation++;
+
+                if (!isPiece && unbuilt.Count < 12) unbuilt.Add(prefab.name);
+
+                if (sample.Count < 12 && isPiece)
+                {
+                    sample.Add($"{prefab.name} hp={wear.m_health:0} " +
+                               $"station='{(station.Length == 0 ? "none" : station)}' " +
+                               $"noRoofWear={wear.m_noRoofWear} noSupportWear={wear.m_noSupportWear}");
+                }
+            }
+
+            Log.Info($"[Probe:wear] {total} prefab(s) carry WearNTear: {built} are built pieces, " +
+                     $"{loose} are not, {needingStation} name a crafting station");
+
+            foreach (string line in sample) Log.Info($"[Probe:wear] {line}");
+            Log.Info($"[Probe:wear] not pieces: {Join(unbuilt)}");
+        }
+
+        /// <summary>
+        ///     Which items carry a build menu, and which of those can take a piece down.
+        /// </summary>
+        /// <remarks>
+        ///     The hammer has to be told from the hoe and the cultivator, which carry piece tables
+        ///     too. <c>PieceTable.m_canRemovePieces</c> is the difference in the assembly; whether
+        ///     it is the difference in the assets is what this prints. Naming the hammer would
+        ///     work until somebody added a modded one.
+        /// </remarks>
+        private static void ReportBuildTools()
+        {
+            if (ObjectDB.instance?.m_items == null)
+            {
+                Log.Warning("[Probe:tool] no ObjectDB - cannot look at the build tools");
+                return;
+            }
+
+            List<string> found = new List<string>();
+
+            foreach (GameObject item in ObjectDB.instance.m_items)
+            {
+                if (item == null || !item.TryGetComponent(out ItemDrop drop)) continue;
+
+                PieceTable table = drop.m_itemData?.m_shared?.m_buildPieces;
+                if (table == null) continue;
+
+                found.Add($"{item.name}: canRemovePieces={table.m_canRemovePieces} " +
+                          $"pieces={(table.m_pieces == null ? 0 : table.m_pieces.Count)}");
+            }
+
+            Log.Info($"[Probe:tool] {found.Count} item(s) carry a build menu");
+            foreach (string line in found) Log.Info($"[Probe:tool] {line}");
         }
 
         /// <summary>

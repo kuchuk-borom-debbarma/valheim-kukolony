@@ -65,9 +65,10 @@ namespace Kukolony.Colonies
         ///     Version 6 stopped writing the four tending settings that described stations
         ///     rather than work; a version-5 blob still carries them and is still read, because
         ///     the bytes sit in the middle of a stream holding every job the colony has. Version
-        ///     7 appends what a mining job needs, and 8 what a foraging one does.
+        ///     7 appends what a mining job needs, 8 what a foraging one does, and 9 the one
+        ///     number a mending job has.
         /// </remarks>
-        internal const int JobFormat = 8;
+        internal const int JobFormat = 9;
 
         internal List<StructureRecord> GetStructures()
         {

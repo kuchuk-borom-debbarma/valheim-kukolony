@@ -26,7 +26,10 @@ namespace Kukolony.Jobs
         Forage = 5,
 
         /// <summary>Put things in the ground, and keep them there.</summary>
-        Farm = 6
+        Farm = 6,
+
+        /// <summary>Put right what the weather and the world have worn down.</summary>
+        Repair = 7
     }
 
     /// <summary>
@@ -205,6 +208,34 @@ namespace Kukolony.Jobs
         /// </remarks>
         internal bool ForageRegrowingOnly;
 
+        /// <summary>
+        ///     How worn something must be before a mending job walks to it.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         A fraction of what the thing is worth when whole, never a number. Health across
+        ///         what this game ships runs from fifty for an armour stand to two thousand for an
+        ///         Ashlands arch, so "mend anything under two hundred" would mean every stone wall
+        ///         always and no armour stand ever.
+        ///     </para>
+        ///     <para>
+        ///         Zero means unset and is read as <see cref="DefaultRepairBelow" />, which is how
+        ///         a job written before this field existed arrives sensible rather than switched
+        ///         off - the same reading every appended field here takes.
+        ///     </para>
+        /// </remarks>
+        internal float RepairBelow;
+
+        /// <summary>
+        ///     What a mending job does when nobody has said otherwise.
+        /// </summary>
+        /// <remarks>
+        ///     Nine tenths, because the alternative is a villager crossing the base because a
+        ///     shower took one plank to ninety-nine per cent. Repair costs nothing in Valheim, so
+        ///     the only thing a threshold buys is the villager's time and the player's patience.
+        /// </remarks>
+        internal const float DefaultRepairBelow = .9f;
+
         /// <summary>What the settlement is gathering, for the purpose of knowing when to stop.</summary>
         internal string StockItem = string.Empty;
 
@@ -299,6 +330,11 @@ namespace Kukolony.Jobs
 
             package.Write(harvest.Count);
             foreach (string item in harvest) package.Write(item ?? string.Empty);
+
+            // Version 9 and after. Appended last, for the reason every tail here was: nothing an
+            // older reader knows how to find has moved, which is what lets a version-8 record
+            // decode against this layout.
+            package.Write(RepairBelow);
         }
 
         /// <summary>
@@ -449,6 +485,10 @@ namespace Kukolony.Jobs
 
             for (int i = 0; i < harvest; i++) job.Harvest.Add(package.ReadString());
 
+            if (version < 9) return job;
+
+            job.RepairBelow = package.ReadSingle();
+
             return job;
         }
 
@@ -484,6 +524,7 @@ namespace Kukolony.Jobs
                 case JobKind.Mine: return "Mine";
                 case JobKind.Forage: return "Forage";
                 case JobKind.Farm: return "Farm";
+                case JobKind.Repair: return "Repair";
                 default: return string.Empty;
             }
         }
