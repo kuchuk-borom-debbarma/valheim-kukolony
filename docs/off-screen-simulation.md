@@ -162,16 +162,20 @@ kept-alive colony would lose ownership of its villagers and quietly stop.
 
 ### Where this improves on a chunk loader
 
-Chunk-loader mods append **every** ZDO in a forced zone, paying for hundreds of trees and
-rocks nobody is looking at. We append only ZDOs whose prefab is on an allowlist, built once
-by scanning `ZNetScene.m_prefabs` **by component** rather than by name, so modded chests and
-stations are covered too. 1267 prefabs qualify; everything else is skipped.
+Chunk-loader mods append **every** ZDO in a forced zone. We append only ZDOs whose prefab is on
+an allowlist, built once by scanning `ZNetScene.m_prefabs` **by component** rather than by name,
+so modded chests and stations are covered too. Everything else is skipped.
 
-Trees and logs are on the list **only when some colony gathers**, which a job declares for
-itself. A gathering job that cannot see what it gathers idles silently off-screen and works
-perfectly under observation — the hardest kind of fault to find — but trees are by far the
-most numerous thing in the world, so a colony that only hauls and smelts pays nothing for
-them. The allowlist is rebuilt when that answer changes, not every frame.
+**Trees and rock are the expensive entries, and they are unconditional.** A gathering job that
+cannot see what it gathers idles silently off-screen and works perfectly under observation — the
+hardest kind of fault to find — so what a job might want has to be there before the job asks.
+Keep-alive cannot ask which jobs a colony has: a zone is kept for *whatever* might want it, and
+the allowlist is one list for the whole world rather than one per settlement. `LoadAllowlist`
+says so where it admits them.
+
+That is a real cost and it is paid whether or not anybody chops or mines. Trees are the most
+numerous thing in a forest and rock is the most numerous thing in a mountain, and both are now on
+the list. The zone cap is what bounds it.
 
 `Piece` is on the list deliberately: walking through a tree that was not loaded is
 cosmetic, walking through your wall is not.

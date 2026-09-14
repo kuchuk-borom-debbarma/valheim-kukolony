@@ -297,10 +297,11 @@ that turns into a different object halfway through.
 
 **This job is chopping and only chopping.** Not mining, not foraging. That narrowing is what
 buys precision — every target takes an axe, every one of them keeps its health in the same ZDO
-field, and the settings can talk about trees instead of about "resources". Mining would not
-share the health field: a `MineRock` keeps a float per hit area under a runtime-hashed key and
-a `MineRock5` keeps a base64 package of them, so a give-up test that works for trees would read
-nothing at all from a rock.
+field, and the settings can talk about trees instead of about "resources".
+
+That prediction held. Mining, when it came, needed three protocols precisely because it does not
+share the health field: a `MineRock` keeps a float per hit area under a runtime-hashed key and a
+`MineRock5` keeps a base64 package of them. See **Mine**, below.
 
 ## What it does
 
@@ -681,7 +682,8 @@ away and counting the coal afterwards.
 
 # Craft — making what the settlement was told to make
 
-Chop fells a tree, haul files the wood, tend feeds the kiln. Craft closes the loop: a villager
+Chop fells a tree, haul files the wood, tend feeds the kiln, mine breaks the ore. Craft closes
+the loop: a villager
 takes materials out of the settlement's chests, stands at a workbench or forge, and makes
 something.
 
@@ -743,3 +745,57 @@ station offers to do with its spare time. It costs no materials, which is vanill
 simplification of it. The gate is vanilla's too, reproduced because `CanRepair` needs a `Player`:
 the item must use durability, be repairable, and have a recipe whose repair or crafting station
 shares this one's name, at a level clamped to four the way vanilla clamps it.
+
+---
+
+# Mine — breaking rock for what is in it
+
+Chop, haul, tend and craft made a finished chain for wood and coal and a dead one for metal:
+nothing in the settlement produced copper, tin, iron or silver, so a forge full of orders waited
+on the player swinging a pickaxe.
+
+## The one thing that is not chopping again
+
+Everything else transfers — a tool in hand, a swing, a classifier compiled to a prefab-hash set,
+work areas in order, a stock rule, ground drops that hauling files. **What is new is that the
+target is not a thing, it is part of one.**
+
+A tree is destroyed or it is not. A `MineRock5` builds a hit area per child collider, each with
+its own health and its own drop roll, and the object survives until the last of them is gone — so
+a silver vein is forty rocks wearing one name and spends nearly its whole life partly mined. The
+state table therefore asks two questions chopping only ever had to ask as one: *is the deposit
+still there* and *has it anything left to hit*.
+
+**And the part being worked is never remembered.** Mining collapses: a deposit kills its own
+unsupported parts with a synthetic tool-tier-100 structural hit, several at a time. Anything
+holding an opinion about which rock it was hitting would be wrong within seconds, and wrong in the
+way that looks exactly like working. The part is re-chosen every tick from the colliders that are
+still active, which is the game's own record of what is left.
+
+## Settings
+
+| Setting | Meaning |
+|---|---|
+| **Which ore** — multi-select, empty means all | By what a deposit *yields*, not by which rock it is. A drop table is public on the prefab, so this is answerable with nothing loaded and covers a modded deposit that drops copper without the mod hearing of it |
+| **Also break loose rock** — off by default | The `Destructible` tail. `DestructibleType` has no *Stone*, so the game cannot tell a boulder from a crate; this is opt-in for the reason *chop undergrowth* is |
+| **Stop when we have** | Chopping's terminus, and mining needs it more — a forest grows back and a vein does not. The screen says so |
+| **Where it works**, **Repeat** | Unchanged |
+
+## What it does not do
+
+**It does not carry what it breaks.** Each destroyed part drops where it stood, so a vein is a
+stream of ore over minutes rather than a pile at the end — and hauling files it. One miner will
+comfortably out-produce one hauler.
+
+**It does not swing at what it cannot break.** Tool tier is checked before the blow, because
+`Damage` returns void and refuses silently. A blow that lands and moves nothing is tolerated four
+times — a `Destructible` ignores damage during its first frame, and a peer that has just taken
+ownership can be working from a stale collider set — and then the deposit is refused for the long
+period that matches *until the pickaxe changes*, said once, and the trip ends as skipped rather
+than as a repetition spent on work it never did.
+
+## Done when
+
+A deposit comes apart part by part, what is left survives being unloaded, a pickaxe too weak is
+refused and said, the ore filter leaves the wrong rock alone, loose rock is untouched until it is
+asked for, the stock rule stops it, and two villagers never work one vein.

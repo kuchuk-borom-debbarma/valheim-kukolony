@@ -31,9 +31,25 @@ namespace Kukolony.Resources.Mining
     {
         private readonly MineRock5 _rock;
 
+        /// <summary>
+        ///     The parts, found once.
+        /// </summary>
+        /// <remarks>
+        ///     The set never changes - the component builds its own list from these same
+        ///     children in Awake and never rebuilds it. What changes is which of them are
+        ///     active, and that is a field read rather than a hierarchy walk. Walking the
+        ///     children on every tick, per miner, at twenty a second, to rediscover an answer
+        ///     that cannot have changed is the shape of cost this mod's own remarks argue
+        ///     against everywhere else.
+        /// </remarks>
+        private readonly Collider[] _parts;
+
         internal DepositOfParts(ZNetView view, MineRock5 rock) : base(view)
         {
             _rock = rock;
+            _parts = rock != null
+                ? rock.gameObject.GetComponentsInChildren<Collider>(true)
+                : new Collider[0];
         }
 
         internal override int MinToolTier => _rock != null ? _rock.m_minToolTier : 0;
@@ -42,12 +58,18 @@ namespace Kukolony.Resources.Mining
         {
             if (into == null || _rock == null) return;
 
-            // Every collider, in the order Awake found them, because that order *is* the index
-            // the component uses. Inactive ones are the parts already gone.
-            Collider[] colliders = _rock.gameObject.GetComponentsInChildren<Collider>(true);
-            for (int i = 0; i < colliders.Length; i++)
+            // Inactive ones are the parts already gone: UpdateMesh deactivates a part's collider
+            // when its health reaches zero, which is what makes "what is left" a question the
+            // world answers rather than one we would have to track.
+            //
+            // Including the inactive ones in the array is deliberate, and not the same flag the
+            // component uses in Awake - it takes only the active ones. That matters not at all
+            // here, because MineRock5 resolves which part was hit from the collider reference
+            // rather than from any index we pass, so nothing outside this class reads the number.
+            // Keeping the array stable as parts die is worth more than matching a flag.
+            for (int i = 0; i < _parts.Length; i++)
             {
-                Collider collider = colliders[i];
+                Collider collider = _parts[i];
                 if (collider == null || !collider.gameObject.activeInHierarchy) continue;
 
                 into.Add(new MineArea(i, collider.bounds.center, collider));

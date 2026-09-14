@@ -322,6 +322,8 @@ namespace Kukolony.Debug
                 case "mine":
                     CheckJobsSurviveAVersion(report);
                     yield return CheckMiningIndex(report);
+                    yield return CheckRockIsKeptLoaded(report);
+                    yield return CheckThePickaxeIsPutAway(report, colony);
                     yield return CheckAVeinIsMinedPartByPart(report, colony, origin);
                     break;
 
@@ -5491,6 +5493,102 @@ namespace Kukolony.Debug
         ///     where it came back empty would mean the job's picker offers nothing and the
         ///     failure would show up as "nothing to mine" with no explanation.
         /// </remarks>
+        /// <summary>
+        ///     Deposits survive in a zone kept open for a villager, so mining works off-screen.
+        /// </summary>
+        /// <remarks>
+        ///     The failure this guards is invisible by construction: a mine outpost whose rock
+        ///     was filtered out of its own kept zone finds nothing, idles, and works perfectly
+        ///     every time somebody comes to look.
+        /// </remarks>
+        private static IEnumerator CheckRockIsKeptLoaded(TestReport report)
+        {
+            if (!LoadAllowlist.IsReady) LoadAllowlist.Rebuild();
+            if (!Mineable.IsReady) Mineable.Rebuild();
+
+            string deposit = Mineable.SampleDeposit(0, 99);
+            if (string.IsNullOrEmpty(deposit) || ZNetScene.instance == null)
+            {
+                report.Check(false, "kept-rock check could name a deposit");
+                yield break;
+            }
+
+            report.Check(LoadAllowlist.Contains(deposit.GetStableHashCode()),
+                "deposits are loaded in a zone kept open for a villager, so mining works off-screen",
+                $"deposit={deposit}");
+
+            report.Check(!LoadAllowlist.Contains("not_a_real_prefab".GetStableHashCode()),
+                "control: the allowlist still excludes what a colony has no use for");
+
+            yield break;
+        }
+
+        /// <summary>
+        ///     A pickaxe leaves the hand when the villager stops mining.
+        /// </summary>
+        /// <remarks>
+        ///     The slot is ZDO-backed and nothing else writes it, so a tool left in a hand stays
+        ///     there for the rest of the world. Mining made this reachable a second way: before
+        ///     the hand learned what a pickaxe is, one would have read as the player's own
+        ///     choice and been left alone for ever.
+        /// </remarks>
+        private static IEnumerator CheckThePickaxeIsPutAway(TestReport report, Colony colony)
+        {
+            Villager villager = VillagerLifecycle.Spawn(colony);
+            yield return null;
+
+            if (villager == null || !villager.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "control: the pickaxe check could spawn a villager");
+                yield break;
+            }
+
+            VisEquipment dressed = villager.GetComponentInChildren<VisEquipment>(true);
+            ItemDrop.ItemData pick = AnyPickaxe();
+
+            if (dressed == null || pick == null)
+            {
+                report.Check(false, "control: the pickaxe check could find a villager to dress and a pickaxe",
+                    $"dressed={(dressed != null)} pickaxe={(pick != null)}");
+                VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
+                yield break;
+            }
+
+            VillagerWardrobe.Set(dressed, WearSlot.RightHand, pick);
+            yield return null;
+
+            report.Check(VillagerWardrobe.Worn(view.GetZDO(), WearSlot.RightHand) != 0,
+                "control: the villager really is holding a pickaxe before this is asked");
+
+            VillagerTool.PutAway(dressed, view.GetZDO());
+            yield return null;
+
+            report.Check(VillagerWardrobe.Worn(view.GetZDO(), WearSlot.RightHand) == 0,
+                "a pickaxe is taken out of the hand when the villager is not mining",
+                $"worn={VillagerWardrobe.Worn(view.GetZDO(), WearSlot.RightHand)}");
+
+            VillagerLifecycle.Remove(colony, view.GetZDO().m_uid);
+            yield return null;
+        }
+
+        /// <summary>Any pickaxe the game has, so this check need not name one.</summary>
+        private static ItemDrop.ItemData AnyPickaxe()
+        {
+            if (ObjectDB.instance?.m_items == null) return null;
+
+            foreach (GameObject prefab in ObjectDB.instance.m_items)
+            {
+                if (prefab == null || !prefab.TryGetComponent(out ItemDrop drop)) continue;
+
+                ItemDrop.ItemData.SharedData shared = drop.m_itemData?.m_shared;
+                if (shared == null || shared.m_damages.m_pickaxe <= 0f) continue;
+
+                return drop.m_itemData;
+            }
+
+            return null;
+        }
+
         private static IEnumerator CheckMiningIndex(TestReport report)
         {
             if (!Mineable.IsReady) Mineable.Rebuild();

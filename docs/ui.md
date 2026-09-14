@@ -156,12 +156,15 @@ settlement's record every time somebody is reassigned.
 - **Jobs** — every job the settlement knows, what it does, and where it happens.
 - **A job** — its name, how many times it repeats before the queue advances, and **where it
   works**. Hauling adds which items it handles, whether it tidies containers and whether it
-  fills the bag before setting out; chopping adds what it takes and when to stop. Tending and
-  crafting add nothing at all, because everything they used to ask is a fact about a station and
-  is now set on the station. Both screens say so rather than showing an empty panel, which reads
+  fills the bag before setting out; chopping adds what it takes and when to stop; mining adds
+  which ore, whether loose rock counts, and the same stopping rule — with a line saying that ore
+  does not grow back, because a mining job without a limit clears the area while every individual
+  decision is correct. Tending and crafting add nothing at all, because everything they used to
+  ask is a fact about a station and is now set on the station. Both screens say so rather than showing an empty panel, which reads
   as one that has not finished loading.
-- **Add a job** opens a picker over the kinds. It was a button per kind until a fourth arrived —
-  three fitted the row and the fourth would have been a silently half-width button. The list is
+- **Add a job** opens a picker over the kinds — five of them now. It was a button per kind until a
+  fourth arrived: three fitted the row and the fourth would have been a silently half-width
+  button. The list is
   built from the enum, which is what stops the next kind being unreachable.
 
 "Where it works" offers the whole settlement first, then the colony's work-area flags. A work

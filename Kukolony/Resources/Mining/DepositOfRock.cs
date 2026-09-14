@@ -24,9 +24,24 @@ namespace Kukolony.Resources.Mining
     {
         private readonly MineRock _rock;
 
+        /// <summary>
+        ///     The parts, found once, in the order the component numbers them.
+        /// </summary>
+        /// <remarks>
+        ///     <b>Here the index is load-bearing</b>, unlike its successor's: this component
+        ///     keeps each part's health under a ZDO key built from the index, so reading the
+        ///     wrong slot would report a neighbour's health and every blow would look fruitless.
+        ///     The component builds its list once in Start from the children of m_areaRoot; this
+        ///     reads the same children once, so the two agree for as long as the object lives.
+        /// </remarks>
+        private readonly Collider[] _parts;
+
         internal DepositOfRock(ZNetView view, MineRock rock) : base(view)
         {
             _rock = rock;
+
+            GameObject root = rock == null ? null : rock.m_areaRoot != null ? rock.m_areaRoot : rock.gameObject;
+            _parts = root != null ? root.GetComponentsInChildren<Collider>(true) : new Collider[0];
         }
 
         internal override int MinToolTier => _rock != null ? _rock.m_minToolTier : 0;
@@ -35,12 +50,9 @@ namespace Kukolony.Resources.Mining
         {
             if (into == null || _rock == null) return;
 
-            GameObject root = _rock.m_areaRoot != null ? _rock.m_areaRoot : _rock.gameObject;
-            Collider[] colliders = root.GetComponentsInChildren<Collider>(true);
-
-            for (int i = 0; i < colliders.Length; i++)
+            for (int i = 0; i < _parts.Length; i++)
             {
-                Collider collider = colliders[i];
+                Collider collider = _parts[i];
                 if (collider == null || !collider.gameObject.activeInHierarchy) continue;
                 if (Health(i) <= 0f) continue;
 

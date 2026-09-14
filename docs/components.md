@@ -27,7 +27,8 @@ This describes the code, not an aspiration:
 | May this be registered? | `Colonies/StructureRegistry.TryCapabilities` | `Container`, `Bed`, `WorkFlag`, a processing station via `StationProbe`, a crafting station via `CraftProbe` |
 | Which station is this, and how is it worked? | `Colonies/Stations/StationProbe` | `CookingStation`, `Fermenter`, `Smelter` |
 | Is this a place things are made by hand? | `Colonies/Stations/CraftProbe` | `CraftingStation` — one component, unlike processing, which is the whole finding |
-| What stays loaded off-screen? | `KeepAlive/LoadAllowlist.Matters` | `Piece`, `Container`, `CraftingStation`, `Smelter`, `CookingStation`, `Fermenter`, `Fireplace`, `TerrainComp`, `ItemDrop`, and what an axe can cut |
+| What stays loaded off-screen? | `KeepAlive/LoadAllowlist.Matters` | `Piece`, `Container`, `CraftingStation`, `Smelter`, `CookingStation`, `Fermenter`, `Fireplace`, `TerrainComp`, `ItemDrop`, what an axe can cut, and what a pickaxe can break |
+| What can a pickaxe break? | `Resources/Mineable`, and `Resources/Mining/MineProbe` for how to work it | `MineRock5`, `MineRock` — unambiguous, because nothing else carries them — and a `Destructible` a pickaxe is not immune to, which is the opt-in tail |
 | What can an axe cut? | `Resources/Choppable` | `TreeBase`, `TreeLog`, `Destructible` — compiled into a prefab-hash set, so the scan is an integer compare rather than a `GetComponent` per candidate |
 | What is this called? | `StructureRegistry.DisplayName` | `Piece.m_name` or `Container.m_name`, localised. The cleaned prefab name is the fallback when a thing carries neither — honest, and the reason rows do not read `charcoal_kiln(Clone)` |
 
@@ -48,6 +49,14 @@ target picker, and the settlement index.
 
 Two surfaces with two tests drift apart, and the symptom is ugly: a structure a player can register
 that no job will ever touch, or one a job wants that cannot be registered.
+
+**Mining splits one question across two files, and should not.** `Mineable.Classify` answers it
+for prefabs — feeding the keep-alive allowlist and the hash index — while `MineProbe.TryFind`
+answers it for instances and returns the protocol. They agree today, but the loose-rock test is
+written out in both, which is the arrangement `CraftProbe.NameOfPrefab` was moved *out of* three
+paragraphs above. The drift it invites is named in `Mineable`'s own docstring: a prefab that is
+minable but unworkable is a villager walking to a rock it cannot work, and one that is workable
+but never kept loaded is an outpost that silently idles.
 
 **Processing and Crafting hold to this; Storage does not yet.** Every processing question goes
 through `StationProbe` and every crafting question through `CraftProbe` — including the one
@@ -107,12 +116,19 @@ rather than a convention.
 
 ## What it costs, honestly
 
-A component test can admit more than was meant. The chop classifier admits any `Destructible` an
-axe is not outright immune to, which is most scenery as well as stumps and bushes — so a kept zone
-instantiates its undergrowth, and a chopping job could flatten decorations nobody asked it to.
+A component test can admit more than was meant, and it has happened twice on the same shape. The
+chop classifier admits any `Destructible` an axe is not outright immune to, which is most scenery
+as well as stumps and bushes. The mine classifier does the same for pickaxe damage — and there it
+is worse, because `DestructibleType` offers `None`, `Default`, `Tree` and `Character` with **no
+Stone**, so a boulder and a crate are the same thing as far as the game is concerned.
+
+So a kept zone instantiates its undergrowth *and* its loose rock, and either job could flatten
+decorations nobody asked it to.
 
 Breadth is the price of not maintaining a name list. **The mitigation is a setting** — *chop
-undergrowth* is opt-in — never a name list smuggled back in through the side door.
+undergrowth* and *also break loose rock* are both opt-in — never a name list smuggled back in
+through the side door. The unambiguous halves need no setting: `TreeBase` and `TreeLog` are trees,
+`MineRock` and `MineRock5` are deposits, and nothing else in the game carries any of them.
 
 ## Adding a capability
 

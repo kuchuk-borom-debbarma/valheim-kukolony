@@ -87,6 +87,18 @@ namespace Kukolony.Jobs.Mine
         /// <summary>Fruitless blows landed on the deposit each villager is working.</summary>
         private static readonly Dictionary<ZDOID, int> Fruitless = new Dictionary<ZDOID, int>();
 
+        /// <summary>
+        ///     The protocol for the deposit each villager holds, built once per deposit.
+        /// </summary>
+        /// <remarks>
+        ///     Building one costs a handful of GetComponent calls and an allocation, and the
+        ///     answer cannot change while the villager keeps working the same rock - so doing it
+        ///     twenty times a second per miner is exactly the per-tick cost this mod argues
+        ///     against everywhere else. Dropped whenever the target changes or the object goes.
+        /// </remarks>
+        private static readonly Dictionary<ZDOID, MineProtocol> Holding =
+            new Dictionary<ZDOID, MineProtocol>();
+
         /// <summary>Reused so a 20Hz path does not allocate a list per villager per tick.</summary>
         private static readonly List<MineArea> Parts = new List<MineArea>();
 
@@ -98,6 +110,7 @@ namespace Kukolony.Jobs.Mine
             NextBlow.Clear();
             Settled.Clear();
             Fruitless.Clear();
+            Holding.Clear();
         }
 
         /// <summary>Drops what a villager that no longer exists was waiting on.</summary>
@@ -108,6 +121,7 @@ namespace Kukolony.Jobs.Mine
             NextBlow.Remove(villager);
             Settled.Remove(villager);
             Fruitless.Remove(villager);
+            Holding.Remove(villager);
         }
 
         internal static JobResult Tick(MineContext context, out string activity)
@@ -121,7 +135,7 @@ namespace Kukolony.Jobs.Mine
             if (lost) state.ClearTarget();
 
             ItemDrop.ItemData pick = Pickaxe(context);
-            MineProtocol rock = Working(target);
+            MineProtocol rock = Working(context, target);
 
             // The part to work, chosen afresh from what is standing. This is the line the whole
             // job is arranged around: everything below asks about *this* part, and next tick it
@@ -502,8 +516,29 @@ namespace Kukolony.Jobs.Mine
             return areas;
         }
 
-        private static MineProtocol Working(GameObject target) =>
-            target != null && MineProbe.TryFind(target, out MineProtocol found) ? found : null;
+        /// <summary>
+        ///     How to work the deposit this villager holds, remembered while it holds it.
+        /// </summary>
+        private static MineProtocol Working(MineContext context, GameObject target)
+        {
+            ZDOID villager = context.Villager.Id;
+            ZDOID held = context.State.Target;
+
+            if (!villager.IsNone() && Holding.TryGetValue(villager, out MineProtocol cached))
+            {
+                // Still the same rock, and still there. Anything else and it is rebuilt, which
+                // is the cheap case precisely because it happens once per deposit rather than
+                // once per tick.
+                if (cached != null && cached.IsValid && cached.View.GetZDO().m_uid == held) return cached;
+
+                Holding.Remove(villager);
+            }
+
+            if (target == null || !MineProbe.TryFind(target, out MineProtocol found)) return null;
+
+            if (!villager.IsNone()) Holding[villager] = found;
+            return found;
+        }
 
         private static JobResult Walk(MineContext context, Vector3 to, out string activity)
         {
