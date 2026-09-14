@@ -127,24 +127,23 @@ namespace Kukolony.Gui
                 });
             }
 
-            if ((record.Capabilities & StructureCapability.Storage) != 0)
+            // One row per capability, each opening its own screen, rather than every panel
+            // stacked down one column. A build piece can be several things at once - a thing
+            // that is both storage and a station is ordinary, and nothing stops a modded piece
+            // being three - and stacking them meant the screen's row budget decided how much of
+            // a structure could be configured. Rows are finite; capabilities are a list.
+            //
+            // It also gives each capability a title of its own, so a player configuring the
+            // storage half of a station is looking at a screen that says Storage.
+            foreach (StructureCapability capability in Aspects(record.Capabilities))
             {
-                BuildStorage(host, column, colony, record, settings);
-            }
+                if (!column.TryRow(out Row aspect)) break;
 
-            if ((record.Capabilities & StructureCapability.Processing) != 0)
-            {
-                BuildProcessing(host, column, colony, record, settings);
-            }
-
-            if ((record.Capabilities & StructureCapability.Crafting) != 0)
-            {
-                BuildCrafting(host, column, colony, record, settings);
-            }
-
-            if ((record.Capabilities & StructureCapability.Rest) != 0)
-            {
-                BuildRest(host, column, colony, record, settings);
+                StructureCapability opening = capability;
+                Widgets.Choice(aspect, StructureCapabilities.Describe(capability),
+                    Summary(colony, record, capability),
+                    () => host.Push(new StructureAspectScreen(record.PersistentId, record.Id, opening)),
+                    260f);
             }
 
             StructureStatus status = record.StatusIn(colony);
@@ -184,6 +183,117 @@ namespace Kukolony.Gui
         }
 
         /// <summary>
+        ///     Draws one capability's settings.
+        /// </summary>
+        /// <remarks>
+        ///     The dispatch lives here rather than on the aspect screen so the panels stay
+        ///     private to this file and there is exactly one place that maps a capability to
+        ///     what configures it.
+        /// </remarks>
+        internal static void BuildAspect(ColonyScreen host, Column column, Colony colony,
+            StructureRecord record, StructureCapability capability)
+        {
+            StructureSettings settings = record.Settings;
+
+            switch (capability)
+            {
+                case StructureCapability.Storage:
+                    BuildStorage(host, column, colony, record, settings);
+                    break;
+
+                case StructureCapability.Processing:
+                    BuildProcessing(host, column, colony, record, settings);
+                    break;
+
+                case StructureCapability.Crafting:
+                    BuildCrafting(host, column, colony, record, settings);
+                    break;
+
+                case StructureCapability.Rest:
+                    BuildRest(host, column, colony, record, settings);
+                    break;
+
+                default:
+                    // A work flag configures itself on its own screen, and a capability with no
+                    // panel says so rather than drawing an empty one that reads as a screen
+                    // which has not finished loading.
+                    if (column.TryRow(out Row none))
+                    {
+                        Widgets.Label(none, "Nothing to configure here.", Color.gray);
+                    }
+
+                    break;
+            }
+        }
+
+        /// <summary>
+        ///     The capabilities a record has, in the order they are worth configuring.
+        /// </summary>
+        /// <remarks>
+        ///     Read off the flags rather than listed, so a capability added later appears here
+        ///     the day its bit is defined - the same reason the job picker reads its kinds off
+        ///     the enum.
+        /// </remarks>
+        internal static List<StructureCapability> Aspects(StructureCapability capabilities)
+        {
+            List<StructureCapability> found = new List<StructureCapability>();
+            capabilities &= StructureCapabilities.Known;
+
+            foreach (StructureCapability candidate in new[]
+                     {
+                         StructureCapability.Storage, StructureCapability.Processing,
+                         StructureCapability.Crafting, StructureCapability.Rest,
+                         StructureCapability.WorkArea
+                     })
+            {
+                if ((capabilities & candidate) != 0) found.Add(candidate);
+            }
+
+            return found;
+        }
+
+        /// <summary>
+        ///     A line of what one capability is currently set to, for the row that opens it.
+        /// </summary>
+        /// <remarks>
+        ///     So a structure with four capabilities reads as a summary rather than as four
+        ///     identical buttons - the same reason a picker row shows what is chosen on it.
+        /// </remarks>
+        private static string Summary(Colony colony, StructureRecord record, StructureCapability capability)
+        {
+            StructureSettings settings = record.Settings;
+
+            switch (capability)
+            {
+                case StructureCapability.Storage:
+                    return settings.Accepts.Count == 0 ? "anything" : Summarise(settings.Accepts);
+
+                case StructureCapability.Processing:
+                    return settings.Input.Count == 0 && settings.Fuel.Count == 0
+                        ? "not set up"
+                        : $"{Mathf.RoundToInt(settings.KeepFull * 100f)}% full";
+
+                case StructureCapability.Crafting:
+                    return settings.Orders.Count == 0
+                        ? "no orders"
+                        : settings.Orders.Count == 1
+                            ? ItemCatalogue.Label(settings.Orders[0].Item)
+                            : $"{settings.Orders.Count} orders";
+
+                case StructureCapability.Rest:
+                    return settings.HasSleeper ? VillagerRoster.Name(settings.Sleeper) : "nobody";
+
+                case StructureCapability.WorkArea:
+                    return "a place villagers work";
+
+                default:
+                    // No fallback that invents a plausible line: a capability nobody has
+                    // written a summary for should look unfinished rather than fine.
+                    return string.Empty;
+            }
+        }
+
+        /// <summary>
         ///     What belongs here, and whether the settlement may take from it.
         /// </summary>
         /// <remarks>
@@ -209,7 +319,10 @@ namespace Kukolony.Gui
 
             if (column.TryRow(out Row take))
             {
-                Widgets.Flag(take, "May take from", settings.MayTakeFrom, value =>
+                // Named for what it prevents. "May take from" reads as a note about hauling,
+                // and the thing a player actually wants to say is "these are my tools, leave
+                // them alone" - which this has always done and never said.
+                Widgets.Flag(take, "Villagers may use what is here", settings.MayTakeFrom, value =>
                 {
                     ColonyOperations.EditSettings(colony, record.Id, s => s.MayTakeFrom = value);
                     host.Refresh();
@@ -611,6 +724,68 @@ namespace Kukolony.Gui
             }
 
             return fallback.IsNone() ? null : records.Find(r => r.Id == fallback);
+        }
+    }
+
+    /// <summary>
+    ///     One capability of one structure, on a screen of its own.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         A build piece can be several things at once - storage and a station is ordinary,
+    ///         and a modded piece could be three - and stacking every panel down one column made
+    ///         the screen's row budget decide how much of a structure could be configured. Rows
+    ///         are finite; capabilities are a list.
+    ///     </para>
+    ///     <para>
+    ///         Keyed on the capability rather than on a screen per kind, so the day a new bit is
+    ///         defined the row appears and this screen builds it - there is no fourth class to
+    ///         remember to write.
+    ///     </para>
+    /// </remarks>
+    internal sealed class StructureAspectScreen : ScreenView
+    {
+        private readonly string _token;
+        private readonly ZDOID _fallback;
+        private readonly StructureCapability _capability;
+
+        internal StructureAspectScreen(string token, ZDOID fallback, StructureCapability capability)
+        {
+            _token = token ?? string.Empty;
+            _fallback = fallback;
+            _capability = capability;
+        }
+
+        internal override string Title => StructureCapabilities.Describe(_capability);
+
+        internal override bool StillValid(ColonyScreen host) => host.Colony != null;
+
+        internal override void Build(ColonyScreen host, Column column)
+        {
+            Colony colony = host.Colony;
+            StructureRecord record = StructureDetailScreen.Find(colony, _token, _fallback);
+
+            if (record == null || (record.Capabilities & _capability) == 0)
+            {
+                if (column.TryRow(out Row gone))
+                {
+                    Widgets.Label(gone, record == null
+                        ? "This structure is no longer registered."
+                        : "This structure is no longer understood to be that.", Color.gray);
+                }
+
+                return;
+            }
+
+            // Which structure this is, because the title says what the screen configures and
+            // not what it belongs to - and a settlement has more than one chest.
+            if (column.TryRow(out Row whose))
+            {
+                Widgets.Caption(whose, "On");
+                Widgets.Label(whose, record.Name);
+            }
+
+            StructureDetailScreen.BuildAspect(host, column, colony, record, _capability);
         }
     }
 

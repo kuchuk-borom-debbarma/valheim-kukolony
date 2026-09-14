@@ -279,8 +279,18 @@ namespace Kukolony.Debug
 
                 ScreenAudit.Result station = ScreenAudit.Inspect(screen.Content);
                 report.Check(station.Clean,
-                    "a crafting station's screen has no layout faults, orders and all",
+                    "a crafting station's screen has no layout faults, a row per capability",
                     station.Clean ? station.Summary : station.FirstFault);
+
+                // The settings themselves live a screen deeper now, one capability at a time,
+                // so auditing the structure alone would no longer see a single order row.
+                screen.Push(new StructureAspectScreen("audit-bench", ZDOID.None,
+                    StructureCapability.Crafting));
+                yield return null;
+
+                ScreenAudit.Result aspect = ScreenAudit.Inspect(screen.Content);
+                report.Check(aspect.Clean, "and nor does its crafting settings screen",
+                    aspect.Clean ? aspect.Summary : aspect.FirstFault);
 
                 screen.Push(new StructureOrderScreen("audit-bench", ZDOID.None, "Stone"));
                 yield return null;

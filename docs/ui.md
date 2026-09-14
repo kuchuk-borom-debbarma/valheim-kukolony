@@ -117,10 +117,19 @@ governs all of them, because almost every structure has a single capability and 
 capability would mostly be a second click to reach the same place. Switching off is not
 unregistering — the row keeps its name and its settings and comes back configured.
 
-Then a section per capability it has:
+Then **one row per capability, each opening a screen of its own**. A build piece can be several
+things at once — storage and a station is ordinary, and nothing stops a modded piece being three —
+and stacking every panel down one column let the screen's row budget decide how much of a
+structure could be configured. Rows are finite; capabilities are a list. Each row shows what that
+capability is currently set to, so a structure with four of them reads as a summary rather than as
+four identical buttons.
 
-- **Storage** — what belongs here (empty means *anything*, which is what an overflow chest is)
-  and whether the settlement may take from it.
+What each screen holds:
+
+- **Storage** — what belongs here (empty means *anything*, which is what an overflow chest is),
+  and **whether villagers may use what is here**. That second one is how a player says *these are
+  my tools, leave them alone*: a chest with it off is still filled by hauling and never emptied,
+  and nothing — no supply run, no craft, no repair — takes anything out of it.
 - **Processing** — what to keep it fuelled with, what to feed it, how full to keep it, whether
   villagers supply it or clear it, and whether they carry fuel, material or both.
 - **Crafting** — what it should make, as a list of orders, and whether worn gear may be mended

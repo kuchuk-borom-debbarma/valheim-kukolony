@@ -782,3 +782,62 @@ Scan `ObjectDB.instance.m_recipes`.
 gate is `m_shared.m_useDurability`, `m_shared.m_canBeReparied` (vanilla's typo), a recipe from
 `ObjectDB.GetRecipe(item)`, a station whose `m_name` matches the recipe's `m_repairStation` **or**
 `m_craftingStation`, and `Mathf.Min(station.GetLevel(), 4) >= recipe.m_minStationLevel`.
+
+## Mining: a silver vein is forty rocks wearing one name
+
+A tree is one object with one health and one death. An ore deposit is not, and designing for it as
+though it were is the mistake worth naming before writing any of it.
+
+### `MineRock5` — the modern one
+
+`Awake` walks `GetComponentsInChildren<Collider>()` and builds a `HitArea` for each: its own
+health, its own drop roll, its own destruction. The object is only `m_nview.Destroy()`ed when
+`AllDestroyed()` is true, so a vein spends almost its whole life *partly* mined.
+
+**What is left is readable without touching private state.** `UpdateMesh` does
+
+```csharp
+hitArea.m_collider.gameObject.SetActive(hitArea.m_health > 0f);
+```
+
+so the **active child colliders are exactly the remaining areas**. Count them for progress; take
+each one's `bounds.center` as both a place to stand and a point to strike. No reflection, no
+bookkeeping of our own, and nothing to keep in step with the world.
+
+**Two ways in, and the second is generous:**
+
+```csharp
+if (hit.m_hitCollider == null || hit.m_radius > 0f)   // sphere at m_point: damages EVERY area it overlaps
+else                                                   // a named collider: exactly one area
+```
+
+Vanilla builds its own synthetic hit in `CheckSupport`, which is the template to copy — a fresh
+`HitData`, `m_point` at `collider.bounds.center`, a tool tier, a damage figure.
+
+### `MineRock` — the older one, still on live prefabs
+
+Stricter: `Damage` **requires** `hit.m_hitCollider` and has no radius path, and per-area health
+lives in the ZDO under keys `"Health<index>"`. Two unrelated components answering one question is
+the shape tending already solved — a probe and a small adapter each.
+
+### Three rules that shape the job
+
+**Mining collapses.** `m_supportCheck` runs `CheckSupport`, which kills unsupported areas with a
+synthetic **tool-tier-100 `Structural`** hit. Cut the base and the top falls on its own, so areas
+vanish that nobody struck and the remaining count can drop by several at once. Progress must be
+read from the world, never counted from our own swings.
+
+**Drops come per area, continuously.** Each destroyed area spawns its own drop list where it stood.
+A vein is a stream of ore over minutes rather than a pile at the end, which lands directly on
+hauling — one miner will out-produce one hauler.
+
+**Tool tier is a silent gate.** `CheckToolTier(m_minToolTier)` shows "too hard" and returns, and
+`Damage` is `void`, so nothing comes back. Both numbers are readable, so the check belongs
+*before* the swing — which is what `Choppable` already does for trees.
+
+### And the classifier cannot use the type
+
+`DestructibleType` is `None / Default / Tree / Character`. **There is no Stone.** A boulder and a
+crate are both `Default`, so the type says nothing. `MineRock` and `MineRock5` are unambiguous;
+plain `Destructible` is the ambiguous tail and belongs behind a setting, exactly as undergrowth
+does for chopping.
