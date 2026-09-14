@@ -5803,9 +5803,15 @@ namespace Kukolony.Debug
             SweepLooseItems(colony);
             SettlementIndex.ResetForTest();
 
-            Vector3 site = MiningSite(origin) + new Vector3(0f, 0f, 30f);
+            // Beside the Kolony, not out at the mining site. Registration is bounded by the
+            // hearth's reach and the claimed flags' circles, so a chest eighty metres out comes
+            // back OutOfReach - which is what this check's own control caught on its first run
+            // in game, and is the reason the control is a control rather than an assumption.
+            Vector3 site = origin + new Vector3(-11f, 0f, -4f);
 
-            GameObject chest = Spawn("piece_chest_wood", site + new Vector3(4f, 0f, 0f));
+            // Far enough that the walk is a walk. At arm's length the villager would already be
+            // standing at the chest and the errand would never have to path anywhere.
+            GameObject chest = Spawn("piece_chest_wood", site + new Vector3(8f, 0f, 0f));
             yield return new WaitForSecondsRealtime(.3f);
 
             StructureRecord shed = Register(colony, chest, "Tool shed");
@@ -5815,7 +5821,8 @@ namespace Kukolony.Debug
             if (shed == null || store == null || spare == null)
             {
                 report.Check(false, "control: the tool errand check could stock a registered chest",
-                    $"registered={(shed != null)} container={(store != null)} pickaxe={(spare != null)}");
+                    $"registered={(shed != null)} container={(store != null)} pickaxe={(spare != null)} " +
+                    $"fromHearth={(chest == null ? -1f : Utils.DistanceXZ(chest.transform.position, colony.transform.position)):0}m");
                 Release(chest);
                 yield break;
             }
