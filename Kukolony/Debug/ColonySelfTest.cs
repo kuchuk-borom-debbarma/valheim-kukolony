@@ -310,6 +310,11 @@ namespace Kukolony.Debug
                     yield return CheckEnoughStopsTheTending(report, colony, origin);
                     break;
 
+                case "craft":
+                    yield return CheckAStationRefusesWhatItCannotDo(report, colony, origin);
+                    yield return CheckACraftedOrderIsMadeFiledAndStops(report, colony, origin);
+                    break;
+
                 case "queue":
                     yield return CheckAStuckTripEndsAndTheQueueMovesOn(report, colony);
                     yield return CheckAPresetKeepsItsOrder(report, colony);
@@ -325,7 +330,7 @@ namespace Kukolony.Debug
                     // Named but unknown. Failing beats running everything under a name that
                     // says otherwise, or running nothing and reporting a pass.
                     report.Check(false, $"'{wanted}' is not a slice this run knows",
-                        "known: chop, travel, queue, tend, swing");
+                        "known: chop, travel, queue, tend, craft, swing");
                     break;
             }
 
@@ -6831,13 +6836,16 @@ namespace Kukolony.Debug
             });
 
             // Ten, against the twenty already in the chest. Nothing to do from the first tick.
+            //
+            // The order is on the station now, not on the job. That is the whole of the change:
+            // a settlement with two kilns can want a hundred coal from one and nothing from the
+            // other, which it could not say while the number lived on the work.
+            ColonyOperations.EditSettings(colony, station.Id, s =>
+                s.Orders.Add(new StructureOrder { Item = product, Count = 10 }));
+
             colony.State.SetJobs(new List<JobDefinition>
             {
-                new JobDefinition
-                {
-                    Id = "enough", Name = "Tend", Kind = JobKind.Tend, Repeat = 30,
-                    StockItem = product, StockTarget = 10
-                }
+                new JobDefinition { Id = "enough", Name = "Tend", Kind = JobKind.Tend, Repeat = 30 }
             });
 
             Villager hand = VillagerLifecycle.Spawn(colony);
@@ -6864,9 +6872,11 @@ namespace Kukolony.Debug
                 $"did='{hand.Activity}'");
 
             // The control. Same fixture, same villager - only the line moves.
-            List<JobDefinition> raised = colony.State.GetJobs();
-            raised.Find(j => j.Id == "enough").StockTarget = 999;
-            colony.State.SetJobs(raised);
+            ColonyOperations.EditSettings(colony, station.Id, s =>
+            {
+                StructureOrder order = s.Orders.Find(o => o.Item == product);
+                if (order != null) order.Count = 999;
+            });
 
             for (int attempt = 0; attempt < 60 && smelter.GetQueueSize() == 0; attempt++)
             {
@@ -6882,6 +6892,276 @@ namespace Kukolony.Debug
             colony.RemoveStructure(station.Id);
             colony.RemoveStructure(store.Id);
             Release(kiln);
+            Release(chest);
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A station missing what it needs refuses, and the same station with it accepts.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The two halves have to be the same station, because a refusal on its own
+        ///         proves nothing: a villager that never found the bench at all, or a fixture
+        ///         that failed to register, would produce exactly the same silence. Only the
+        ///         second half says the refusal was a decision.
+        ///     </para>
+        ///     <para>
+        ///         <b>The requirement is set on the instance rather than staged.</b> Building a
+        ///         roof and lighting a fire in a fixture would be testing Valheim's cover and
+        ///         heat systems, which work; what is under test is whether <em>our</em> copy of
+        ///         CheckUsable reads them - it has to be a copy, because vanilla's takes a
+        ///         Player and dereferences it. So the fixture flips the station's own flag,
+        ///         which is the input that rule actually reads.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckAStationRefusesWhatItCannotDo(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject bench = SpawnFirst(origin + new Vector3(6f, 0f, -10f), "piece_workbench");
+            yield return new WaitForSecondsRealtime(.4f);
+
+            CraftingStation station = bench != null ? bench.GetComponentInChildren<CraftingStation>(true) : null;
+            if (station == null || !Colonies.Stations.CraftProbe.TryFind(bench, out Colonies.Stations.CraftStation adapter))
+            {
+                report.Check(false, "control: the refusal check could place a crafting station",
+                    $"bench={(bench != null)}");
+                Release(bench);
+                yield break;
+            }
+
+            // Out in the open with no fire, which is the state being asserted about.
+            station.m_craftRequireRoof = false;
+            station.m_craftRequireFire = true;
+            yield return new WaitForSecondsRealtime(1.2f);
+
+            bool refused = !adapter.Usable(out string why);
+            report.Check(refused && why.Contains("fire"),
+                "a station that needs a fire and has none refuses, and says which",
+                $"usable={!refused} said='{why}'");
+
+            station.m_craftRequireFire = false;
+            bool accepted = adapter.Usable(out string nowWhy);
+            report.Check(accepted, "control: the same station accepts once it no longer needs one",
+                $"usable={accepted} said='{nowWhy}'");
+
+            // Roof, the other half of the same rule, on the same station.
+            station.m_craftRequireRoof = true;
+            bool roofless = !adapter.Usable(out string roofWhy);
+            report.Check(roofless && roofWhy.Contains("roof"),
+                "and a station standing in the open under a roof rule refuses too",
+                $"usable={!roofless} said='{roofWhy}'");
+
+            station.m_craftRequireRoof = false;
+            Release(bench);
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     The whole loop: a villager makes what a station was told to make, a hauler files
+        ///     it, the order fills, and the making stops.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Written as one check rather than four because the parts do not work
+        ///         separately. What a crafter makes stays in its own bag, and a bag is not
+        ///         registered storage - so the order counts nothing until a hauler has carried
+        ///         it to a chest. A "does it craft" check with no hauler would pass while the
+        ///         settlement quietly made things for ever.
+        ///     </para>
+        ///     <para>
+        ///         <b>The materials are counted.</b> That is the guard against the trap this job
+        ///         was written around: Inventory.RemoveItem returns void and silently skips
+        ///         anything below the world's level, so on an NG+ world a villager would consume
+        ///         nothing and produce everything, and every other assertion here would pass.
+        ///     </para>
+        ///     <para>
+        ///         The recipe is read from the catalogue rather than named. A fixture that
+        ///         hardcoded "make nails" would keep passing after Valheim moved nails to a
+        ///         different bench, which is the same reason nothing else here names a prefab.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckACraftedOrderIsMadeFiledAndStops(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject bench = SpawnFirst(origin + new Vector3(7f, 0f, 7f), "piece_workbench");
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(4f, 0f, 7f));
+            yield return new WaitForSecondsRealtime(.4f);
+
+            CraftingStation component = bench != null ? bench.GetComponentInChildren<CraftingStation>(true) : null;
+            if (component == null)
+            {
+                report.Check(false, "control: the crafting check could place a station");
+                Release(bench);
+                Release(chest);
+                yield break;
+            }
+
+            // Standing in a field, which is where a benchmark runs. The roof and fire rules have
+            // their own check above; here they would only be a way to fail for a reason that is
+            // not what is being measured.
+            component.m_craftRequireRoof = false;
+            component.m_craftRequireFire = false;
+
+            StructureRecord station = Register(colony, bench, "Craft bench");
+            StructureRecord store = Register(colony, chest, "Craft store");
+            Container box = chest != null ? chest.GetComponentInChildren<Container>(true) : null;
+
+            if (station == null || store == null || box == null)
+            {
+                report.Check(false, "control: the crafting check could register its fixtures",
+                    $"station={(station != null)} store={(store != null)} box={(box != null)}");
+                Release(bench);
+                Release(chest);
+                yield break;
+            }
+
+            Recipe recipe = null;
+            CraftOption making = null;
+            foreach (CraftOption option in CraftCatalogue.For(component.m_name))
+            {
+                Recipe candidate = CraftCatalogue.RecipeFor(option.Item);
+                if (candidate?.m_resources == null || option.MinLevel > 1) continue;
+                if (candidate.m_resources.Length == 0 || candidate.m_resources.Length > 2) continue;
+
+                recipe = candidate;
+                making = option;
+                break;
+            }
+
+            if (recipe == null)
+            {
+                report.Check(false, "control: this bench knows how to make something simple",
+                    $"station='{component.m_name}' options={CraftCatalogue.For(component.m_name).Count}");
+                Release(bench);
+                Release(chest);
+                yield break;
+            }
+
+            // Six times what one craft needs, so running out is never the reason it stops.
+            List<string> materials = new List<string>();
+            List<int> each = new List<int>();
+            bool stocked = true;
+
+            foreach (Piece.Requirement requirement in recipe.m_resources)
+            {
+                if (requirement?.m_resItem == null) continue;
+
+                int amount = requirement.GetAmount(1);
+                if (amount <= 0) continue;
+
+                string prefab = requirement.m_resItem.gameObject.name;
+                materials.Add(prefab);
+                each.Add(amount);
+                if (PutIn(box, prefab, amount * 6) <= 0) stocked = false;
+            }
+
+            if (!stocked || materials.Count == 0)
+            {
+                report.Check(false, "control: the crafting check could stock what the recipe needs",
+                    $"making='{making.Item}' materials={materials.Count}");
+                Release(bench);
+                Release(chest);
+                yield break;
+            }
+
+            string product = making.Item;
+            int target = Mathf.Max(2, making.Amount * 2);
+
+            ColonyOperations.EditSettings(colony, store.Id,
+                s => s.Accepts = new List<string>(materials) { product });
+
+            ColonyOperations.EditSettings(colony, station.Id,
+                s => s.Orders.Add(new StructureOrder { Item = product, Count = target }));
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "make", Name = "Craft", Kind = JobKind.Craft, Repeat = 60 },
+                new JobDefinition { Id = "fetch", Name = "Haul", Kind = JobKind.Haul, Repeat = 60 }
+            });
+
+            Villager maker = VillagerLifecycle.Spawn(colony);
+            Villager mover = VillagerLifecycle.Spawn(colony);
+            yield return null;
+
+            if (maker == null || mover == null ||
+                !maker.TryGetComponent(out ZNetView makerView) || !makerView.IsValid() ||
+                !mover.TryGetComponent(out ZNetView moverView) || !moverView.IsValid())
+            {
+                report.Check(false, "control: the crafting check could spawn a maker and a hauler");
+                yield break;
+            }
+
+            SendRested(makerView);
+            SendRested(moverView);
+            new VillagerState(makerView.GetZDO()).SetQueue(new List<string> { "make" });
+            new VillagerState(moverView.GetZDO()).SetQueue(new List<string> { "fetch" });
+
+            // Switched off first. A station out of service must be invisible, and asserting that
+            // before anything works is what stops it passing because nothing happened yet.
+            ColonyOperations.EditSettings(colony, station.Id, s => s.InService = false);
+
+            List<int> before = new List<int>();
+            foreach (string material in materials) before.Add(CountIn(box, material));
+
+            for (int attempt = 0; attempt < 24; attempt++) yield return new WaitForSecondsRealtime(.5f);
+
+            bool untouched = true;
+            for (int i = 0; i < materials.Count; i++) untouched &= CountIn(box, materials[i]) == before[i];
+
+            report.Check(untouched && CountIn(box, product) == 0,
+                "a station out of service is not worked",
+                $"product={CountIn(box, product)} did='{maker.Activity}'");
+
+            ColonyOperations.EditSettings(colony, station.Id, s => s.InService = true);
+
+            for (int attempt = 0; attempt < 120 && CountIn(box, product) < target; attempt++)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+            }
+
+            int filed = CountIn(box, product);
+            report.Check(filed >= target,
+                "control: back in service, the order is made and a hauler files it",
+                $"{product}={filed} target={target} maker='{maker.Activity}' hauler='{mover.Activity}'");
+
+            // The materials really went. Everything above passes just as well for a settlement
+            // crafting out of thin air.
+            bool spent = true;
+            string ledger = string.Empty;
+            for (int i = 0; i < materials.Count; i++)
+            {
+                int now = CountIn(box, materials[i]) + CountIn(maker.Bag, materials[i]);
+                ledger += $"{materials[i]} {before[i]}->{now} ";
+                spent &= now < before[i];
+            }
+
+            report.Check(spent && filed > 0, "and the materials it used are gone", ledger);
+
+            // Made enough, so it stops. Watched past the point rather than asserted at it: a
+            // job that never stopped would be indistinguishable at the moment it arrived.
+            int settled = CountIn(box, product);
+            for (int attempt = 0; attempt < 24; attempt++) yield return new WaitForSecondsRealtime(.5f);
+
+            int after = CountIn(box, product);
+            report.Check(after <= settled + making.Amount,
+                "and having made enough, it stops",
+                $"{product} {settled}->{after} did='{maker.Activity}'");
+
+            VillagerLifecycle.Remove(colony, makerView.GetZDO().m_uid);
+            VillagerLifecycle.Remove(colony, moverView.GetZDO().m_uid);
+            colony.State.SetJobs(new List<JobDefinition>());
+            colony.RemoveStructure(station.Id);
+            colony.RemoveStructure(store.Id);
+            Release(bench);
             Release(chest);
             SweepLooseItems(colony);
             yield return new WaitForSecondsRealtime(.2f);
