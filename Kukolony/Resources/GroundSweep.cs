@@ -68,6 +68,7 @@ namespace Kukolony.Resources
 
         private readonly Dictionary<ZDOID, Cache> _caches = new Dictionary<ZDOID, Cache>();
         private readonly Action _ensureReady;
+        private readonly Func<bool> _ready;
         private readonly Func<int, bool> _wanted;
 
         /// <param name="ensureReady">
@@ -79,9 +80,11 @@ namespace Kukolony.Resources
         ///     an unrelated feature as the cause.
         /// </param>
         /// <param name="wanted">Whether a prefab hash is something this sweep is looking for.</param>
-        internal GroundSweep(Action ensureReady, Func<int, bool> wanted)
+        /// <param name="ready">Whether the classifier could be built at all.</param>
+        internal GroundSweep(Action ensureReady, Func<bool> ready, Func<int, bool> wanted)
         {
             _ensureReady = ensureReady;
+            _ready = ready;
             _wanted = wanted;
         }
 
@@ -117,6 +120,11 @@ namespace Kukolony.Resources
             if (ZNetScene.instance == null) return cache.Found;
 
             _ensureReady();
+
+            // And bail out if it could not be built. Without this the sweep walks every loaded
+            // instance in the world asking a predicate that can only answer no - the one case
+            // where the whole walk is guaranteed pointless.
+            if (!_ready()) return cache.Found;
 
             // The widest net, bounded once here rather than once per villager.
             //

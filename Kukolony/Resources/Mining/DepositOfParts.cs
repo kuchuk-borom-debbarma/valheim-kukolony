@@ -127,17 +127,30 @@ namespace Kukolony.Resources.Mining
 
             if (string.IsNullOrEmpty(encoded))
             {
-                // Untouched: nothing has been saved yet, so every part is at full health.
-                List<MineArea> areas = new List<MineArea>();
-                Areas(areas);
-                return areas.Count * (_rock != null ? _rock.m_health : 0f);
+                // Untouched - nothing has been saved yet. Answered as "more than any blow could
+                // leave" rather than as a number, because the number cannot be guessed: the game
+                // scales a part's starting health by the world level
+                // (m_health + worldLevel * m_health * m_worldLevelMineHPMultiplier), so on an
+                // NG+ world a guess at the prefab's own figure is a third of the truth or less -
+                // and reading it as "before" made the first blow on every fresh deposit look
+                // like an increase, which is to say like a pickaxe that does not bite.
+                //
+                // This needs no scaling factor and cannot go stale. A blow that lands writes the
+                // package, so "after" becomes a real number below the maximum; a blow that is
+                // refused writes nothing, so "after" is this same answer and nothing appears to
+                // have happened. Both readings are correct, which the guess never was.
+                return float.MaxValue;
             }
 
             try
             {
                 ZPackage package = new ZPackage(Convert.FromBase64String(encoded));
                 int count = package.ReadInt();
-                if (count < 0 || count > 4096) return 0f;
+
+                // Not zero. Zero reads as "finished" two lines into the caller, which would
+                // report an untouched deposit as mined out and consume a repetition for it.
+                // A package this build cannot make sense of is a measurement we do not have.
+                if (count < 0 || count > 4096) return float.MaxValue;
 
                 float total = 0f;
                 for (int i = 0; i < count; i++)
@@ -150,9 +163,9 @@ namespace Kukolony.Resources.Mining
             }
             catch (Exception)
             {
-                // A package we cannot read is not a reason to stop mining; it is a reason not to
-                // claim we measured anything. Zero would read as "finished", so the untouched
-                // answer is the safer lie - the caller re-reads the parts either way.
+                // Same answer and the same reason: this is a measurement we do not have, and
+                // the two readings either side of a blow will agree, so the caller concludes
+                // nothing happened rather than concluding the rock is gone.
                 return float.MaxValue;
             }
         }

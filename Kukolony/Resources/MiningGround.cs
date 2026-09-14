@@ -16,6 +16,7 @@ namespace Kukolony.Resources
     {
         private static readonly GroundSweep Sweep = new GroundSweep(
             () => { if (!Mineable.IsReady) Mineable.Rebuild(); },
+            () => Mineable.IsReady,
             hash => Mineable.Of(hash) != MineKind.None);
 
         /// <summary>How far from any of a Kolony's places mining looks for work.</summary>

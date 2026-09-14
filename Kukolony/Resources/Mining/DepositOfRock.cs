@@ -106,15 +106,21 @@ namespace Kukolony.Resources.Mining
         /// </summary>
         /// <remarks>
         ///     The key is built the way the component builds it - the string "Health" and the
-        ///     index, hashed at runtime. Its default is the rock's full health, which is also
-        ///     what the component assumes for a part nobody has hit.
+        ///     index, hashed at runtime.
+        ///
+        ///     A part nobody has hit answers "more than any blow could leave" rather than the
+        ///     prefab's figure, because the prefab's figure is not the truth: the game scales
+        ///     starting health by the world level, so on an NG+ world reading it as "before"
+        ///     makes the first blow look like an increase. The maximum needs no scaling factor
+        ///     and is right either way - a landed blow writes a real number below it, a refused
+        ///     one writes nothing at all.
         /// </remarks>
         private float Health(int index)
         {
             ZDO zdo = View != null ? View.GetZDO() : null;
             if (zdo == null || _rock == null) return 0f;
 
-            return zdo.GetFloat(("Health" + index).GetStableHashCode(), _rock.m_health);
+            return zdo.GetFloat(("Health" + index).GetStableHashCode(), float.MaxValue);
         }
     }
 }

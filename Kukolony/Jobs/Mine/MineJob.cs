@@ -58,7 +58,34 @@ namespace Kukolony.Jobs.Mine
         /// </remarks>
         private const float SecondsBetweenBlows = .9f;
 
+        /// <summary>How many fruitless blows before a deposit is written off.</summary>
+        /// <remarks>
+        ///     Chopping's number, for chopping's reasons. A blow can land and move nothing for
+        ///     causes that are not "this tool cannot do it": a Destructible ignores damage
+        ///     during its first frame, and a peer that has just taken ownership can be holding a
+        ///     collider set up to ten seconds stale and aim at a part that is already gone.
+        ///     Acting on the first of those is how a working deposit gets blacklisted.
+        /// </remarks>
+        private const int FruitlessBlowsAllowed = 4;
+
         private static readonly Dictionary<ZDOID, float> NextBlow = new Dictionary<ZDOID, float>();
+
+        /// <summary>
+        ///     The deposit each villager's walk has done its best at.
+        /// </summary>
+        /// <remarks>
+        ///     The working reach cannot be read off the walk's stall clock the way hauling reads
+        ///     it - striking calls <c>Walk.Forget()</c> every tick, which zeroes that clock, so
+        ///     the reach would collapse back to the tight one the moment a blow landed. The
+        ///     villager would then be told it had left the rock, walk the same two steps, wait
+        ///     out the settling time and swing again: one blow every few seconds instead of one
+        ///     a second, with a shuffle after each. Chopping found this and solved it with this
+        ///     latch; this is the same latch.
+        /// </remarks>
+        private static readonly Dictionary<ZDOID, ZDOID> Settled = new Dictionary<ZDOID, ZDOID>();
+
+        /// <summary>Fruitless blows landed on the deposit each villager is working.</summary>
+        private static readonly Dictionary<ZDOID, int> Fruitless = new Dictionary<ZDOID, int>();
 
         /// <summary>Reused so a 20Hz path does not allocate a list per villager per tick.</summary>
         private static readonly List<MineArea> Parts = new List<MineArea>();
@@ -66,12 +93,21 @@ namespace Kukolony.Jobs.Mine
         private static readonly List<Spot> Spots = new List<Spot>();
 
         /// <summary>Dropped when a world unloads; none of these identities survive one.</summary>
-        internal static void Clear() => NextBlow.Clear();
+        internal static void Clear()
+        {
+            NextBlow.Clear();
+            Settled.Clear();
+            Fruitless.Clear();
+        }
 
         /// <summary>Drops what a villager that no longer exists was waiting on.</summary>
         internal static void Forget(ZDOID villager)
         {
-            if (!villager.IsNone()) NextBlow.Remove(villager);
+            if (villager.IsNone()) return;
+
+            NextBlow.Remove(villager);
+            Settled.Remove(villager);
+            Fruitless.Remove(villager);
         }
 
         internal static JobResult Tick(MineContext context, out string activity)
@@ -202,6 +238,7 @@ namespace Kukolony.Jobs.Mine
                     if (!Wanted(context.Job, zdo.GetPrefab())) continue;
                     if (Unreachable.Refuses(context.Villager.Id, id)) continue;
                     if (TargetClaims.IsClaimedByOther(id, context.Villager)) continue;
+                    if (!Worth(id)) continue;
 
                     float distance = Utils.DistanceXZ(at, here);
                     if (distance >= closest) continue;
@@ -295,25 +332,66 @@ namespace Kukolony.Jobs.Mine
                     return JobOutcomes.Running(what, out activity);
 
                 case BlowResult.Struck:
-                    context.Animation?.Swing();
-                    return JobOutcomes.Running(what, out activity);
-
                 case BlowResult.Felled:
+                    // A landed blow is progress, so the claim is refreshed here. Without it the
+                    // claim ages against the length of the vein rather than against being
+                    // stuck, and any deposit outlasting the thirty-second life loses its claim
+                    // half-mined - which is two villagers on one vein, arrived at by both of
+                    // them behaving correctly.
+                    context.State.TouchClaim();
+                    Fruitless.Remove(miner);
                     context.Animation?.Swing();
                     return JobOutcomes.Running(what, out activity);
 
                 case BlowResult.TooHard:
-                    // Refused, and it will be refused again for ever. Letting go and saying so
-                    // beats standing at a rock this pickaxe cannot break.
-                    Unreachable.Refuse(context.Villager.Id, context.State.Target,
-                        Unreachable.BlockedForSeconds);
-                    Release(context);
-                    return JobOutcomes.Running(what, out activity);
+                    return Blunt(context, miner, what, out activity);
 
                 default:
                     Release(context);
                     return JobOutcomes.Running(what, out activity);
             }
+        }
+
+        /// <summary>
+        ///     A blow that moved nothing, and what to make of it.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>Not on the first one.</b> A blow can land and change nothing for reasons
+        ///         that are not "this tool cannot do it": a Destructible ignores damage during
+        ///         its first frame, and a peer that has just taken ownership may be working from
+        ///         a collider set up to ten seconds stale and aim at a part already gone. Acting
+        ///         immediately is how a perfectly good deposit gets written off.
+        ///     </para>
+        ///     <para>
+        ///         <b>And when it is a verdict, it is a lasting one.</b> "This pickaxe cannot
+        ///         break this rock" stays true until the pickaxe changes, so the refusal is the
+        ///         long one rather than the twenty seconds meant for somebody standing in a
+        ///         doorway - otherwise the villager walks back every twenty seconds to be
+        ///         refused again.
+        ///     </para>
+        ///     <para>
+        ///         <b>Skipped, not completed.</b> Releasing the target sends the table to its
+        ///         Complete arm on the next tick, which would report a deposit that was never
+        ///         touched as finished and spend a repetition on it. Ending the trip here is
+        ///         what keeps a job from exhausting its own count on work it cannot do.
+        ///     </para>
+        /// </remarks>
+        private static JobResult Blunt(MineContext context, ZDOID miner, string what,
+            out string activity)
+        {
+            Fruitless.TryGetValue(miner, out int blows);
+            blows++;
+            Fruitless[miner] = blows;
+
+            if (blows < FruitlessBlowsAllowed) return JobOutcomes.Running(what, out activity);
+
+            Chatter.Say($"[mine] blunt: {context.State.Target}",
+                $"{context.State.Name} cannot break that with the pickaxe it has.");
+
+            Unreachable.Refuse(context.Villager.Id, context.State.Target);
+            Release(context);
+            return JobOutcomes.Skipped(context.State, what, out activity);
         }
 
         /// <summary>
@@ -348,6 +426,27 @@ namespace Kukolony.Jobs.Mine
         {
             context.State.ClearTarget();
             Forget(context.Villager.Id);
+        }
+
+        /// <summary>
+        ///     Whether a candidate has anything left to work.
+        /// </summary>
+        /// <remarks>
+        ///     A deposit outlives its parts, and one kind of them outlives them permanently -
+        ///     a MineRock built with <c>m_removeWhenDestroyed</c> false stands there for ever
+        ///     with nothing on it. Without this the nearest such rock is chosen every tick,
+        ///     reported finished, and chosen again: a villager standing still, spending its
+        ///     whole mining allowance, announcing success the entire time.
+        /// </remarks>
+        private static bool Worth(ZDOID id)
+        {
+            GameObject instance = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(id) : null;
+
+            // Not loaded is not the same as not worth it. Something out of memory is still work,
+            // and refusing it here would make discovery depend on what happens to be resident.
+            if (instance == null) return true;
+
+            return MineProbe.TryFind(instance, out MineProtocol rock) && !rock.Spent();
         }
 
         /// <summary>The best pickaxe the villager owns, shown in its hand.</summary>
@@ -412,6 +511,12 @@ namespace Kukolony.Jobs.Mine
             {
                 case MoveResult.Arrived:
                     context.State.TouchClaim();
+
+                    // Latched here, and only here. This is the walk saying it has got as close
+                    // as it is going to; everything after it works from that answer rather than
+                    // from a clock the striking keeps resetting.
+                    if (!context.Villager.Id.IsNone()) Settled[context.Villager.Id] = context.State.Target;
+
                     return JobOutcomes.Running("off to mine", out activity);
 
                 case MoveResult.PathFailed:
@@ -421,20 +526,54 @@ namespace Kukolony.Jobs.Mine
                     return JobOutcomes.Skipped(context.State, "cannot get there", out activity);
 
                 default:
+                    // The claim is refreshed while walking, not only on arrival: the sweep
+                    // reaches ninety-six metres and a claim lives thirty seconds, so a long
+                    // approach would lose the deposit to somebody else before getting there.
+                    context.State.TouchClaim();
+
+                    // And bounded. Every other walking job bounds this arm, because a trip that
+                    // can never arrive otherwise returns Running for ever - which consumes no
+                    // repetition, so the queue never advances and every later entry in that
+                    // villager's queue stops running too.
+                    ZDOID abandoned = context.State.Target;
+                    JobResult? stuck = JobOutcomes.GiveUpIfStuck(context.Villager, context.State,
+                        context.Walk.TripStalledFor, abandoned,
+                        () => "a rock", out string gaveUp);
+
+                    if (stuck.HasValue)
+                    {
+                        // Refused for a while rather than for good: not being able to walk
+                        // somewhere stops being true the moment a path opens, and the
+                        // settlement should notice without being reloaded.
+                        Unreachable.Refuse(context.Villager.Id, abandoned);
+                        Release(context);
+                        activity = gaveUp;
+                        return stuck.Value;
+                    }
+
                     return JobOutcomes.Running("off to mine", out activity);
             }
         }
 
+        /// <summary>
+        ///     Whether the villager is close enough to work this part.
+        /// </summary>
+        /// <remarks>
+        ///     The wider reach applies once the walk has done its best at <em>this deposit</em>,
+        ///     recorded per target rather than read off the stall clock - striking resets that
+        ///     clock every tick, so reading it would make the reach collapse after every blow.
+        ///     And the part being worked moves as the near ones fall, which is why the latch is
+        ///     on the deposit rather than on the part: a villager standing at a vein has arrived
+        ///     at the vein, whichever rock of it is next.
+        /// </remarks>
         private static bool Within(MineContext context, Vector3 at)
         {
-            // Arriving and having arrived must be the same number, or a villager walks as far
-            // as it can, is told it is not there yet, and tries again for ever. The wider
-            // working reach only applies once the walk has given up, which is what lets a
-            // villager wedged against the rock get on with it.
-            float reach = context.Walk.StalledFor >= Arrival.SettledSeconds
-                ? Arrival.WorkingReach
-                : Approach.ToStructure;
+            ZDOID villager = context.Villager.Id;
+            bool arrived = !villager.IsNone() &&
+                           Settled.TryGetValue(villager, out ZDOID settled) &&
+                           !settled.IsNone() && settled == context.State.Target;
 
+            float reach = arrived ? Arrival.WorkingReach : Approach.ToStructure;
             return Utils.DistanceXZ(at, context.Villager.transform.position) <= reach;
         }
 

@@ -15,6 +15,7 @@ namespace Kukolony.Resources
     {
         private static readonly GroundSweep Sweep = new GroundSweep(
             () => { if (!Choppable.IsReady) Choppable.Rebuild(); },
+            () => Choppable.IsReady,
             hash => Choppable.Of(hash) != ChopKind.None);
 
         /// <summary>How far from any of a Kolony's places chopping looks for work.</summary>

@@ -398,7 +398,11 @@ namespace Kukolony.Gui
                 // applied to all of them, so a bound taken from the first meant a second,
                 // wider flag could never be given more than the default ceiling from this
                 // screen - and which flag you had picked first decided it.
-                float most = job.Kind == JobKind.Chop ? Resources.ChoppingGround.SearchRadius : 128f;
+                // Every job whose work areas are narrowed to a sweep has to be named here, or
+                // the slider offers ground the job discards without saying so - which is the
+                // failure the narrowing exists to prevent, moved from the job to the screen.
+                float sweep = Sweeps(job.Kind);
+                float most = sweep > 0f ? sweep : 128f;
                 float bound = Mathf.Max(shown, Mathf.Max(most, WidestNamedPlace(colony, job)));
 
                 Widgets.Number(radius, "How far it reaches", shown, 8f, bound, 4f,
@@ -683,10 +687,38 @@ namespace Kukolony.Gui
         }
 
         /// <summary>The radius this job works, whatever decided it.</summary>
-        private static float Effective(Colony colony, JobDefinition job) =>
-            job.Kind == JobKind.Chop
-                ? Jobs.Chop.ChopJob.Area(colony, job).Radius
-                : WorkArea.For(colony, job).Radius;
+        private static float Effective(Colony colony, JobDefinition job)
+        {
+            if (job.Kind == JobKind.Chop) return Jobs.Chop.ChopJob.Area(colony, job).Radius;
+
+            // Mining narrows its areas the same way chopping does, so the row has to state the
+            // narrowed number - a row showing a radius that is not the one in force is worse
+            // than no row, because it is believed.
+            float radius = WorkArea.For(colony, job).Radius;
+            float sweep = Sweeps(job.Kind);
+            return sweep > 0f ? Mathf.Min(radius, sweep) : radius;
+        }
+
+        /// <summary>
+        ///     How far this kind of job can look, or zero when nothing bounds it.
+        /// </summary>
+        /// <remarks>
+        ///     Chopping and mining each sweep the loaded world for their own resource and narrow
+        ///     every work area to what that sweep returns. Hauling, tending and crafting work
+        ///     from the settlement's own records instead, which are not bounded this way.
+        /// </remarks>
+        private static float Sweeps(JobKind kind)
+        {
+            switch (kind)
+            {
+                case JobKind.Chop: return Resources.ChoppingGround.SearchRadius;
+                case JobKind.Mine: return Resources.MiningGround.SearchRadius;
+
+                // Nothing bounds the rest: hauling, tending and crafting work from the
+                // settlement's own records rather than from a sweep of the loaded world.
+                default: return 0f;
+            }
+        }
 
         /// <summary>
         ///     The widest reach any of this job's named places has of its own.

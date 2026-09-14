@@ -84,10 +84,18 @@ namespace Kukolony.Resources.Mining
             return BlowResult.TooHard;
         }
 
+        /// <summary>
+        ///     What is left of it, or the maximum when nothing has been written yet.
+        /// </summary>
+        /// <remarks>
+        ///     Not the prefab's own health as the default: the game scales starting health by
+        ///     the world level, so that figure is wrong on any NG+ world and reading it as
+        ///     "before" makes the first blow look like an increase.
+        /// </remarks>
         private float Health()
         {
             ZDO zdo = View != null ? View.GetZDO() : null;
-            return zdo == null ? 0f : zdo.GetFloat(ZDOVars.s_health, _rock != null ? _rock.m_health : 0f);
+            return zdo == null ? 0f : zdo.GetFloat(ZDOVars.s_health, float.MaxValue);
         }
     }
 }

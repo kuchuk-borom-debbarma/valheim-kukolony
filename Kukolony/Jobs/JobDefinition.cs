@@ -350,6 +350,24 @@ namespace Kukolony.Jobs
                 }
 
                 for (int i = 0; i < stations; i++) package.ReadString();
+
+                // Said rather than dropped in silence. These settings had real effects - a job
+                // set to clear only, or to two named kilns, becomes a job that supplies every
+                // station in its work area, and the stations they moved to start at their
+                // permissive defaults. A player who is told can go and set them; one who is not
+                // finds out by watching ore disappear into a furnace they had excluded.
+                //
+                // Inside the version gate, where it belongs: appending the mining fields below
+                // it moved the warning out of the branch it was written for, so it stopped
+                // firing for the blob it describes and started firing for every job this build
+                // writes. And latched, because decoding is not a once-per-load event - the job
+                // list is re-read from the ZDO per villager per work tick.
+                if (job.Kind == JobKind.Tend)
+                {
+                    Chatter.Warn($"[job] tending moved: {job.Id}",
+                        $"[job] '{job.Name}' was set up before tending moved onto the stations. " +
+                        "Its station settings were dropped - open each station to set them again.");
+                }
             }
 
             if (version < 7) return job;
@@ -363,17 +381,6 @@ namespace Kukolony.Jobs
             }
 
             for (int i = 0; i < ores; i++) job.Ores.Add(package.ReadString());
-
-            // Said rather than dropped in silence. These settings had real effects - a job set
-            // to clear only, or to two named kilns, becomes a job that supplies every station in
-            // its work area - and the stations they moved to start at their permissive defaults.
-            // A player who is told can go and set them; one who is not finds out by watching ore
-            // disappear into a furnace they had excluded.
-            if (job.Kind == JobKind.Tend)
-            {
-                Log.Warning($"[job] '{job.Name}' was set up before tending moved onto the stations. " +
-                            "Its station settings were dropped - open each station to set them again.");
-            }
 
             return job;
         }

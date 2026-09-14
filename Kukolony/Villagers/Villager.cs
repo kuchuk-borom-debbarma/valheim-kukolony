@@ -253,7 +253,7 @@ namespace Kukolony.Villagers
         ///     Puts away an axe this villager's chopping put in its hand, wherever it has
         ///     stopped chopping - including the paths that never reach the queue again.
         /// </summary>
-        private void PutAxeAway()
+        private void PutToolAway()
         {
             VillagerTool.PutAway(_visEquipment,
                 _nview != null && _nview.IsValid() ? _nview.GetZDO() : null);
@@ -719,7 +719,7 @@ namespace Kukolony.Villagers
                 // never reaches the queue again, so an axe left in its hand here would stay
                 // there for the rest of the session - which is the exact failure putting it
                 // away was added to prevent.
-                PutAxeAway();
+                PutToolAway();
                 return false;
             }
 
@@ -740,16 +740,15 @@ namespace Kukolony.Villagers
             List<Jobs.JobDefinition> jobs = colony.State.GetJobs();
             Jobs.JobDefinition job = Jobs.QueueRunner.Current(state, jobs);
 
-            // A tool is held while the work is being done. Only the chopping job writes the
-            // visible right hand, so anything else being current - a haul entry, or a chop
-            // job the player deleted - has to put the axe away, or the villager carries one
-            // for the rest of the session with nothing left to write the slot again.
+            // A tool is held while the work is being done, and put away when it is not: the
+            // slot is ZDO-backed, so a villager whose job was deleted while it slept would
+            // carry one for the rest of the world with nothing left to write the slot again.
             // Any job that holds a tool keeps it; everything else bares the hand. Written as
             // the set rather than as "not chop", because the next tool-using job would have
             // been added to the enum and quietly had its pickaxe put away every tick.
             if (job == null || (job.Kind != Jobs.JobKind.Chop && job.Kind != Jobs.JobKind.Mine))
             {
-                PutAxeAway();
+                PutToolAway();
             }
 
             if (job == null)
