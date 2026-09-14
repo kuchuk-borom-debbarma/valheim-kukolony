@@ -5587,13 +5587,17 @@ namespace Kukolony.Debug
             }
 
             VillagerWardrobe.Set(dressed, WearSlot.RightHand, pick);
-            yield return null;
 
+            // Read with no wait, as the axe check does and for the reason it records: an idle
+            // villager's own tick bares the hand every frame, so anything yielded here takes
+            // the pickaxe back before the control can see it - and the assertion below would
+            // then pass because nothing was ever there. This check was written with a yield and
+            // the control caught it on the first run, which is what a control is for.
             report.Check(VillagerWardrobe.Worn(view.GetZDO(), WearSlot.RightHand) != 0,
-                "control: the villager really is holding a pickaxe before this is asked");
+                "control: the villager really is holding a pickaxe before this is asked",
+                $"worn={VillagerWardrobe.Worn(view.GetZDO(), WearSlot.RightHand)}");
 
             VillagerTool.PutAway(dressed, view.GetZDO());
-            yield return null;
 
             report.Check(VillagerWardrobe.Worn(view.GetZDO(), WearSlot.RightHand) == 0,
                 "a pickaxe is taken out of the hand when the villager is not mining",
