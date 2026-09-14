@@ -169,6 +169,11 @@ namespace Kukolony.Jobs
                 ZDO zdo = ZDOMan.instance?.GetZDO(record.Id);
                 if (zdo == null) return false;
 
+                // A flag switched off is a place the settlement is not working, which is the
+                // plainest reading of "villagers may not use this" - and the only way to pause
+                // an outpost without deleting the job that names it.
+                if (!record.Settings.InService) return false;
+
                 // A flag brings its own reach - its screen says how far, and a job pointed
                 // at it working a default-sized patch of a larger outpost contradicted the
                 // number the player set. The job's own radius still wins when given, because

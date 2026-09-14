@@ -58,12 +58,8 @@ namespace Kukolony.Colonies.Stations
         /// </remarks>
         internal int Level => Station != null ? Station.GetLevel() : 0;
 
-        internal float UseDistance => Station != null ? Station.m_useDistance : 2f;
-
         /// <summary>Which crafting animation the rig should play here.</summary>
         internal int UseAnimation => Station != null ? Station.m_useAnimation : 0;
-
-        internal Vector3 Position => Station != null ? Station.transform.position : Vector3.zero;
 
         internal bool IsValid => Station != null && _view != null && _view.IsValid();
 

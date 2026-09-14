@@ -30,6 +30,7 @@ namespace Kukolony.Colonies
             internal readonly List<StructureRecord> Storage = new List<StructureRecord>();
             internal readonly List<StructureRecord> Processing = new List<StructureRecord>();
             internal readonly List<StructureRecord> Beds = new List<StructureRecord>();
+            internal readonly List<StructureRecord> Crafting = new List<StructureRecord>();
         }
 
         private static readonly Dictionary<ZDOID, Snapshot> Snapshots = new Dictionary<ZDOID, Snapshot>();
@@ -147,7 +148,11 @@ namespace Kukolony.Colonies
 
             foreach (StructureRecord record in Current(colony).Beds)
             {
-                if (record.Settings.HasSleeper) continue;
+                // Resting is work too, as far as the switch is concerned. "Villagers may use
+                // this" was honoured by every job and by no bed, which is exactly the five
+                // places out of six the switch's own remark warns about - a player who
+                // switched off a bed to stop it being used watched somebody sleep in it.
+                if (record.Settings.HasSleeper || !record.WorkableIn(colony)) continue;
                 answers.Add(record);
             }
 
@@ -167,8 +172,15 @@ namespace Kukolony.Colonies
         {
             if (colony == null || id.IsNone()) return null;
 
+            // Every list, because a record is only in the lists its capabilities put it in and
+            // this answers "which record is this" rather than "what is it for". A crafting
+            // station carries no Container, no Bed and no processing component, so leaving it
+            // out made Find return null for every workbench in the settlement - and the craft
+            // job, which asks this to find out whether its own station still wants anything,
+            // read that as "it wants nothing" and looped for ever while saying it was working.
             Snapshot snapshot = Current(colony);
-            return FindIn(snapshot.Storage, id) ?? FindIn(snapshot.Processing, id) ?? FindIn(snapshot.Beds, id);
+            return FindIn(snapshot.Storage, id) ?? FindIn(snapshot.Processing, id)
+                ?? FindIn(snapshot.Beds, id) ?? FindIn(snapshot.Crafting, id);
         }
 
         private static StructureRecord FindIn(List<StructureRecord> records, ZDOID id)
@@ -186,7 +198,7 @@ namespace Kukolony.Colonies
         {
             if (colony == null || villager.IsNone()) return null;
             foreach (StructureRecord record in Current(colony).Beds)
-                if (record.Settings.Sleeper == villager) return record;
+                if (record.Settings.Sleeper == villager && record.WorkableIn(colony)) return record;
             return null;
         }
 
@@ -330,17 +342,19 @@ namespace Kukolony.Colonies
             snapshot.Storage.Clear();
             snapshot.Processing.Clear();
             snapshot.Beds.Clear();
+            snapshot.Crafting.Clear();
 
             foreach (StructureRecord record in colony.State.GetStructures())
             {
                 if ((record.Capabilities & StructureCapability.Storage) != 0) snapshot.Storage.Add(record);
                 if ((record.Capabilities & StructureCapability.Processing) != 0) snapshot.Processing.Add(record);
                 if ((record.Capabilities & StructureCapability.Rest) != 0) snapshot.Beds.Add(record);
+                if ((record.Capabilities & StructureCapability.Crafting) != 0) snapshot.Crafting.Add(record);
             }
 
             Log.Debug($"[index] rebuilt '{colony.State.Name}' at revision {revision}: " +
                       $"{snapshot.Storage.Count} storage, {snapshot.Processing.Count} processing, " +
-                      $"{snapshot.Beds.Count} beds");
+                      $"{snapshot.Beds.Count} beds, {snapshot.Crafting.Count} crafting");
             return snapshot;
         }
 

@@ -212,6 +212,7 @@ namespace Kukolony.Villagers
             if (_zdo != null && HasGoods != holding) _zdo.Set(GoodsKey, holding);
         }
 
+        /// <summary>Whether it is currently resting, which decides which threshold applies.</summary>
         internal bool Resting => _zdo?.GetBool(RestingKey, false) ?? false;
 
         /// <summary>

@@ -81,11 +81,7 @@ namespace Kukolony.Colonies
         {
             if (string.IsNullOrEmpty(prefabName) || ZNetScene.instance == null) return string.Empty;
 
-            GameObject prefab = ZNetScene.instance.GetPrefab(prefabName);
-            if (prefab == null) return string.Empty;
-
-            CraftingStation station = prefab.GetComponentInChildren<CraftingStation>(true);
-            return station != null ? station.m_name : string.Empty;
+            return Stations.CraftProbe.NameOfPrefab(ZNetScene.instance.GetPrefab(prefabName));
         }
 
         internal static void Clear()

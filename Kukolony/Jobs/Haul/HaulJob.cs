@@ -512,7 +512,7 @@ namespace Kukolony.Jobs.Haul
                 return JobResult.Running;
             }
 
-            ItemDrop.ItemData wanted = Wanted(context, bag.GetInventory(), to);
+            ItemDrop.ItemData wanted = Wanted(context, carrier, bag.GetInventory(), to);
             if (wanted == null)
             {
                 // Emptied, or nothing left that this job handles. Either way the advertisement
@@ -550,27 +550,33 @@ namespace Kukolony.Jobs.Haul
             }
         }
 
-        /// <summary>The first thing in a carrier's bag this job handles and this trip can file.</summary>
-        private static ItemDrop.ItemData Wanted(HaulContext context, Inventory bag, StructureRecord to)
+        /// <summary>
+        ///     The first thing in a carrier's bag this job may take, bound for where it is going.
+        /// </summary>
+        /// <remarks>
+        ///     Asked through the same predicate the trip was chosen with. Written separately the
+        ///     two disagreed - the chooser accepted a chest that takes unclaimed oddments, this
+        ///     demanded the chest name the item - and the hauler walked to the carrier, refused
+        ///     everything, let go, and chose the same carrier again on the next tick, for ever.
+        /// </remarks>
+        private static ItemDrop.ItemData Wanted(HaulContext context, Villager carrier, Inventory bag,
+            StructureRecord to)
         {
             if (bag == null) return null;
 
+            Vector3 there = carrier.transform.position;
+
             foreach (ItemDrop.ItemData item in bag.GetAllItems())
             {
-                string prefab = Carrying.NameOf(item);
-                if (string.IsNullOrEmpty(prefab)) continue;
-
-                if (context.Job != null && context.Job.Items.Count > 0 &&
-                    !context.Job.Items.Contains(prefab))
+                if (!Selection.Collectable(context.Colony, context.Job, carrier, item, there,
+                        context.Villager.Id, out StructureRecord goes))
                 {
                     continue;
                 }
 
-                // Only what this trip is actually going to: a hauler bound for the woodshed
-                // does not take ore it would then have nowhere to put.
-                if (!to.Settings.Accepts.Contains(prefab) && to.Settings.Accepts.Count > 0) continue;
-
-                return item;
+                // Bound for where this trip is going. Something the settlement wants elsewhere
+                // is somebody else's errand, not a reason to abandon this one.
+                if (goes.Id == to.Id) return item;
             }
 
             return null;
@@ -582,6 +588,14 @@ namespace Kukolony.Jobs.Haul
             return inventory == null || inventory.GetAllItems().Count == 0;
         }
 
+        /// <summary>
+        ///     Takes the next thing out of a chest that belongs somewhere else.
+        /// </summary>
+        /// <remarks>
+        ///     Deciding on arrival batches for free: everything in this chest bound for the one
+        ///     this trip is going to comes out on the same visit, because the question is asked
+        ///     again each tick while the villager stands there.
+        /// </remarks>
         private static JobResult CollectFromContainer(HaulContext context, GameObject source, out string activity)
         {
             Container container = source.GetComponentInChildren<Container>(true);

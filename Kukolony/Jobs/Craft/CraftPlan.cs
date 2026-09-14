@@ -36,57 +36,6 @@ namespace Kukolony.Jobs.Craft
     internal static class CraftPlan
     {
         /// <summary>
-        ///     How many of an order are still worth making.
-        /// </summary>
-        /// <remarks>
-        ///     <para>
-        ///         Bounded by three separate things, and each bound is a rule somebody would
-        ///         otherwise have to remember: the order's own target, the materials that exist,
-        ///         and how many the villager can carry away. A craft that cannot be carried is a
-        ///         craft that lands on the floor.
-        ///     </para>
-        ///     <para>
-        ///         <b>Zero is a real answer</b> and means "not now" rather than "never" - the
-        ///         station may want something else, and the settlement may be short for an hour.
-        ///     </para>
-        /// </remarks>
-        /// <param name="wanted">How many the order still wants - target less what is held.</param>
-        /// <param name="perCraft">How many the recipe yields in one go.</param>
-        /// <param name="needs">What one craft consumes.</param>
-        /// <param name="available">How much of an item can be got hold of.</param>
-        /// <param name="room">How many of the product there is room to carry.</param>
-        internal static int HowMany(int wanted, int perCraft, List<CraftNeed> needs,
-            Func<string, int> available, int room)
-        {
-            if (wanted <= 0 || perCraft <= 0 || room <= 0) return 0;
-
-            // Rounded up, because a recipe yielding two is not a reason to stop one short of a
-            // target of five - the settlement asked for five and will get six, which is the
-            // answer a player expects from "keep five".
-            int crafts = (wanted + perCraft - 1) / perCraft;
-
-            // What the bag can carry away caps it too, and this one rounds *down*: a craft
-            // whose product will not fit is a craft that spills.
-            crafts = Math.Min(crafts, room / perCraft);
-
-            if (crafts <= 0) return 0;
-            if (needs == null) return crafts;
-
-            foreach (CraftNeed need in needs)
-            {
-                if (need.Amount <= 0) continue;
-
-                // The scarcest requirement decides, which is what makes this one loop rather
-                // than a check per material followed by a separate count.
-                int affordable = available(need.Item) / need.Amount;
-                if (affordable < crafts) crafts = affordable;
-                if (crafts <= 0) return 0;
-            }
-
-            return crafts;
-        }
-
-        /// <summary>
         ///     Whether everything one craft needs is to hand.
         /// </summary>
         /// <remarks>

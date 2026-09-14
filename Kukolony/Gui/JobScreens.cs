@@ -123,24 +123,22 @@ namespace Kukolony.Gui
             string label = JobDefinition.Describe(kind);
             if (string.IsNullOrEmpty(label)) return;
 
+            Colony colony = host.Colony;
+            if (colony == null) return;
+
+            List<JobDefinition> next = colony.State.GetJobs();
+            JobDefinition fresh = new JobDefinition
             {
-                Colony colony = host.Colony;
-                if (colony == null) return;
+                Id = System.Guid.NewGuid().ToString("N"),
+                Name = label,
+                Kind = kind,
+                Repeat = 4
+            };
 
-                List<JobDefinition> next = colony.State.GetJobs();
-                JobDefinition fresh = new JobDefinition
-                {
-                    Id = System.Guid.NewGuid().ToString("N"),
-                    Name = label,
-                    Kind = kind,
-                    Repeat = 4
-                };
-
-                next.Add(fresh);
-                colony.State.SetJobs(next);
-                Report.Say($"Added '{fresh.Name}'.");
-                host.Refresh();
-            }
+            next.Add(fresh);
+            colony.State.SetJobs(next);
+            Report.Say($"Added '{fresh.Name}'.");
+            host.Refresh();
         }
 
         /// <summary>
@@ -491,6 +489,15 @@ namespace Kukolony.Gui
             }
         }
 
+        /// <summary>
+        ///     A tending job's own settings, of which there are none left.
+        /// </summary>
+        /// <remarks>
+        ///     Everything that was here describes a station - which ones, what to feed them, how
+        ///     full to keep them, whether to supply or clear - and moved onto the stations
+        ///     themselves. An empty panel reads as a screen that has not finished loading, so it
+        ///     says where the settings went instead.
+        /// </remarks>
         private void BuildTend(ColonyScreen host, Column column, Colony colony, JobDefinition job)
         {
             // Almost nothing, and that is the change. Which stations, what to feed them, how
@@ -503,9 +510,6 @@ namespace Kukolony.Gui
                                      "it should be fed and how much to make.", Color.gray);
             }
         }
-
-        private const int Every = (1 << (int)StationKind.Smelter) | (1 << (int)StationKind.Cooking) |
-                                  (1 << (int)StationKind.Fermenter);
 
         /// <summary>
         ///     What a chopping job takes, which of it to leave, and when to stop.

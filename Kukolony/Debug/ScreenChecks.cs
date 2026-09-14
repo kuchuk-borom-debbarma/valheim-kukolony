@@ -243,18 +243,6 @@ namespace Kukolony.Debug
         }
 
         /// <summary>
-        ///     A structure that cannot be found must not be reported as merely distant.
-        /// </summary>
-        /// <remarks>
-        ///     Found by looking at a screenshot: a destroyed chest read "out of reach", which
-        ///     is a sentence about a chest that still exists somewhere. The two states came
-        ///     from one boolean, so every caller had to pick one of the two meanings and be
-        ///     wrong half the time.
-        ///
-        ///     Asserted on the row the player reads rather than on the enum behind it, because
-        ///     the fault was in the rendering and an enum check would have passed throughout.
-        /// </remarks>
-        /// <summary>
         ///     A crafting station's own screen, and one of its orders, draw without faults.
         /// </summary>
         /// <remarks>
@@ -308,6 +296,18 @@ namespace Kukolony.Debug
             }
         }
 
+        /// <summary>
+        ///     A structure that cannot be found must not be reported as merely distant.
+        /// </summary>
+        /// <remarks>
+        ///     Found by looking at a screenshot: a destroyed chest read "out of reach", which
+        ///     is a sentence about a chest that still exists somewhere. The two states came
+        ///     from one boolean, so every caller had to pick one of the two meanings and be
+        ///     wrong half the time.
+        ///
+        ///     Asserted on the row the player reads rather than on the enum behind it, because
+        ///     the fault was in the rendering and an enum check would have passed throughout.
+        /// </remarks>
         private static IEnumerator StructureStatusReads(TestReport report, ColonyScreen screen, Colony colony)
         {
             screen.Close();

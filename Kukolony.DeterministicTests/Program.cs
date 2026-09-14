@@ -743,14 +743,6 @@ static class Program
     }
 
     /// <summary>
-    ///     What a station is short of, which is the whole of the tending job's honesty.
-    /// </summary>
-    /// <remarks>
-    ///     Every rule here has its positive control beside it. "An idle smelter is not stoked"
-    ///     passes for a function that always answers zero, so the case after it asks the same
-    ///     question of a station that <em>is</em> running and requires a number back.
-    /// </remarks>
-    /// <summary>
     ///     What a station's orders still want.
     /// </summary>
     /// <remarks>
@@ -835,39 +827,6 @@ static class Program
         List<CraftNeed> nail = new List<CraftNeed> { new CraftNeed("Iron", 1) };
         Func<string, int> plenty = _ => 1000;
         Func<string, int> none = _ => 0;
-
-        Case("nothing wanted is nothing made",
-            CraftPlan.HowMany(0, 1, nail, plenty, 100) == 0);
-
-        Case("control: something wanted is something made",
-            CraftPlan.HowMany(5, 1, nail, plenty, 100) == 5);
-
-        // Rounded up. A recipe yielding two against a target of five makes six, because the
-        // settlement asked to have five and stopping at four is not having five.
-        Case("a recipe yielding two runs three times for a target of five, not two",
-            CraftPlan.HowMany(5, 2, nail, plenty, 100) == 3);
-
-        Case("the scarcest material decides",
-            CraftPlan.HowMany(100, 1, new List<CraftNeed>
-            {
-                new CraftNeed("Iron", 2),
-                new CraftNeed("Wood", 1)
-            }, item => item == "Iron" ? 10 : 1000, 1000) == 5);
-
-        Case("no materials is nothing made", CraftPlan.HowMany(10, 1, nail, none, 100) == 0);
-
-        // Rounded down, and the opposite way from the target: a craft whose product will not
-        // fit in the bag is a craft that lands on the floor.
-        Case("room in the bag caps it, rounded down",
-            CraftPlan.HowMany(10, 4, nail, plenty, 9) == 2);
-
-        Case("no room is nothing made", CraftPlan.HowMany(10, 1, nail, plenty, 0) == 0);
-
-        Case("a recipe that yields nothing makes nothing",
-            CraftPlan.HowMany(10, 0, nail, plenty, 100) == 0);
-
-        Case("a recipe needing nothing is limited only by the order",
-            CraftPlan.HowMany(7, 1, new List<CraftNeed>(), plenty, 100) == 7);
 
         // Enough and Missing answer the two questions a villager asks either side of a walk.
         Case("everything to hand is enough", CraftPlan.Enough(nail, plenty));
@@ -1031,6 +990,14 @@ static class Program
         Case($"every combination produces an action (undefined in {idle})", idle == 0);
     }
 
+    /// <summary>
+    ///     What a station is short of, which is the whole of the tending job's honesty.
+    /// </summary>
+    /// <remarks>
+    ///     Every rule here has its positive control beside it. "An idle smelter is not stoked"
+    ///     passes for a function that always answers zero, so the case after it asks the same
+    ///     question of a station that <em>is</em> running and requires a number back.
+    /// </remarks>
     static void Appetite()
     {
         Console.WriteLine("station appetite");

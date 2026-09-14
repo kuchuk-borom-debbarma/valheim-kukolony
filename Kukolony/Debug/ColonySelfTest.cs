@@ -1304,15 +1304,6 @@ namespace Kukolony.Debug
         }
 
         /// <summary>
-        ///     A problem that keeps being true is reported once, with a count.
-        /// </summary>
-        /// <remarks>
-        ///     Driven directly rather than by staging a settlement with nowhere to put things,
-        ///     because what is under test is the collapsing and not the hauling. Fifty calls is
-        ///     roughly two and a half seconds of one villager deciding, which is the rate this
-        ///     exists to survive.
-        /// </remarks>
-        /// <summary>
         ///     A structure record written by an older build still decodes, with its new fields
         ///     at their defaults.
         /// </summary>
@@ -1489,6 +1480,15 @@ namespace Kukolony.Debug
             package.Write("some-station-token");
         }
 
+        /// <summary>
+        ///     A problem that keeps being true is reported once, with a count.
+        /// </summary>
+        /// <remarks>
+        ///     Driven directly rather than by staging a settlement with nowhere to put things,
+        ///     because what is under test is the collapsing and not the hauling. Fifty calls is
+        ///     roughly two and a half seconds of one villager deciding, which is the rate this
+        ///     exists to survive.
+        /// </remarks>
         private static void CheckSayingThingsOnce(TestReport report)
         {
             System.Action<string> previous = Core.Report.Listener;

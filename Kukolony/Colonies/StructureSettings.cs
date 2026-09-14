@@ -3,23 +3,6 @@ using Kukolony.Core;
 
 namespace Kukolony.Colonies
 {
-    /// <summary>
-    ///     What a registered structure is for. One object carrying every component's settings.
-    /// </summary>
-    /// <remarks>
-    ///     <para>
-    ///         Settings belong to the <em>record</em>, not to the object. A chest that goes
-    ///         dormant keeps what it was told to hold, because the alternative is a settlement
-    ///         that forgets its own configuration whenever nobody stands near it.
-    ///     </para>
-    ///     <para>
-    ///         Every component's fields live here together rather than in a per-capability blob.
-    ///         A structure can carry more than one capability - a thing that is both storage and
-    ///         processing is ordinary - and the fields a capability does not use simply stay at
-    ///         their defaults, which cost a few bytes and remove a whole class of "which decoder
-    ///         do I use" mistakes.
-    ///     </para>
-    /// </remarks>
     /// <summary>Which half of tending a structure wants done to it.</summary>
     /// <remarks>
     ///     Moved here from the job. Whether a kiln should be supplied, cleared, or both is a
@@ -42,6 +25,23 @@ namespace Kukolony.Colonies
         Material = 2
     }
 
+    /// <summary>
+    ///     What a registered structure is for. One object carrying every component's settings.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Settings belong to the <em>record</em>, not to the object. A chest that goes
+    ///         dormant keeps what it was told to hold, because the alternative is a settlement
+    ///         that forgets its own configuration whenever nobody stands near it.
+    ///     </para>
+    ///     <para>
+    ///         Every component's fields live here together rather than in a per-capability blob.
+    ///         A structure can carry more than one capability - a thing that is both storage and
+    ///         processing is ordinary - and the fields a capability does not use simply stay at
+    ///         their defaults, which cost a few bytes and remove a whole class of "which decoder
+    ///         do I use" mistakes.
+    ///     </para>
+    /// </remarks>
     internal sealed class StructureSettings
     {
         /// <summary>

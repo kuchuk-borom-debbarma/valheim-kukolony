@@ -370,6 +370,7 @@ namespace Kukolony.Jobs.Tend
             return any;
         }
 
+        /// <summary>Whether a record is one this job may work, before anything is instantiated.</summary>
         private static bool Eligible(TendContext context, WorkArea area, StructureRecord record)
         {
             if (record == null) return false;
@@ -857,22 +858,5 @@ namespace Kukolony.Jobs.Tend
             return held;
         }
 
-        /// <summary>
-        ///     What a station would ask this job for, asked from outside.
-        /// </summary>
-        /// <remarks>
-        ///     The same predicate the choosing uses, exposed rather than reimplemented, so a
-        ///     check cannot agree with a decision the job does not make.
-        /// </remarks>
-        internal static StationWant WouldWant(Colony colony, ZDOID station)
-        {
-            StructureRecord record = SettlementIndex.Find(colony, station);
-            GameObject instance = ZNetScene.instance != null ? ZNetScene.instance.FindInstance(station) : null;
-            StationProtocol protocol = Operating(instance);
-
-            return record == null || protocol == null
-                ? StationWant.Nothing
-                : Allowed(colony, record, protocol.WhatItWants(record.Settings, string.Empty));
-        }
     }
 }

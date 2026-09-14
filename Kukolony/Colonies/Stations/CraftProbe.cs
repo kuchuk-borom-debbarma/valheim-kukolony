@@ -57,5 +57,23 @@ namespace Kukolony.Colonies.Stations
 
         /// <summary>Whether this object is a crafting station at all, without building an adapter.</summary>
         internal static bool Is(GameObject candidate) => TryFind(candidate, out CraftStation _);
+
+        /// <summary>
+        ///     The station name a prefab carries, or empty.
+        /// </summary>
+        /// <remarks>
+        ///     The prefab question rather than the instance one, and it has to be separate:
+        ///     <see cref="TryFind" /> requires a valid ZNetView and a prefab has none, so it
+        ///     would refuse every prefab ever handed to it. Here rather than in the catalogue
+        ///     that needs it, so the component test lives beside the other one and the two
+        ///     cannot quietly come to disagree about what a crafting station is.
+        /// </remarks>
+        internal static string NameOfPrefab(GameObject prefab)
+        {
+            if (prefab == null) return string.Empty;
+
+            CraftingStation station = prefab.GetComponentInChildren<CraftingStation>(true);
+            return station != null ? station.m_name : string.Empty;
+        }
     }
 }

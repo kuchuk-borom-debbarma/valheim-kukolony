@@ -65,6 +65,12 @@ namespace Kukolony.Jobs
                     VillagerState theirs = other.State;
                     if (!theirs.IsValid || !theirs.HasGoods) continue;
 
+                    // Ours. The instance list is every villager in the world, and two
+                    // settlements can stand close enough for one's work area to cover the
+                    // other's yard - at which point a hauler would quietly empty a neighbour's
+                    // crafter into its own chests.
+                    if (!Mine(colony, other)) continue;
+
                     Vector3 there = other.transform.position;
                     if (!area.Contains(there)) continue;
 
@@ -95,6 +101,13 @@ namespace Kukolony.Jobs
             return false;
         }
 
+        /// <summary>Whether a villager belongs to this colony.</summary>
+        private static bool Mine(Colony colony, Villager villager)
+        {
+            ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(villager.Id) : null;
+            return zdo != null && ColonyMembership.BelongsTo(zdo, colony.Id);
+        }
+
         /// <summary>Somewhere for the first thing in a carrier's bag that this job handles.</summary>
         private static StructureRecord Somewhere(Colony colony, JobDefinition job, Villager carrier,
             Vector3 there, ZDOID asker)
@@ -105,20 +118,48 @@ namespace Kukolony.Jobs
 
             foreach (ItemDrop.ItemData item in inventory.GetAllItems())
             {
-                string prefab = Carrying.NameOf(item);
-                if (string.IsNullOrEmpty(prefab)) continue;
-
-                // The job's own item list still narrows this, so a hauler told to move wood
-                // does not empty a crafter's bag of nails.
-                if (job != null && job.Items.Count > 0 && !job.Items.Contains(prefab)) continue;
-
-                foreach (StructureRecord record in SettlementIndex.WhereDoesItGo(colony, prefab, there, asker))
-                {
-                    return record;
-                }
+                if (!Collectable(colony, job, carrier, item, there, asker, out StructureRecord goes)) continue;
+                return goes;
             }
 
             return null;
+        }
+
+        /// <summary>
+        ///     Whether one thing in a carrier's bag is something this job may take, and where to.
+        /// </summary>
+        /// <remarks>
+        ///     <b>One question, asked by the chooser and again on arrival.</b> When the two were
+        ///     written separately they disagreed: the chooser accepted a chest that takes
+        ///     unclaimed oddments, the collector demanded the chest name the item, so a hauler
+        ///     walked to a crafter, found nothing it was willing to take, let go, and - because
+        ///     collecting is the first thing it looks for - immediately chose the same carrier
+        ///     again. It never did another piece of work.
+        /// </remarks>
+        internal static bool Collectable(Colony colony, JobDefinition job, Villager carrier,
+            ItemDrop.ItemData item, Vector3 there, ZDOID asker, out StructureRecord goes)
+        {
+            goes = null;
+
+            string prefab = Carrying.NameOf(item);
+            if (string.IsNullOrEmpty(prefab)) return false;
+
+            // The job's own item list narrows this, so a hauler told to move wood does not
+            // empty a crafter's bag of nails.
+            if (!Handles(job, prefab)) return false;
+
+            // And what the crafter is holding to work with is not finished goods, whatever its
+            // advertisement says. The advertising side already knew this; the taking side did
+            // not, so a hauler relieved a crafter of the iron it had just fetched.
+            if (Craft.CraftJob.Reserved(carrier, prefab)) return false;
+
+            foreach (StructureRecord record in SettlementIndex.WhereDoesItGo(colony, prefab, there, asker))
+            {
+                goes = record;
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -434,7 +475,10 @@ namespace Kukolony.Jobs
         }
 
         /// <summary>Whether a job handles this item. An empty list means everything.</summary>
-        private static bool Wanted(JobDefinition job, string prefab) =>
+        /// <summary>Whether a job handles this item at all. No list means everything.</summary>
+        internal static bool Handles(JobDefinition job, string prefab) =>
             job?.Items == null || job.Items.Count == 0 || job.Items.Contains(prefab);
+
+        private static bool Wanted(JobDefinition job, string prefab) => Handles(job, prefab);
     }
 }

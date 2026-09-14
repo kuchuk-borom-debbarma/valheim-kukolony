@@ -433,7 +433,7 @@ namespace Kukolony.Gui
             }
         }
 
-        internal static string Describe(StructureOrder order)
+        private static string Describe(StructureOrder order)
         {
             if (order.Count <= 0) return "none";
             if (order.Mode == OrderMode.Maintain) return $"keep {order.Count}";

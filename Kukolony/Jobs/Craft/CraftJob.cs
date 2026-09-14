@@ -124,8 +124,12 @@ namespace Kukolony.Jobs.Craft
                 hasSupply: !state.Destination.IsNone(),
                 atSupply: Within(context, supply),
                 atStation: Within(context, target),
-                hasMaterials: (recipe != null || repairing) &&
-                              CraftPlan.Enough(needs, item => Held(bag, item)),
+                // A repair needs a *worn* one. Counting any copy let a villager holding the
+                // axe it had just mended report that it had materials for ever, while the
+                // station said there was nothing to mend - two facts that never agree again.
+                hasMaterials: repairing
+                    ? HeldWorn(bag, product) > 0
+                    : recipe != null && CraftPlan.Enough(needs, item => Held(bag, item)),
                 stationUsable: station != null && station.Usable(out string _) &&
                                (repairing || Level(station, recipe)),
 
@@ -135,8 +139,12 @@ namespace Kukolony.Jobs.Craft
                     ? record != null && record.Settings.Repairs && Repairing.Anything(bag, station)
                     : record != null && Wanted(context.Colony, record, product),
 
-                // Nothing comes out of a repair, so there is always room for it.
-                bagRoom: repairing || (recipe != null && Room(bag, recipe) > 0),
+                // Nothing comes out of a repair, so there is always room for it. And with no
+                // recipe chosen yet the question is only whether the bag has any room at all -
+                // asking whether there is room for a product nobody has picked answered no,
+                // and the table yields on no room *before* it reaches the branch that would
+                // have picked one. A fresh villager stood still saying its bag was full.
+                bagRoom: repairing || (recipe != null ? Room(bag, recipe) > 0 : Space(bag)),
                 tired: false);
 
             // Anything held that this recipe does not need is finished work, and a hauler is
@@ -151,7 +159,7 @@ namespace Kukolony.Jobs.Craft
             switch (step.Action)
             {
                 case CraftAction.Yield:
-                    return JobOutcomes.Skipped(state, WhyNothing(context, facts), out activity);
+                    return JobOutcomes.Skipped(state, WhyNothing(facts), out activity);
 
                 case CraftAction.ChooseWork:
                     return Record(state, step, Choose(context, needs, out activity));
@@ -245,6 +253,16 @@ namespace Kukolony.Jobs.Craft
                         Recipe recipe = CraftCatalogue.RecipeFor(order.Item);
                         if (recipe == null) continue;
 
+                        // The level is the station's, not the prefab's, so this is the first
+                        // point the question can be answered - and answering it here rather
+                        // than on arrival saves a walk to a bench that cannot do the work.
+                        if (!Level(Station(ZNetScene.instance != null
+                                ? ZNetScene.instance.FindInstance(record.Id)
+                                : null), recipe))
+                        {
+                            continue;
+                        }
+
                         List<CraftNeed> wanted = Needs(recipe);
                         Inventory bag = context.Bag.GetInventory();
 
@@ -331,6 +349,18 @@ namespace Kukolony.Jobs.Craft
                 ZDO zdo = ZDOMan.instance != null ? ZDOMan.instance.GetZDO(record.Id) : null;
                 if (zdo == null || !zdo.IsValid() || !area.Contains(zdo.GetPosition())) continue;
 
+                // Usable, and not merely registered. Without this the table would refuse a
+                // station whose fire had gone out, send the villager back to choosing, and get
+                // handed the same station again - a loaded crafter standing at a cold forge
+                // for ever, reporting that it was off to make something. The table can only
+                // refuse; refusing has to mean something here or it means nothing.
+                GameObject instance = ZNetScene.instance != null
+                    ? ZNetScene.instance.FindInstance(record.Id)
+                    : null;
+
+                if (instance == null || !CraftProbe.TryFind(instance, out CraftStation usable)) continue;
+                if (!usable.Usable(out string _)) continue;
+
                 yield return record;
             }
         }
@@ -399,7 +429,8 @@ namespace Kukolony.Jobs.Craft
             bool took = false;
             foreach (CraftNeed need in needs)
             {
-                int short_of = need.Amount - Held(bag, need.Item);
+                int short_of = need.Amount -
+                               (repairing ? HeldWorn(bag, need.Item) : Held(bag, need.Item));
                 if (short_of <= 0) continue;
 
                 // isPrefabName, or this finds nothing at all: Inventory.GetItem matches the
@@ -421,7 +452,8 @@ namespace Kukolony.Jobs.Craft
                     {
                         case TakeResult.Took:
                             took = true;
-                            short_of = need.Amount - Held(bag, need.Item);
+                            short_of = need.Amount -
+                                       (repairing ? HeldWorn(bag, need.Item) : Held(bag, need.Item));
                             continue;
 
                         default:
@@ -511,20 +543,20 @@ namespace Kukolony.Jobs.Craft
                 int amount = requirement.GetAmount(1);
                 if (amount <= 0) continue;
 
-                string prefab = requirement.m_resItem.gameObject.name;
-                int before = Held(bag, prefab);
+                string named = requirement.m_resItem.m_itemData.m_shared.m_name;
+                int before = HeldByName(bag, named);
 
                 // By the shared name and not the prefab name, because that is what vanilla's
                 // own ConsumeResources matches on - the two are different spellings of the same
                 // item and only one of them works here.
-                bag.RemoveItem(requirement.m_resItem.m_itemData.m_shared.m_name, amount);
+                bag.RemoveItem(named, amount);
 
-                int after = Held(bag, prefab);
+                int after = HeldByName(bag, named);
                 if (before - after >= amount) continue;
 
                 // The removal did not land. Said loudly, because the alternative is a
                 // settlement quietly crafting for free.
-                Log.Warning($"[craft] {state.Name} could not spend {amount} {prefab} " +
+                Log.Warning($"[craft] {state.Name} could not spend {amount} {named} " +
                             $"({before} to {after}); nothing was made.");
                 state.ClearTarget();
                 activity = "could not spend the materials";
@@ -640,12 +672,8 @@ namespace Kukolony.Jobs.Craft
         ///     goes in the villager's activity rather than on the message line, because it is a
         ///     standing state rather than an event.
         /// </remarks>
-        private static string WhyNothing(CraftContext context, CraftFacts facts)
-        {
-            if (!facts.BagRoom) return "bag full, waiting to be collected";
-
-            return "nothing to craft";
-        }
+        private static string WhyNothing(CraftFacts facts) =>
+            facts.BagRoom ? "nothing to craft" : "bag full, waiting to be collected";
 
         private static string Nothing(CraftContext context, string missing)
         {
@@ -744,13 +772,88 @@ namespace Kukolony.Jobs.Craft
             int total = 0;
             foreach (ItemDrop.ItemData item in inventory.GetAllItems())
             {
-                if (item?.m_dropPrefab == null || item.m_dropPrefab.name != prefab) continue;
+                if (Carrying.NameOf(item) != prefab) continue;
                 if (item.m_worldLevel < Game.m_worldLevel) continue;
 
                 total += item.m_stack;
             }
 
             return total;
+        }
+
+        /// <summary>
+        ///     How much is held under the name <c>RemoveItem</c> will match on.
+        /// </summary>
+        /// <remarks>
+        ///     The shared name, not the prefab name, because that is what the removal compares -
+        ///     and the removal is what this is used to verify. Two prefabs can share one shared
+        ///     name, so counting by prefab either side of a removal that matched by shared name
+        ///     would report a spend that did not happen and a spend that did as a failure.
+        /// </remarks>
+        private static int HeldByName(Inventory inventory, string sharedName)
+        {
+            if (inventory == null || string.IsNullOrEmpty(sharedName)) return 0;
+
+            int total = 0;
+            foreach (ItemDrop.ItemData item in inventory.GetAllItems())
+            {
+                if (item?.m_shared == null || item.m_shared.m_name != sharedName) continue;
+                if (item.m_worldLevel < Game.m_worldLevel) continue;
+
+                total += item.m_stack;
+            }
+
+            return total;
+        }
+
+        /// <summary>How many worn copies of a thing are held, for a repair trip.</summary>
+        private static int HeldWorn(Inventory inventory, string prefab)
+        {
+            if (inventory == null || string.IsNullOrEmpty(prefab)) return 0;
+
+            int worn = 0;
+            foreach (ItemDrop.ItemData item in inventory.GetAllItems())
+            {
+                if (Carrying.NameOf(item) == prefab && Repairing.Worn(item)) worn++;
+            }
+
+            return worn;
+        }
+
+        /// <summary>Whether the bag has any room at all, for when nothing has been chosen yet.</summary>
+        private static bool Space(Inventory bag) => bag != null && bag.GetEmptySlots() > 0;
+
+        /// <summary>
+        ///     Whether a villager is holding this for work in hand rather than for collection.
+        /// </summary>
+        /// <remarks>
+        ///     Asked by a hauler before it takes anything off a crafter. The advertising side
+        ///     already excludes materials, but advertising and taking are two decisions and only
+        ///     one of them had the guard: a crafter holding iron for nails and the nails it had
+        ///     just made would advertise correctly and then be relieved of the iron, walk back
+        ///     to the chest the hauler had just filed it into, and fetch it again.
+        /// </remarks>
+        internal static bool Reserved(Villager carrier, string prefab)
+        {
+            if (carrier == null || string.IsNullOrEmpty(prefab)) return false;
+
+            VillagerState state = carrier.State;
+            if (!state.IsValid) return false;
+
+            string cargo = state.Cargo ?? string.Empty;
+            if (cargo.Length == 0) return false;
+
+            if (cargo.StartsWith(RepairMark, System.StringComparison.Ordinal))
+            {
+                return cargo.Substring(RepairMark.Length) == prefab;
+            }
+
+            foreach (CraftNeed need in Needs(CraftCatalogue.RecipeFor(cargo)))
+            {
+                if (need.Item == prefab) return true;
+            }
+
+            return false;
         }
 
         /// <summary>How many of the product there is room to carry.</summary>
