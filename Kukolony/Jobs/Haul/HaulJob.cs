@@ -440,8 +440,12 @@ namespace Kukolony.Jobs.Haul
 
             if (source == null || !source.TryGetComponent(out ItemDrop drop))
             {
+                // Said distinctly. Three arms of this method used to answer "it was gone" and a
+                // log full of it could not say which - which cost a session when a hauler
+                // livelocked between choosing a carrier and failing to collect from one, eighty
+                // three times, with nothing in the record to say where it was turning round.
                 context.State.ClearTarget();
-                activity = "it was gone";
+                activity = source == null ? "that is not loaded" : "that is not there any more";
                 return JobResult.Running;
             }
 
@@ -468,7 +472,7 @@ namespace Kukolony.Jobs.Haul
 
                 default:
                     context.State.ClearTarget();
-                    activity = "it was gone";
+                    activity = "somebody else got there first";
                     return JobResult.Running;
             }
         }
@@ -544,8 +548,20 @@ namespace Kukolony.Jobs.Haul
                     return JobResult.Running;
 
                 default:
+                    // **Bounded, because this is where the job livelocked.** The chooser decides
+                    // a carrier is worth collecting from and this decides it is not, and the two
+                    // disagreeing is not hypothetical - it has happened twice, once because the
+                    // predicates differed and once here, and the symptom both times was a hauler
+                    // alternating between the two decisions for ever while reporting that it was
+                    // working.
+                    //
+                    // Refused briefly rather than diagnosed, and deliberately: the two can
+                    // disagree for reasons that stop being true - a bag being written by its
+                    // owner, an ownership handover mid-tick - so what this must not do is retry
+                    // instantly, and what it must not do either is give up for good.
+                    Unreachable.Refuse(context.Villager.Id, carrier.Id, Unreachable.BlockedForSeconds);
                     context.State.ClearTarget();
-                    activity = "it was gone";
+                    activity = $"could not take anything from {carrier.State.Name}";
                     return JobResult.Running;
             }
         }

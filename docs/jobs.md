@@ -129,3 +129,45 @@ Exclusive targets can be reserved through villagers' persisted active-target fie
 Station operations use verified vanilla RPCs after checking compatibility/capacity.
 Containers are claimed, changed through Inventory, and saved through Container. Raw
 internal station ZDO keys are forbidden.
+
+
+## Letting go of a target: the rule that stops a livelock
+
+Every job has arms that give up on what they were doing and return `Running` — the thing was
+destroyed, the station is unusable, the chest was emptied first. Returning `Running` costs no
+repetition, so the queue does not advance and the villager chooses again on the very next tick.
+That is correct, and it is also how a job spins for ever while reporting that it is working.
+
+**The rule: a job that lets go of a target must either refuse it, or be certain the chooser will
+not pick it straight back up.**
+
+In practice that means one of two things, and every arm must be one of them:
+
+- **The chooser asks the same question the actor does.** Crafting is the clean case — the chooser
+  tests `station.Usable(...)` and so does the act of crafting, so a station that refuses is never
+  chosen again and letting go costs one wasted tick. Tending is the same, through
+  `protocol.WhatItWants(...)` on both sides.
+- **Or the arm refuses the target for a while.** `Unreachable.Refuse(villager, target, seconds)`
+  is the mechanism, and every chooser already consults it — including
+  `Selection.TryFindCarriedWork`, which is what makes it work for a *villager* as a target and not
+  only for a thing.
+
+**Hauling has broken this twice, both times on the same pair.** The first was the chooser accepting
+a chest that takes unclaimed oddments while `Wanted` demanded the chest name the item — fixed by
+aligning the predicates, and recorded in that method's own docstring. The second was collecting
+from a carrier: the chooser decided a crafter was worth collecting from and `TakeFromContainer`
+disagreed, and the log shows the result exactly —
+
+```
+83 × "Villager 'Olaug' is now collecting from Asketill"
+83 × "Villager 'Olaug' is now it was gone"
+```
+
+— a hauler alternating between two decisions until the check gave up, with the crafter's finished
+goods never filed. That arm now refuses the carrier briefly, which turns an unbounded livelock into
+a bounded retry: the two can disagree for reasons that stop being true, so it must not retry
+instantly and must not give up for good.
+
+**And say which arm.** Three arms of `HaulJob.Collect` answered `"it was gone"`, so a log full of it
+could not say where the villager was turning round. Distinct wording is not decoration here; it is
+the difference between a diagnosis and a session spent guessing.
