@@ -19,6 +19,23 @@ namespace Kukolony.Patches
     {
         private static bool Prefix(MonsterAI __instance, float dt)
         {
+            // A destroyed component that is still in the list, which is not a rare case: the
+            // game keeps BaseAI.Instances and a villager removed from a colony leaves its entry
+            // behind for at least a frame. Component.TryGetComponent reads gameObject, and
+            // reading gameObject on a destroyed component throws - so without this line the
+            // guard below is itself the crash.
+            //
+            // **And the crash does not stop at this creature.** The exception leaves the prefix,
+            // leaves MonoUpdaters.FixedUpdate, and takes the rest of the loop with it - so every
+            // creature after the dead one never gets its AI tick at all. Measured: one removed
+            // villager produced six thousand identical stack traces and left the next villager
+            // spawned standing still, reporting "idle", for the whole two minutes a check
+            // watched it. It looked exactly like a job that did not work.
+            //
+            // Unity's == is overloaded to answer true for a destroyed object, which is why this
+            // is a comparison rather than a null check and why it cannot itself throw.
+            if (__instance == null) return true;
+
             // Cheapest possible guard: only our prefab carries this component, and this
             // runs for every creature in the world 20 times a second.
             if (!__instance.TryGetComponent(out Villager villager))

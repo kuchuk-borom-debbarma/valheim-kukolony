@@ -21,6 +21,12 @@ namespace Kukolony.Patches
         {
             private static void Postfix(Character __instance, ref string __result)
             {
+                // Destroyed but still being asked, which reading gameObject would throw on. The
+                // same guard MonsterAiTickPatch needs and for the same reason - it is cheaper
+                // here, because the blast radius is one hover rather than every creature's AI
+                // tick, but it is the same mistake.
+                if (__instance == null) return;
+
                 if (__instance.TryGetComponent(out Villager villager))
                 {
                     __result = villager.DescribeForHover();
@@ -33,6 +39,8 @@ namespace Kukolony.Patches
         {
             private static void Postfix(Character __instance, ref string __result)
             {
+                if (__instance == null) return;
+
                 if (__instance.TryGetComponent(out Villager villager))
                 {
                     __result = villager.DisplayName();
