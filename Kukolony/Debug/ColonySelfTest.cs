@@ -10776,11 +10776,24 @@ namespace Kukolony.Debug
                 yield break;
             }
 
+            // A grill needs a fire under it, and this fixture used to place one on bare ground.
+            // That was not a hole in the fixture when it was written - the mod fed a cold grill
+            // happily and it silently never cooked. Now that a cold grill is refused, the check
+            // has to stand the station up the way the game does, which is a fire pit with a
+            // cooking rack on top of it.
+            GameObject fire = null;
+            if (placed.TryGetComponent(out CookingStation grill) && grill.m_requireFire)
+            {
+                fire = SpawnFirst(where, "fire_pit", "bonfire");
+                yield return new WaitForSecondsRealtime(1f);
+            }
+
             if (!Colonies.Stations.StationProbe.TryFind(placed, out Colonies.Stations.StationProtocol protocol))
             {
                 report.Check(false, $"'{prefabName}' is recognised as a station by its component",
                     $"components={StructureRegistry.Explain(placed)}");
                 Release(placed);
+                Release(fire);
                 yield break;
             }
 
@@ -10796,6 +10809,7 @@ namespace Kukolony.Debug
                 report.Check(false, $"control: '{prefabName}' converts something this run could carry",
                     $"inputs={inputs.Count} material='{material}'");
                 Release(placed);
+                Release(fire);
                 yield break;
             }
 
@@ -10815,7 +10829,8 @@ namespace Kukolony.Debug
 
             report.Check(result == Colonies.Stations.FeedResult.Fed,
                 $"a {prefabName} takes what this mod hands it, and its own numbers say so",
-                $"result={result} material='{material}' kind={protocol.Kind}");
+                $"result={result} material='{material}' kind={protocol.Kind}" +
+                (fire == null ? string.Empty : $" over a {Utils.GetPrefabName(fire)}"));
 
             // The other half of the same claim: what it was handed actually left the bag. A
             // station that reported success while the item stayed put would be worse than one
@@ -10825,6 +10840,7 @@ namespace Kukolony.Debug
                 $"held={CountIn(bag, material)} seeded={seeded}");
 
             Release(placed);
+            Release(fire);
             yield return new WaitForSecondsRealtime(.2f);
         }
 
