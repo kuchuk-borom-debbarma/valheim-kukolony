@@ -78,6 +78,17 @@ namespace Kukolony.Gui
                 Widgets.Button(jobsRow, "Manage", 160f, () => host.Push(new JobListScreen()));
             }
 
+            // Its own row, beside jobs rather than inside them. A job says what work is; a preset
+            // is a named queue of jobs, which is a different thing you reach for at a different
+            // moment - and it was reachable only by opening Jobs and scrolling past every job the
+            // Kolony had, in a row that looked like one more of them.
+            if (column.TryRow(out Row presetsRow))
+            {
+                Widgets.Caption(presetsRow, "Work presets");
+                Widgets.Caption(presetsRow, state.GetPresets().Count.ToString(), 80f);
+                Widgets.Button(presetsRow, "Manage", 160f, () => host.Push(new PresetListScreen()));
+            }
+
             // Registering what the player was looking at when the screen opened. Offered only
             // when there is something to offer: a row reading "Register nothing" would be
             // worse than the subtitle already saying they were looking at nothing.

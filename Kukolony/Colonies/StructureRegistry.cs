@@ -177,6 +177,7 @@ namespace Kukolony.Colonies
             if (Stations.CraftProbe.Is(candidate)) capabilities |= StructureCapability.Crafting;
             if (Has<Bed>(candidate)) capabilities |= StructureCapability.Rest;
             if (Has<WorkFlag>(candidate)) capabilities |= StructureCapability.WorkArea;
+            if (Has<Field>(candidate)) capabilities |= StructureCapability.Field;
             return capabilities != StructureCapability.None;
         }
 

@@ -133,6 +133,16 @@ namespace Kukolony.KeepAlive
                 return true;
             }
 
+            // And what has been put in the ground, which is the narrowest entry of the four: a
+            // sapling exists only where somebody planted one, so this costs a kept zone nothing
+            // it was not already going to hold. It earns its place anyway - a Plant only grows
+            // while it is loaded and owned, so without this a crop at an outfarm stays a seedling
+            // for ever and looks perfectly healthy every time anybody walks out to check.
+            if (Resources.Planting.IsPlantable(prefab))
+            {
+                return true;
+            }
+
             // And the colony itself.
             // The flag is a Piece already, but name it anyway: a marker that got filtered
             // out of its own kept zone would be an outpost nobody can interact with.

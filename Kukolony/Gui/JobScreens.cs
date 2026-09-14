@@ -61,15 +61,6 @@ namespace Kukolony.Gui
                 Widgets.Button(row, "Open", 110f, () => host.Push(new JobDetailScreen(id)));
             }
 
-            // Presets live next to jobs because that is where a player is when they realise
-            // they are about to configure the same thing twenty times.
-            if (column.TryRow(out Row presets))
-            {
-                Widgets.Caption(presets, "Work presets");
-                Widgets.Caption(presets, colony.State.GetPresets().Count.ToString(), 80f);
-                Widgets.Button(presets, "Manage", 160f, () => host.Push(new PresetListScreen()));
-            }
-
             if (!column.TryRow(out Row adding)) return;
 
             // A picker rather than a button per kind. The row held three - 190 for the caption
@@ -90,6 +81,16 @@ namespace Kukolony.Gui
                         host.Pop();
                     })), 260f);
         }
+
+        // Work presets used to live at the bottom of this screen, in a row shaped exactly like a
+        // job row - a caption, a caption and a button - sitting directly under the last job and
+        // directly *above* "Add a job". So the list read as though the Kolony had a job called
+        // "Work presets", and the control for adding a job appeared to belong to presets.
+        //
+        // A job says what work is; a preset is a named queue of jobs. They are two subjects, and
+        // one undifferentiated column of identical rows is not a way to say so. They are now a
+        // row each on the Kolony screen, which is where every other subject is reached from - so
+        // this screen holds jobs and nothing else, and its title is its heading.
 
         /// <summary>Every kind of job there is, read off the enum rather than listed.</summary>
         private static List<PickerScreen.Option> Kinds(string filter)

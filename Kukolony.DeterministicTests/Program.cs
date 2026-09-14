@@ -9,6 +9,7 @@ using Kukolony.Jobs.Tend;
 using Kukolony.Jobs.Craft;
 using Kukolony.Jobs.Mine;
 using Kukolony.Jobs.Forage;
+using Kukolony.Jobs.Farm;
 
 /// <summary>
 ///     Verification for logic that needs no game running.
@@ -48,6 +49,18 @@ static class Program
         Case("rest does not collide with any retired bit",
             ((int)StructureCapability.Rest & (2 | 8 | 16 | 32)) == 0);
 
+        // The same control for every bit added since, asked once rather than a line per
+        // capability - the next one to be added is covered by this without anybody remembering.
+        Case("no capability this build knows sits on a retired bit",
+            ((int)StructureCapabilities.Known & (2 | 8 | 16 | 32)) == 0);
+
+        Mask("a field record reads as a field", 512, StructureCapability.Field);
+
+        // A field is a place *and* can be other things: nothing stops somebody registering a
+        // piece that is both. The mask must carry them together rather than choosing one.
+        Mask("a field that is also storage keeps both", 1 | 512,
+            StructureCapability.Storage | StructureCapability.Field);
+
         Label("no longer understood", StructureCapability.None);
         Label("Storage", StructureCapability.Storage);
         Label("Rest", StructureCapability.Rest);
@@ -55,6 +68,8 @@ static class Program
         // A retired bit must not reach the player as a name, or as a blank row.
         Label("no longer understood", (StructureCapability)2);
         Label("Storage", (StructureCapability)(1 | 32));
+        Label("Field", StructureCapability.Field);
+        Label("Storage + Field", StructureCapability.Storage | StructureCapability.Field);
 
         Haul();
         Placing();
@@ -74,6 +89,9 @@ static class Program
         MiningParts();
         Mining();
         Foraging();
+        FieldOrders_();
+        FieldLayout();
+        Farming();
         Tending();
 
         Console.WriteLine(_failed == 0
@@ -1365,6 +1383,350 @@ static class Program
         // would leave a villager unable to finish and no other case would notice.
         bool every = true;
         foreach (ForageAction action in Enum.GetValues(typeof(ForageAction))) every &= reached[(int)action];
+        Case("every action the table can name is reached by some combination", every);
+    }
+
+    /// <summary>What a field has been told to grow, and when it is content.</summary>
+    /// <remarks>
+    ///     The three modes are the four stopping rules a settlement was asked for, minus the one
+    ///     that is counted in the larder rather than in the ground - that one is the stock rule
+    ///     every producing job already shares, and it is checked where that is checked.
+    /// </remarks>
+    static void FieldOrders_()
+    {
+        Console.WriteLine("field orders");
+
+        FieldOrder fill = new FieldOrder { Plant = "sapling_carrot", Mode = SowMode.Fill };
+
+        Case("a field told to fill wants more while there is room", fill.WantsMore(0, room: true));
+        Case("and still wants more with a hundred already growing", fill.WantsMore(100, room: true));
+        Case("but not once the ground is full", !fill.WantsMore(0, room: false));
+
+        FieldOrder keep = new FieldOrder { Plant = "sapling_turnip", Mode = SowMode.Keep, Count = 5 };
+
+        Case("keeping five wants more at four", keep.WantsMore(4, room: true));
+        Case("and stops at five", !keep.WantsMore(5, room: true));
+
+        // The rule that makes Keep worth having. Harvesting is what takes one out of the ground,
+        // and a field told to keep five must notice - this is "replant what was harvested" and
+        // it is the same arithmetic asked a moment later.
+        Case("and wants one again the moment one is taken", keep.WantsMore(4, room: true));
+
+        // Zero is not "keep none", it is an order nobody finished setting. Treating it as a
+        // target would make an unfinished row silently stop the field.
+        FieldOrder unset = new FieldOrder { Plant = "sapling_turnip", Mode = SowMode.Keep, Count = 0 };
+        Case("a keep order with no number set does nothing", !unset.WantsMore(0, room: true));
+
+        FieldOrder once = new FieldOrder { Plant = "Birch_Sapling", Mode = SowMode.Once, Count = 3 };
+
+        Case("a one-off wants more until it has sown its number", once.WantsMore(0, room: true));
+        once.Sown = 3;
+        Case("and stops for good once it has", !once.WantsMore(0, room: true));
+
+        // The whole difference between Once and Keep, stated as the thing that separates them: a
+        // one-off that read the ground would start again the moment somebody harvested.
+        Case("and does not start again when what it sowed is taken away",
+            !once.WantsMore(0, room: true));
+
+        Case("an order naming no plant is ignored",
+            !new FieldOrder { Mode = SowMode.Fill }.WantsMore(0, room: true));
+
+        // The list is read in the player's order, because the order on the screen is the only
+        // thing that makes "carrots, then turnips" a sentence.
+        FieldOrder carrots = new FieldOrder { Plant = "sapling_carrot", Mode = SowMode.Keep, Count = 2 };
+        FieldOrder turnips = new FieldOrder { Plant = "sapling_turnip", Mode = SowMode.Keep, Count = 2 };
+        List<FieldOrder> both = new List<FieldOrder> { carrots, turnips };
+
+        Case("the first order that wants something is the one taken",
+            FieldOrders.Next(both, _ => 0, room: true) == carrots);
+
+        Case("and the next only once the first is content",
+            FieldOrders.Next(both, plant => plant == "sapling_carrot" ? 2 : 0, room: true) == turnips);
+
+        Case("a content field asks for nothing",
+            FieldOrders.Next(both, _ => 2, room: true) == null);
+
+        Case("and a full one asks for nothing whatever it was told",
+            FieldOrders.Next(both, _ => 0, room: false) == null);
+    }
+
+    /// <summary>Where the next thing goes in a field.</summary>
+    static void FieldLayout()
+    {
+        Console.WriteLine("field layout");
+
+        List<Furrow> squares = new List<Furrow>();
+
+        FieldPlan.Squares(radius: 5f, pitch: 1f, squares);
+        Case($"a field is divided into squares (got {squares.Count})", squares.Count > 0);
+
+        // Round, not square. The corners of the bounding box lie outside the circle a player
+        // drew, and a plant there is outside the field.
+        bool allInside = true;
+        foreach (Furrow furrow in squares)
+        {
+            if (furrow.X * furrow.X + furrow.Z * furrow.Z > 5f * 5f + .001f) allInside = false;
+        }
+
+        Case("every square is inside the field's own edge", allInside);
+
+        // The control the line above needs: a test that only checks "inside" passes for a plan
+        // that returns the centre and nothing else.
+        bool reachesTheEdge = false;
+        foreach (Furrow furrow in squares)
+        {
+            if (furrow.X * furrow.X + furrow.Z * furrow.Z > 16f) reachesTheEdge = true;
+        }
+
+        Case("control: and the squares reach the edge rather than huddling at the centre",
+            reachesTheEdge);
+
+        // Spacing is the whole reason the pitch is per crop. Six to one between an oak and a
+        // carrot, so a tighter pitch must genuinely fit more.
+        int tight = FieldPlan.Capacity(radius: 6f, pitch: .5f);
+        int loose = FieldPlan.Capacity(radius: 6f, pitch: 3f);
+
+        Case($"a crop's tight pitch fits far more than an oak's ({tight} vs {loose})",
+            tight > loose * 4);
+
+        // No two squares closer than the pitch, which is what the pitch means. Checked over the
+        // whole field rather than on a sample, because it is cheap here and impossible in game.
+        FieldPlan.Squares(radius: 4f, pitch: 2f, squares);
+        float closest = float.MaxValue;
+        for (int i = 0; i < squares.Count; i++)
+        {
+            for (int j = i + 1; j < squares.Count; j++)
+            {
+                float dx = squares[i].X - squares[j].X;
+                float dz = squares[i].Z - squares[j].Z;
+                float distance = (float)Math.Sqrt(dx * dx + dz * dz);
+                if (distance < closest) closest = distance;
+            }
+        }
+
+        Case($"no two squares are closer than the pitch (closest {closest:0.##} of 2)",
+            squares.Count < 2 || closest >= 2f - .001f);
+
+        // Stable, because a square index is how two villagers name the same square. An order
+        // that shifted between calls would have them claiming each other's ground.
+        List<Furrow> again = new List<Furrow>();
+        FieldPlan.Squares(radius: 4f, pitch: 2f, again);
+
+        bool same = again.Count == squares.Count;
+        for (int i = 0; same && i < squares.Count; i++)
+        {
+            same = again[i].Index == squares[i].Index &&
+                   Math.Abs(again[i].X - squares[i].X) < .001f &&
+                   Math.Abs(again[i].Z - squares[i].Z) < .001f;
+        }
+
+        Case("the same field divides the same way twice, so a square has a name", same);
+
+        FieldPlan.Squares(radius: 5f, pitch: 1f, squares);
+
+        Case("the first free square is offered",
+            FieldPlan.Next(squares, _ => false, out Furrow first) && first.Index == squares[0].Index);
+
+        // And the next one along once it is taken - the arm that makes a field fill rather than
+        // a villager planting into the same square for ever.
+        Case("and the next one along once that is taken",
+            FieldPlan.Next(squares, index => index == squares[0].Index, out Furrow second) &&
+            second.Index == squares[1].Index);
+
+        Case("a full field offers nothing", !FieldPlan.Next(squares, _ => true, out Furrow _));
+
+        Case("and so does a field with no squares at all",
+            !FieldPlan.Next(new List<Furrow>(), _ => false, out Furrow _));
+
+        // Bounded before anything is built. A pitch from a corrupt record would otherwise ask for
+        // a billion squares and the list would be the thing that noticed.
+        FieldPlan.Squares(radius: 32f, pitch: .001f, squares);
+        Case($"an absurd pitch is refused rather than attempted (got {squares.Count})",
+            squares.Count == 0);
+
+        Case("control: and a sane one at the same radius is not",
+            FieldPlan.Capacity(32f, 2f) > 0);
+    }
+
+    static FarmFacts Sow(bool hasField = true, bool wantsSowing = true, bool hasSpot = true,
+        bool atSpot = false, bool hasSeed = true, bool ready = true, bool mayCultivate = false,
+        bool tired = false) =>
+        new FarmFacts(hasField, wantsSowing, hasSpot, atSpot, hasSeed, ready, mayCultivate, tired);
+
+    static void Plant_(string what, FarmState state, FarmFacts facts, FarmAction expected)
+    {
+        FarmAction actual = FarmTransitions.Next(state, facts).Action;
+        Case($"{what} (got {actual})", actual == expected);
+    }
+
+    /// <summary>The sowing state machine, exhaustively.</summary>
+    static void Farming()
+    {
+        Console.WriteLine("farming");
+
+        Plant_("with nothing chosen it looks for work", FarmState.Choosing,
+            Sow(hasField: false), FarmAction.ChooseWork);
+
+        Plant_("with a field and a square it walks there", FarmState.Choosing, Sow(),
+            FarmAction.MoveToSpot);
+
+        Plant_("standing on it, it sows", FarmState.Approaching, Sow(atSpot: true), FarmAction.Sow);
+
+        Plant_("and goes on sowing while the field wants more", FarmState.Sowing,
+            Sow(atSpot: true), FarmAction.Sow);
+
+        // A field outlives being full, exactly as a bush outlives being picked - so "the field is
+        // there" and "the field wants something" are two questions and finishing is the second.
+        Plant_("a field that has everything it asked for is finished", FarmState.Sowing,
+            Sow(atSpot: true, wantsSowing: false), FarmAction.Complete);
+
+        Plant_("and one filled while walking is dropped, not completed", FarmState.Approaching,
+            Sow(wantsSowing: false), FarmAction.ChooseWork);
+
+        Plant_("a field already content when chosen is never walked to", FarmState.Choosing,
+            Sow(wantsSowing: false), FarmAction.ChooseWork);
+
+        // The fact no other job has. Running out mid-field is ordinary, and the errand that
+        // fetches more is asked from the choosing arm.
+        Plant_("no seed is an ordinary answer, not a failure", FarmState.Choosing,
+            Sow(hasSeed: false), FarmAction.Yield);
+
+        Plant_("and running out mid-field sends it back to be told so", FarmState.Sowing,
+            Sow(atSpot: true, hasSeed: false), FarmAction.Yield);
+
+        // Cultivating sits between arriving and sowing, because a villager only knows whether the
+        // ground is ready once it is standing on it.
+        Plant_("ground that is not ready is broken when that is allowed", FarmState.Sowing,
+            Sow(atSpot: true, ready: false, mayCultivate: true), FarmAction.Cultivate);
+
+        Plant_("and the square is given up when it is not", FarmState.Sowing,
+            Sow(atSpot: true, ready: false, mayCultivate: false), FarmAction.ChooseWork);
+
+        Plant_("the square being taken while walking sends it back to choose another",
+            FarmState.Approaching, Sow(hasSpot: false), FarmAction.ChooseWork);
+
+        Plant_("shoved away from the square, it walks back", FarmState.Sowing,
+            Sow(atSpot: false), FarmAction.MoveToSpot);
+
+        Plant_("being tired stops it", FarmState.Choosing, Sow(tired: true), FarmAction.Yield);
+
+        // Deliberate, and the same call every other producing job makes: a stopping rule stops a
+        // villager starting, never mid-square.
+        Plant_("a villager already standing on a square finishes it even once tired",
+            FarmState.Sowing, Sow(atSpot: true, tired: true), FarmAction.Sow);
+
+        Plant_("the field being destroyed under it ends the trip", FarmState.Sowing,
+            Sow(hasField: false, atSpot: true), FarmAction.Complete);
+
+        Plant_("an unknown state starts over", (FarmState)99, Sow(hasField: false),
+            FarmAction.ChooseWork);
+
+        // Every combination. The four "never" properties are all counted inside `action == Sow`,
+        // so a table that never sowed at all would satisfy every one of them - which is why the
+        // liveness counter and the two-way check beside them are not decoration.
+        int sowedWithoutField = 0, sowedUnwanted = 0, sowedWithoutSpot = 0;
+        int sowedFromAfar = 0, sowedWithoutSeed = 0, sowedOnBareGround = 0;
+        int cultivatedUnasked = 0, cultivatedFromAfar = 0;
+        int sowed = 0, disagreed = 0, yieldedWithoutReason = 0, completedWanting = 0;
+        bool[] reached = new bool[6];
+        FarmState[] states = { FarmState.Choosing, FarmState.Approaching, FarmState.Sowing };
+
+        for (int bits = 0; bits < 256; bits++)
+        {
+            FarmFacts facts = new FarmFacts(
+                hasField: (bits & 1) != 0,
+                wantsSowing: (bits & 2) != 0,
+                hasSpot: (bits & 4) != 0,
+                atSpot: (bits & 8) != 0,
+                hasSeed: (bits & 16) != 0,
+                ready: (bits & 32) != 0,
+                mayCultivate: (bits & 64) != 0,
+                tired: (bits & 128) != 0);
+
+            foreach (FarmState from in states)
+            {
+                FarmAction action = FarmTransitions.Next(from, facts).Action;
+
+                reached[(int)action] = true;
+
+                if (action == FarmAction.Sow)
+                {
+                    sowed++;
+                    if (!facts.HasField) sowedWithoutField++;
+                    if (!facts.WantsSowing) sowedUnwanted++;
+                    if (!facts.HasSpot) sowedWithoutSpot++;
+                    if (!facts.AtSpot) sowedFromAfar++;
+                    if (!facts.HasSeed) sowedWithoutSeed++;
+                    if (!facts.Ready) sowedOnBareGround++;
+                }
+
+                if (action == FarmAction.Cultivate)
+                {
+                    // Terrain edits are the one thing here a player cannot undo by unregistering
+                    // something, so the two conditions on them are asserted rather than trusted.
+                    if (!facts.MayCultivate) cultivatedUnasked++;
+                    if (!facts.AtSpot) cultivatedFromAfar++;
+                }
+
+                // Finishing means the field wanted nothing more. A table that reported a hungry
+                // field as done would sow nothing and look busy the whole time.
+                if (action == FarmAction.Complete && facts.HasField && facts.WantsSowing)
+                {
+                    completedWanting++;
+                }
+
+                // The same rule stated as an if-and-only-if, so it fails for a table that sows
+                // when it should not *and* for one that never sows. Written out here rather than
+                // derived from the table, which would only prove the table agrees with itself.
+                bool should = facts.HasField && facts.WantsSowing && facts.HasSpot &&
+                              facts.AtSpot && facts.HasSeed && facts.Ready &&
+                              (from != FarmState.Choosing || !facts.Tired);
+
+                if (should != (action == FarmAction.Sow)) disagreed++;
+
+                // Yielding is for the two ordinary reasons and nothing else. Without this the
+                // seed rule could be ignored entirely and every other case would still pass.
+                if (action == FarmAction.Yield && !facts.Tired && facts.HasSeed)
+                {
+                    yieldedWithoutReason++;
+                }
+            }
+        }
+
+        Case($"no combination ever sows without a field (did {sowedWithoutField})",
+            sowedWithoutField == 0);
+        Case($"no combination ever sows into a field that asked for nothing (did {sowedUnwanted})",
+            sowedUnwanted == 0);
+        Case($"no combination ever sows without a square (did {sowedWithoutSpot})",
+            sowedWithoutSpot == 0);
+        Case($"no combination ever sows from away from the square (did {sowedFromAfar})",
+            sowedFromAfar == 0);
+        Case($"no combination ever sows without a seed (did {sowedWithoutSeed})",
+            sowedWithoutSeed == 0);
+        Case($"no combination ever sows into ground the plant cannot use (did {sowedOnBareGround})",
+            sowedOnBareGround == 0);
+        Case($"no combination ever breaks ground it was not told it could (did {cultivatedUnasked})",
+            cultivatedUnasked == 0);
+        Case($"and never breaks ground it is not standing on (did {cultivatedFromAfar})",
+            cultivatedFromAfar == 0);
+        Case($"nothing is reported finished while the field still wants something (did {completedWanting})",
+            completedWanting == 0);
+
+        // The control the lines above need. Every one of them is satisfied by a table that does
+        // nothing at all, which is a suite that cannot fail.
+        Case($"control: something does get sown when everything is right (sowed {sowed} times)",
+            sowed > 0);
+
+        Case($"sowing happens exactly when it should, and never otherwise ({disagreed} disagreed)",
+            disagreed == 0);
+
+        Case($"yielding is always for a reason ({yieldedWithoutReason} were not)",
+            yieldedWithoutReason == 0);
+
+        // Every arm is reachable. A reordered condition that made one dead - Cultivate, say -
+        // would leave villagers unable to break ground and no other case would notice.
+        bool every = true;
+        foreach (FarmAction action in Enum.GetValues(typeof(FarmAction))) every &= reached[(int)action];
         Case("every action the table can name is reached by some combination", every);
     }
 

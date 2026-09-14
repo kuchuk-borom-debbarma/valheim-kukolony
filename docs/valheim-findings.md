@@ -923,3 +923,112 @@ before writing a bush off.
 zero and it is gone for good. That is the one fact that separates a raspberry bush from an
 obsidian outcrop or a surtling core, and it is readable with nothing loaded — which is what makes
 *leave what does not grow back* a setting the mod can honestly offer.
+
+---
+
+## Planting: the rulebook is public, and the cultivator is not where you would look
+
+Sowing turned out to be the most cooperative system this mod has had to work with, with one trap
+at the end that a probe caught and reading the assembly never would have.
+
+### `Plant.GetStatus()` is the whole rulebook, and it is public
+
+```
+public Status GetStatus()            // Healthy, NoSun, NoSpace, WrongBiome,
+public void UpdateHealth(double)     // NotCultivated, NoAttachPiece, TooHot, TooCold
+```
+
+`UpdateHealth` sets the status from `Heightmap.GetBiome`, `Heightmap.IsCultivated`,
+`EffectArea.IsPointInsideArea` for heat and cold, a roof raycast, and an `OverlapSphere` for
+space. Both are public, so **a villager never reimplements the planting rules** — it places, asks
+the plant itself, and undoes if the answer is not `Healthy`. This is the single-predicate ideal
+`docs/components.md` keeps asking for and rarely gets.
+
+`HaveGrowSpace` and `HaveRoof` are private, and do not need to be reached: they are already
+summarised in the status.
+
+### An unripe crop is not a `Plant`'s problem, and not a `Pickable`
+
+A planted seed is a `Plant`. When it ripens it calls `Grow()` and **replaces itself with a
+different prefab**, and it is that one that carries `Pickable`. So the forage classifier never
+sees an unripe crop, and the farm classifier never sees a ripe one. Two jobs, two predicates, no
+shared state and no timers.
+
+### `IsCultivated` belongs to a tile, not to the class
+
+`Heightmap.FindHeightmap(Vector3)` is static; **`IsCultivated(Vector3)` and `IsCleared(Vector3)`
+are not.** They are instance methods on the tile the point falls in, so the tile has to be found
+first:
+
+```
+Heightmap ground = Heightmap.FindHeightmap(at);
+bool ready = ground != null && ground.IsCultivated(at);
+```
+
+A point with no tile is a point outside the loaded world, which is not cultivated in any useful
+sense - so the null is an answer rather than a case to guard against.
+
+### Spacing is per-crop, and the spread is six to one
+
+`m_growRadius` and `m_growRadiusVines` are public floats on the prefab. Measured across the 22
+plantable prefabs this game ships:
+
+| | `m_growRadius` |
+|---|---|
+| every crop — carrot, turnip, onion, barley, flax, kale, oat, poteitr | **0.5** |
+| magecap | 0.8 |
+| vines | 0.5, plus a **1.8** vine radius |
+| birch, beech, fir, pine | **2** |
+| oak | **3** |
+
+**Six to one between an oak and a carrot.** A single layout pitch would either pack saplings so
+tight none of them grow, or scatter carrots at a sixth of the density a field can hold — so the
+pitch has to come from the crop, and that is a thing the prefab will tell you with nothing loaded.
+
+### Every plantable carries a `Piece`, so the seed cost is asset data
+
+22 of 22. `Piece.m_resources` is `Requirement[] { m_resItem, m_amount }`, so *which seed and how
+many* is answerable without a world. It also exposes the two-stage loop: `sapling_carrot` costs
+`CarrotSeeds` and grows a `Carrot`, while `sapling_seedcarrot` costs a `Carrot` and grows
+`CarrotSeeds`. Those are genuinely different orders and a picker must not merge them.
+
+### Trees break the yield chain, and that is fine
+
+`m_grownPrefabs` → the grown prefab's `Pickable.m_itemPrefab` gives *"Carrot"*, which is how
+*"grow carrots"* becomes expressible. A sapling grows into a `TreeBase` instead, which has no
+`Pickable` and therefore no yield in that chain. So a plantable is labelled by `Piece.m_name` —
+what the build menu already calls it — and a stock rule counted in the larder only applies where
+something pickable comes out the other end. "Stop when we have a hundred wood" is chopping's rule,
+not a tree field's.
+
+### `destroyIfCantGrow` is true for everything but vines
+
+A plant that cannot grow removes itself. That is a safety net rather than a problem — a sapling
+placed somewhere hopeless does not litter the field for ever — but it means a check that reads
+the status must read it **immediately**, because `Grow()` runs off `SUpdate` on a timer and takes
+the evidence with it.
+
+### The cultivator is not in `ZNetScene`, and the first probe found nothing at all
+
+`TerrainOp.Awake` applies its operation to every heightmap in radius **and then destroys its own
+GameObject**. So a terrain op never needs a `ZNetView`, is never registered as a networked prefab,
+and **does not appear in `ZNetScene.m_prefabs`**. A sweep of that list returns zero, which reads
+exactly like *"this game has no cultivator"*.
+
+They live in the piece table of the tool that places them —
+`ObjectDB.m_items[…].m_itemData.m_shared.m_buildPieces.m_pieces`:
+
+```
+Cultivator: cultivate_v2  paint=Cultivate  radius=3    znetview=False  piece=True
+            replant_v2    paint=Reset      radius=2.2
+Hoe:        mud_road_v2   paint=Dirt       raise_v2, path_v2, paved_road_v2
+```
+
+So the predicate is **a piece-table entry carrying `TerrainOp` whose `m_settings.m_paintType` is
+`Cultivate`** — by component and by the game's own enum, never by the name `cultivate_v2`. One
+cultivate covers a three-metre radius, which is thirty-six crop spots at a 0.5 pitch: cultivating
+is cheap compared with sowing.
+
+**This is the finding that justifies probing before designing.** Nothing in the decompiled
+assembly says which list a terrain op lives in, the wrong list answers "none", and a cultivate
+switch built on it would have done nothing at all while looking perfectly correct.

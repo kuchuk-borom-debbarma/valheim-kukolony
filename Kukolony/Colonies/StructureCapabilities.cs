@@ -47,7 +47,22 @@ namespace Kukolony.Colonies
         ///     come back as a crafting station, and a settlement would try to forge nails at
         ///     an old fireplace.
         /// </remarks>
-        Crafting = 256
+        Crafting = 256,
+
+        /// <summary>
+        ///     Ground the Kolony grows things in. The field piece.
+        /// </summary>
+        /// <remarks>
+        ///     A fresh bit, as <see cref="Rest" /> and <see cref="Crafting" /> took: a record
+        ///     carrying a retired bit would otherwise come back as a field, and a settlement
+        ///     would try to sow carrots in an old fireplace.
+        ///
+        ///     Unlike <see cref="WorkArea" /> this is <em>not</em> exempt from the reach gate. A
+        ///     flag is exempt because standing beyond reach is its whole purpose; a field is
+        ///     somewhere the Kolony already is - and it has to be, because a plant only grows
+        ///     while its zone is loaded and the keep-alive holds open what the Kolony reaches.
+        /// </remarks>
+        Field = 512
     }
 
     /// <summary>
@@ -66,7 +81,7 @@ namespace Kukolony.Colonies
     /// </remarks>
     internal const StructureCapability Known =
         StructureCapability.Storage | StructureCapability.Processing | StructureCapability.Rest |
-        StructureCapability.WorkArea | StructureCapability.Crafting;
+        StructureCapability.WorkArea | StructureCapability.Crafting | StructureCapability.Field;
 
     /// <summary>
     ///     What a player should read for a set of capabilities.
@@ -86,12 +101,13 @@ namespace Kukolony.Colonies
         capabilities &= Known;
         if (capabilities == StructureCapability.None) return "no longer understood";
 
-        List<string> parts = new List<string>(5);
+        List<string> parts = new List<string>(6);
         if ((capabilities & StructureCapability.Storage) != 0) parts.Add("Storage");
         if ((capabilities & StructureCapability.Processing) != 0) parts.Add("Processing");
         if ((capabilities & StructureCapability.Rest) != 0) parts.Add("Rest");
         if ((capabilities & StructureCapability.WorkArea) != 0) parts.Add("Work area");
         if ((capabilities & StructureCapability.Crafting) != 0) parts.Add("Crafting");
+        if ((capabilities & StructureCapability.Field) != 0) parts.Add("Field");
         return string.Join(" + ", parts.ToArray());
     }
     }

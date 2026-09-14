@@ -765,50 +765,17 @@ namespace Kukolony.Jobs.Craft
         ///     How much of an item is held, under the same rule that removing it will use.
         /// </summary>
         /// <remarks>
-        ///     The world-level test is the point. <c>Inventory.RemoveItem</c> skips anything
-        ///     below <c>Game.m_worldLevel</c>, so counting without it would say the materials
-        ///     are there, the removal would take nothing, and the craft would be free.
+        ///     Moved to <see cref="Spending" /> when sowing became the second thing in this mod
+        ///     that has to spend. The rule it carries - that a removal below the world level
+        ///     silently takes nothing - is the one that makes free crafting possible, and two
+        ///     copies of it would be two things to keep in step.
         /// </remarks>
-        private static int Held(Inventory inventory, string prefab)
-        {
-            if (inventory == null || string.IsNullOrEmpty(prefab)) return 0;
+        private static int Held(Inventory inventory, string prefab) =>
+            Spending.Held(inventory, prefab);
 
-            int total = 0;
-            foreach (ItemDrop.ItemData item in inventory.GetAllItems())
-            {
-                if (Carrying.NameOf(item) != prefab) continue;
-                if (item.m_worldLevel < Game.m_worldLevel) continue;
+        private static int HeldByName(Inventory inventory, string sharedName) =>
+            Spending.HeldByName(inventory, sharedName);
 
-                total += item.m_stack;
-            }
-
-            return total;
-        }
-
-        /// <summary>
-        ///     How much is held under the name <c>RemoveItem</c> will match on.
-        /// </summary>
-        /// <remarks>
-        ///     The shared name, not the prefab name, because that is what the removal compares -
-        ///     and the removal is what this is used to verify. Two prefabs can share one shared
-        ///     name, so counting by prefab either side of a removal that matched by shared name
-        ///     would report a spend that did not happen and a spend that did as a failure.
-        /// </remarks>
-        private static int HeldByName(Inventory inventory, string sharedName)
-        {
-            if (inventory == null || string.IsNullOrEmpty(sharedName)) return 0;
-
-            int total = 0;
-            foreach (ItemDrop.ItemData item in inventory.GetAllItems())
-            {
-                if (item?.m_shared == null || item.m_shared.m_name != sharedName) continue;
-                if (item.m_worldLevel < Game.m_worldLevel) continue;
-
-                total += item.m_stack;
-            }
-
-            return total;
-        }
 
         /// <summary>How many worn copies of a thing are held, for a repair trip.</summary>
         private static int HeldWorn(Inventory inventory, string prefab)

@@ -211,6 +211,18 @@ and would be truncated somewhere arbitrary.
 
 ## Presets, and handing work out
 
+**A row of their own on the Kolony screen, beside Jobs.** They used to sit at the bottom of the
+jobs list, in a row shaped exactly like a job row - a caption, a caption and a button - directly
+under the last job and directly *above* "Add a job". So the list read as though the Kolony had a
+job called "Work presets", and the control for adding a job appeared to belong to presets. Two
+subjects interleaved in one undifferentiated column, which is not a way to say they are two
+subjects.
+
+It also meant presets were reachable only by opening Jobs and paging past every job the settlement
+had. Now each is a row on the screen every other subject is reached from, and `JobListScreen` holds
+jobs and nothing else - its own title is its heading, so it needs no section machinery and the
+layout gains no new concept.
+
 A **job** says what work is. A **preset** is a named queue — "Hauler" is *these jobs in this
 order* — which is the unit you actually want to copy to many villagers. Without one, a settlement
 of a hundred is assigned a hundred times by hand.

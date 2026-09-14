@@ -10,11 +10,14 @@
     <Compile Include="../Kukolony/Colonies/StructureCapabilities.cs" Link="StructureCapabilities.cs" />
     <Compile Include="../Kukolony/Colonies/StationAppetite.cs" Link="StationAppetite.cs" />
     <Compile Include="../Kukolony/Colonies/StructureOrder.cs" Link="StructureOrder.cs" />
+    <Compile Include="../Kukolony/Colonies/FieldOrder.cs" Link="FieldOrder.cs" />
     <Compile Include="../Kukolony/Jobs/Haul/HaulTransitions.cs" Link="HaulTransitions.cs" />
     <Compile Include="../Kukolony/Jobs/Chop/ChopTransitions.cs" Link="ChopTransitions.cs" />
     <Compile Include="../Kukolony/Jobs/Mine/MineTransitions.cs" Link="MineTransitions.cs" />
     <Compile Include="../Kukolony/Jobs/Mine/MineTargets.cs" Link="MineTargets.cs" />
     <Compile Include="../Kukolony/Jobs/Forage/ForageTransitions.cs" Link="ForageTransitions.cs" />
+    <Compile Include="../Kukolony/Jobs/Farm/FieldPlan.cs" Link="FieldPlan.cs" />
+    <Compile Include="../Kukolony/Jobs/Farm/FarmTransitions.cs" Link="FarmTransitions.cs" />
     <Compile Include="../Kukolony/Jobs/Tend/TendTransitions.cs" Link="TendTransitions.cs" />
     <Compile Include="../Kukolony/Jobs/Craft/CraftTransitions.cs" Link="CraftTransitions.cs" />
     <Compile Include="../Kukolony/Jobs/Craft/CraftPlan.cs" Link="CraftPlan.cs" />

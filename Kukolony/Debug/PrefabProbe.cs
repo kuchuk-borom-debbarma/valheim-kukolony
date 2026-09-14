@@ -53,6 +53,150 @@ namespace Kukolony.Debug
             ReportComponents(prefabs, "ShadowPerson");
             ReportSmallPieces(prefabs);
             ReportStationContracts(prefabs);
+            ReportPlantables(prefabs);
+            ReportCultivators(prefabs);
+        }
+
+        /// <summary>
+        ///     Everything that can be planted, and everything a sowing job needs to know about it.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>The whole of the Farm design rests on two things the assembly cannot say.</b>
+        ///         First, whether a <c>Plant</c> prefab carries a <c>Piece</c> - because that is
+        ///         where the seed cost lives, and a plan that assumed one would be building on a
+        ///         guess. Second, what the spacing numbers actually are: a birch and a carrot are
+        ///         both Plants, and if their grow radii turned out to be similar the whole
+        ///         per-crop layout argument would be wasted effort.
+        ///     </para>
+        ///     <para>
+        ///         Prefab contents are asset data. This mod does not ship the assets, cannot read
+        ///         them from the managed assembly, and has been wrong about a prefab before - so
+        ///         the answer is printed from a running game before anything is built on it.
+        ///     </para>
+        /// </remarks>
+        private static void ReportPlantables(List<GameObject> prefabs)
+        {
+            int total = 0, withPiece = 0, withoutPiece = 0, cultivated = 0;
+            List<string> lines = new List<string>();
+
+            foreach (GameObject prefab in prefabs)
+            {
+                if (prefab == null || !prefab.TryGetComponent(out Plant plant)) continue;
+
+                total++;
+
+                // The seed and its cost, which is the fact the design hangs on.
+                string cost = "NO PIECE";
+                if (prefab.TryGetComponent(out Piece piece))
+                {
+                    withPiece++;
+                    List<string> parts = new List<string>();
+                    if (piece.m_resources != null)
+                    {
+                        foreach (Piece.Requirement need in piece.m_resources)
+                        {
+                            if (need?.m_resItem == null) continue;
+                            parts.Add($"{need.m_resItem.name}x{need.m_amount}");
+                        }
+                    }
+
+                    cost = parts.Count > 0 ? Join(parts) : "free";
+                }
+                else
+                {
+                    withoutPiece++;
+                }
+
+                if (plant.m_needCultivatedGround) cultivated++;
+
+                // What it turns into, and through that what it eventually gives. The picker is
+                // meant to read "grow carrots" off this chain, so a break anywhere in it is
+                // worth seeing now rather than as an empty list on a screen.
+                List<string> grows = new List<string>();
+                if (plant.m_grownPrefabs != null)
+                {
+                    foreach (GameObject grown in plant.m_grownPrefabs)
+                    {
+                        if (grown == null) continue;
+
+                        string gives = grown.TryGetComponent(out Pickable pick) && pick.m_itemPrefab != null
+                            ? pick.m_itemPrefab.name
+                            : (grown.GetComponent<TreeBase>() != null ? "(tree)" : "(nothing pickable)");
+
+                        grows.Add($"{grown.name}->{gives}");
+                    }
+                }
+
+                lines.Add($"{prefab.name}: seed={cost} space={plant.m_growRadius:0.##}" +
+                          $"/vines={plant.m_growRadiusVines:0.##} biome={plant.m_biome} " +
+                          $"cultivated={plant.m_needCultivatedGround} " +
+                          $"grow={plant.m_growTime:0}-{plant.m_growTimeMax:0}s " +
+                          $"destroyIfCantGrow={plant.m_destroyIfCantGrow} => {Join(grows)}");
+            }
+
+            Log.Info($"[Probe:plant] {total} plantable prefab(s); {withPiece} carry a Piece, " +
+                     $"{withoutPiece} do NOT, {cultivated} need cultivated ground");
+
+            foreach (string line in lines) Log.Info($"[Probe:plant] {line}");
+        }
+
+        /// <summary>
+        ///     Which terrain pieces cultivate, so the job can find one by component rather than
+        ///     by name.
+        /// </summary>
+        /// <remarks>
+        ///     <c>TerrainOp.Awake</c> applies its operation and then destroys its own GameObject,
+        ///     so cultivating is one instantiate - but only if the right piece can be picked out
+        ///     of the several that edit terrain. Printed with the paint type so the predicate
+        ///     that picks it is written against what the game actually has.
+        /// </remarks>
+        private static void ReportCultivators(List<GameObject> prefabs)
+        {
+            Report("ZNetScene", prefabs);
+
+            // And the build menus, because the first pass looked only in ZNetScene and found
+            // nothing at all. A terrain op destroys its own GameObject during Awake, so it never
+            // needs a ZNetView and is never registered as a networked prefab - it exists only as
+            // an entry in the piece table of whatever tool places it. Looking in the wrong list
+            // returns "none", which reads exactly like "this game has no cultivator".
+            if (ObjectDB.instance?.m_items == null)
+            {
+                Log.Warning("[Probe:terrain] no ObjectDB - cannot look through the build menus");
+                return;
+            }
+
+            foreach (GameObject item in ObjectDB.instance.m_items)
+            {
+                if (item == null || !item.TryGetComponent(out ItemDrop drop)) continue;
+
+                PieceTable table = drop.m_itemData?.m_shared?.m_buildPieces;
+                if (table?.m_pieces == null || table.m_pieces.Count == 0) continue;
+
+                Report($"{item.name} piece table", table.m_pieces);
+            }
+        }
+
+        /// <summary>Which of these carry a terrain operation, and what it paints.</summary>
+        private static void Report(string where, List<GameObject> candidates)
+        {
+            List<string> found = new List<string>();
+
+            foreach (GameObject prefab in candidates)
+            {
+                if (prefab == null || !prefab.TryGetComponent(out TerrainOp op) || op.m_settings == null) continue;
+
+                found.Add($"{prefab.name}: paint={op.m_settings.m_paintType} " +
+                          $"cleared={op.m_settings.m_paintCleared} radius={op.m_settings.m_paintRadius:0.##} " +
+                          $"level={op.m_settings.m_level} raise={op.m_settings.m_raise} " +
+                          $"znetview={(prefab.GetComponent<ZNetView>() != null)} " +
+                          $"piece={(prefab.GetComponent<Piece>() != null)}");
+            }
+
+            if (found.Count == 0) return;
+
+            Log.Info($"[Probe:terrain] {where}: {found.Count} terrain op(s)");
+            foreach (string line in found) Log.Info($"[Probe:terrain] {line}");
         }
 
         private static void ReportStationContracts(List<GameObject> prefabs)

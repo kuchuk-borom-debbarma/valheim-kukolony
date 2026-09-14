@@ -40,6 +40,7 @@ namespace Kukolony
             VillagerPrefab.Register();
             Colonies.ColonyPrefab.Register();
             Colonies.WorkFlagPrefab.Register();
+            Colonies.FieldPrefab.Register();
             _harmony.PatchAll(Assembly.GetExecutingAssembly());
 
             gameObject.AddComponent<KeepAlive.KeepAliveDriver>();
@@ -68,6 +69,10 @@ namespace Kukolony
             Localization.AddTranslation("English", "kukolony_flag_desc",
                 "Marks ground a Kolony works, however far from home. What its radius covers "
                 + "stays loaded, structures there can be registered, and jobs can be pointed at it.");
+            Localization.AddTranslation("English", "kukolony_field", "Kolony Field");
+            Localization.AddTranslation("English", "kukolony_field_desc",
+                "Marks ground a Kolony grows things in. Register it, tell it what to grow, and "
+                + "villagers with a Farm job will sow it and keep it sown.");
         }
     }
 }
