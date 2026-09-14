@@ -104,6 +104,17 @@ to this peer reads "not found" there, identically to one that was destroyed. The
 live outpost's records is the same loss the *never infer destruction from absence* rule exists
 to prevent, just routed through a person.
 
+**Looking at something and pressing a key opens its settings.** The screen is organised the way a
+settlement is — colony, list, structure, capability — which is right for finding something you
+cannot see and wrong for the thing under your nose. A player standing at a kiln knows which row
+they want. The key skips the walk, and when the structure has exactly one capability it opens that
+capability's screen directly, because the row between them exists for the pieces that carry
+several.
+
+The colony comes from the *structure*, not from the player: a chest registered to an outpost is
+nearer to that outpost than to whichever hearth happens to be closest to somebody standing at it,
+and opening the wrong colony's copy of a list is worse than not opening.
+
 **A letter key is a letter first.** Every hotkey this mod reads asks `Typing.Now()` before it
 acts — the console, chat, the game's own text dialog, and whichever `InputField` Unity says has
 the caret. The screen's key is `C`, so without the last of those, naming a chest *Coal* closed the

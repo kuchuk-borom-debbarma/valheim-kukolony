@@ -444,18 +444,11 @@ namespace Kukolony.Jobs.Mine
 
         /// <summary>Whether a pickaxe of this tier can break this prefab at all.</summary>
         /// <remarks>
-        ///     Read from the prefab rather than the instance, so it answers for a deposit before
-        ///     anybody has walked to it - which is the only point at which the answer is worth
-        ///     anything.
+        ///     Asked of the index rather than of the scene, because this runs per candidate while
+        ///     a villager chooses - and a scene lookup with three GetComponent calls behind it,
+        ///     per rock, per tick, is what made switching loose rock on drop the frame rate.
         /// </remarks>
-        private static bool Breakable(int prefabHash, int tier)
-        {
-            GameObject prefab = ZNetScene.instance != null
-                ? ZNetScene.instance.GetPrefab(prefabHash)
-                : null;
-
-            return prefab == null || Mineable.TierOf(prefab) <= tier;
-        }
+        private static bool Breakable(int prefabHash, int tier) => Mineable.TierOf(prefabHash) <= tier;
 
         private static JobResult Strike(MineContext context, MineProtocol rock, MineArea part,
             ItemDrop.ItemData pick, out string activity)

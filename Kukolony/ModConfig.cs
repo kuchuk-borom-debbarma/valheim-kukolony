@@ -36,6 +36,9 @@ namespace Kukolony
         /// <summary>How near a player must be for a travelling villager to walk rather than reckon.</summary>
         internal static ConfigEntry<float> TravelObservedRange { get; private set; }
 
+        /// <summary>Opens the settings of whatever registered thing the player is looking at.</summary>
+        internal static ConfigEntry<KeyCode> StructureScreenHotkey { get; private set; }
+
         /// <summary>Whether a crafting station only offers what this player has discovered.</summary>
         internal static ConfigEntry<bool> OnlyKnownRecipes { get; private set; }
 
@@ -114,6 +117,11 @@ namespace Kukolony
                 true,
                 "Villagers keep a small area around themselves loaded, so Kolonies carry on "
                 + "working when no player is nearby. Disable to compare against vanilla behaviour.");
+
+            StructureScreenHotkey = config.Bind(
+                "1 - Kolony", nameof(StructureScreenHotkey), KeyCode.V,
+                "Looking at something the Kolony has registered and pressing this opens its "
+                + "settings, rather than the Kolony screen and a walk down the list.");
 
             OnlyKnownRecipes = config.Bind(
                 "4 - Work",

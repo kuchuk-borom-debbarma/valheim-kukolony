@@ -124,6 +124,75 @@ namespace Kukolony.Gui
             Instance.Open(nearest, PlayerLook.Target(player));
         }
 
+        /// <summary>
+        ///     Opens the settings of whatever registered thing the player is looking at.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The screen is organised the way a settlement is - colony, then a list, then a
+        ///         structure, then one of its capabilities - which is right for finding something
+        ///         you cannot see and wrong for the thing under your nose. A player standing in
+        ///         front of a kiln knows exactly which row they want and has to walk down to it.
+        ///     </para>
+        ///     <para>
+        ///         The colony is taken from the structure rather than from the player, because
+        ///         the two can differ: a chest registered to an outpost is nearer to the outpost
+        ///         than to whichever hearth happens to be closest to the player standing at it.
+        ///         Opening the wrong colony's copy of a list would be worse than not opening.
+        ///     </para>
+        /// </remarks>
+        internal static void OpenWhatIsLookedAt()
+        {
+            if (Instance == null)
+            {
+                Report.Say("The Kolony screen is not ready yet.");
+                return;
+            }
+
+            Player player = Player.m_localPlayer;
+            if (player == null) return;
+
+            GameObject looking = PlayerLook.Target(player);
+            if (looking == null || !looking.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                Report.Say("Look at something the Kolony has registered.");
+                return;
+            }
+
+            ZDO zdo = view.GetZDO();
+            Colony owner = Colony.FindFor(zdo);
+
+            StructureRecord record = owner != null
+                ? owner.State.GetStructures().Find(r => r.Id == zdo.m_uid)
+                : null;
+
+            if (record == null)
+            {
+                // Named, because "not registered" and "registered somewhere else" are different
+                // answers and a player standing in front of their own chest deserves the one
+                // that says what to do about it.
+                Report.Say(owner == null
+                    ? $"{StructureRegistry.DisplayName(looking)} is not registered to a Kolony."
+                    : $"{StructureRegistry.DisplayName(looking)} belongs to {owner.State.Name} " +
+                      "but has no record there.");
+                return;
+            }
+
+            if (Instance.IsOpen) Instance.Close();
+
+            Instance.Open(owner, looking);
+            Instance.Push(new StructureDetailScreen(record.PersistentId, record.Id));
+
+            // Straight to the one thing it is, when it is only one thing. A chest has a single
+            // capability and the row between the player and its settings is a row that exists
+            // for the pieces that carry several.
+            List<StructureCapability> aspects = StructureDetailScreen.Aspects(record.Capabilities);
+            if (aspects.Count == 1)
+            {
+                Instance.Push(new StructureAspectScreen(record.PersistentId, record.Id, aspects[0]));
+            }
+        }
+
         private static Colony Nearest(Vector3 position)
         {
             Colony best = null;
@@ -424,20 +493,22 @@ namespace Kukolony.Gui
 
         private void Update()
         {
-            if (!Input.GetKeyDown(ModConfig.ColonyScreenHotkey.Value))
-            {
-                return;
-            }
+            bool colony = Input.GetKeyDown(ModConfig.ColonyScreenHotkey.Value);
+            bool structure = Input.GetKeyDown(ModConfig.StructureScreenHotkey.Value);
+
+            if (!colony && !structure) return;
 
             // A letter key is a letter first. This guarded chat and the console, which are the
             // two places this mod does not put a text box - so naming a chest "Coal" closed the
             // screen on the first keystroke.
-            if (Typing.Now())
-            {
-                return;
-            }
+            if (Typing.Now()) return;
 
-            ColonyScreen.Toggle();
+            // The structure key wins where they are set to the same thing, because it is the
+            // more specific answer: somebody looking at a registered kiln and pressing one key
+            // meant the kiln. With nothing registered in front of them it says so, and the
+            // Kolony key is still there.
+            if (structure) ColonyScreen.OpenWhatIsLookedAt();
+            else ColonyScreen.Toggle();
         }
     }
 }

@@ -62,6 +62,19 @@ namespace Kukolony.Resources
         private static readonly Dictionary<int, List<string>> Drops = new Dictionary<int, List<string>>();
 
         /// <summary>
+        ///     The tool tier each indexed prefab demands.
+        /// </summary>
+        /// <remarks>
+        ///     Asset data, so it is read once with everything else rather than per question.
+        ///     Asking the prefab meant a scene lookup and three GetComponent calls, and the job
+        ///     asks it of every candidate while it chooses - which is per rock, per tick. With
+        ///     loose rock switched on that is every boulder in a hundred metres of meadow, and
+        ///     it showed as exactly what it was: the frame rate falling when the setting went on
+        ///     and recovering when it went off.
+        /// </remarks>
+        private static readonly Dictionary<int, int> Tiers = new Dictionary<int, int>();
+
+        /// <summary>
         ///     The prefabs behind those hashes, kept so a check can pick a real deposit rather
         ///     than name one. Prefab names are asset data this mod cannot see from the managed
         ///     assembly, and it has been wrong about one before.
@@ -98,6 +111,7 @@ namespace Kukolony.Resources
         {
             Kinds.Clear();
             Drops.Clear();
+            Tiers.Clear();
             Prefabs.Clear();
             if (ZNetScene.instance == null) return;
 
@@ -112,6 +126,7 @@ namespace Kukolony.Resources
                 int hash = prefab.name.GetStableHashCode();
                 Kinds[hash] = kind;
                 Drops[hash] = Yield(prefab);
+                Tiers[hash] = TierOf(prefab);
                 Prefabs.Add(prefab);
 
                 if (kind == MineKind.Deposit) deposits++;
@@ -130,6 +145,7 @@ namespace Kukolony.Resources
         {
             Kinds.Clear();
             Drops.Clear();
+            Tiers.Clear();
             Prefabs.Clear();
         }
 
@@ -209,6 +225,10 @@ namespace Kukolony.Resources
 
             return string.Empty;
         }
+
+        /// <summary>The tool tier a prefab demands, from the index rather than from the scene.</summary>
+        internal static int TierOf(int prefabHash) =>
+            Tiers.TryGetValue(prefabHash, out int tier) ? tier : 0;
 
         /// <summary>The tool tier a prefab demands, whichever component says so.</summary>
         internal static int TierOf(GameObject prefab)
