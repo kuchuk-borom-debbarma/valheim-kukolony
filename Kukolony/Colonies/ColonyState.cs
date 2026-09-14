@@ -97,7 +97,17 @@ namespace Kukolony.Colonies
                         Settings = StructureSettings.Read(p, version) });
                 }
             }
-            catch (System.Exception e) { Core.Log.Warning("[colony] invalid structure registry: " + e.Message); }
+            catch (System.Exception e)
+            {
+                // Everything, not the part that decoded before the fault. A half-list is worse
+                // than none: every mutation here is read-modify-write, so the next rename or
+                // toggle would write the truncated list back and the records past the fault
+                // would be gone from the save for good. The jobs reader has always done this;
+                // this one kept what it had and quietly made the loss permanent.
+                Core.Log.Warning("[colony] invalid structure registry: " + e.Message);
+                result.Clear();
+            }
+
             return result;
         }
 

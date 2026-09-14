@@ -300,6 +300,25 @@ namespace Kukolony.Gui
                 });
             }
 
+            // Supply or clear, and what may be carried. These moved here from the tend job -
+            // whether a kiln wants filling or emptying is a fact about that kiln - and they have
+            // to be reachable somewhere or the move would have made them unreachable settings
+            // that a villager still reads and a player can no longer see.
+            if (column.TryRow(out Row does))
+            {
+                Widgets.Cycle(does, "What villagers do here",
+                    new[] { "supply and clear", "supply only", "clear only" },
+                    settings.Work == StationWork.Supply ? 1 : settings.Work == StationWork.Collect ? 2 : 0,
+                    index =>
+                    {
+                        ColonyOperations.EditSettings(colony, record.Id, s => s.Work =
+                            index == 1 ? StationWork.Supply
+                            : index == 2 ? StationWork.Collect
+                            : StationWork.Both);
+                        host.Refresh();
+                    });
+            }
+
             List<string> inputs = ProcessingOptions.Inputs(record.Prefab);
             if (inputs.Count > 0 && column.TryRow(out Row inputRow))
             {
@@ -311,6 +330,26 @@ namespace Kukolony.Gui
                             ColonyOperations.EditSettings(colony, record.Id, s => s.Input = chosen);
                             host.Refresh();
                         })));
+            }
+
+            // Only where there is a choice to make. A station that is only being cleared carries
+            // nothing, and one with no fuel item has only ever taken material - offering either
+            // a choice would be offering a setting the structure ignores, which is the trap this
+            // screen has walked into once already.
+            if (settings.Work != StationWork.Collect && fuel.Length > 0 &&
+                column.TryRow(out Row carries))
+            {
+                Widgets.Cycle(carries, "What they carry to it",
+                    new[] { "fuel and material", "fuel only", "material only" },
+                    settings.Carries == StationCargo.Fuel ? 1 : settings.Carries == StationCargo.Material ? 2 : 0,
+                    index =>
+                    {
+                        ColonyOperations.EditSettings(colony, record.Id, s => s.Carries =
+                            index == 1 ? StationCargo.Fuel
+                            : index == 2 ? StationCargo.Material
+                            : StationCargo.Both);
+                        host.Refresh();
+                    });
             }
 
             // Only where "how full" can mean anything. A fermenter takes one batch and is then

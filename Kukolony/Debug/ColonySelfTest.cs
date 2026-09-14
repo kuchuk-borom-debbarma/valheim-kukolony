@@ -304,6 +304,7 @@ namespace Kukolony.Debug
                     break;
 
                 case "tend":
+                    CheckStructureRecordsSurviveAVersion(report);
                     yield return CheckTheStationContract(report, origin);
                     yield return CheckAnIdleSmelterIsNotStoked(report, colony, origin);
                     yield return CheckAKilnIsKeptHalfFullAndStops(report, colony, origin);
@@ -311,6 +312,8 @@ namespace Kukolony.Debug
                     break;
 
                 case "craft":
+                    CheckStructureRecordsSurviveAVersion(report);
+                    CheckJobsSurviveAVersion(report);
                     yield return CheckAStationRefusesWhatItCannotDo(report, colony, origin);
                     yield return CheckACraftedOrderIsMadeFiledAndStops(report, colony, origin);
                     break;
@@ -1348,7 +1351,31 @@ namespace Kukolony.Debug
             old.Write(ZDOID.None);
             old.Write(string.Empty);
 
-            StructureSettings read = StructureSettings.Read(new ZPackage(old.GetArray()), 3);
+            // A second record after it, so under- or over-consumption shows up. Reading one
+            // blob asserts what the fields decode to and nothing at all about where the reader
+            // finished - and finishing in the wrong place is the failure that takes a whole
+            // settlement with it.
+            old.Write(1);
+            old.Write("Coal");
+            old.Write(false);
+            old.Write(true);
+            old.Write(0);
+            old.Write(0);
+            old.Write(0);
+            old.Write(0.25f);
+            old.Write(ZDOID.None);
+            old.Write(string.Empty);
+
+            ZPackage stream = new ZPackage(old.GetArray());
+            StructureSettings read = StructureSettings.Read(stream, 3);
+            StructureSettings second = StructureSettings.Read(stream, 3);
+
+            report.Check(second.Accepts.Count == 1 && second.Accepts[0] == "Coal" &&
+                         !second.MayTakeFrom && second.TakeUnclaimed &&
+                         Mathf.Approximately(second.KeepFull, 0.25f),
+                "and so does the record written after it, which is where a lost byte would show",
+                $"accepts={second.Accepts.Count} mayTake={second.MayTakeFrom} " +
+                $"unclaimed={second.TakeUnclaimed} keepFull={second.KeepFull:0.00}");
 
             bool kept = read.Accepts.Count == 1 && read.Accepts[0] == "Wood" && read.MayTakeFrom &&
                         !read.TakeUnclaimed && read.CapFor("Stone") == 40 &&

@@ -309,6 +309,18 @@ namespace Kukolony.Jobs
             }
 
             for (int i = 0; i < stations; i++) package.ReadString();
+
+            // Said rather than dropped in silence. These settings had real effects - a job set
+            // to clear only, or to two named kilns, becomes a job that supplies every station in
+            // its work area - and the stations they moved to start at their permissive defaults.
+            // A player who is told can go and set them; one who is not finds out by watching ore
+            // disappear into a furnace they had excluded.
+            if (job.Kind == JobKind.Tend)
+            {
+                Log.Warning($"[job] '{job.Name}' was set up before tending moved onto the stations. " +
+                            "Its station settings were dropped - open each station to set them again.");
+            }
+
             return job;
         }
 

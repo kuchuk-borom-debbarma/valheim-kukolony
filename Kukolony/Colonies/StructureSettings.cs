@@ -184,8 +184,15 @@ namespace Kukolony.Colonies
             WriteList(package, Accepts);
             package.Write(MayTakeFrom);
             package.Write(TakeUnclaimed);
-            package.Write(Caps.Count);
-            foreach (KeyValuePair<string, int> cap in Caps)
+            List<KeyValuePair<string, int>> caps = Caps;
+            if (caps.Count > MaxEntries)
+            {
+                Log.Warning($"[colony] a structure holds {caps.Count} caps - keeping the first {MaxEntries}.");
+                caps = caps.GetRange(0, MaxEntries);
+            }
+
+            package.Write(caps.Count);
+            foreach (KeyValuePair<string, int> cap in caps)
             {
                 package.Write(cap.Key ?? string.Empty);
                 package.Write(cap.Value);
@@ -203,8 +210,15 @@ namespace Kukolony.Colonies
             package.Write(Repairs);
             package.Write((int)Work);
             package.Write((int)Carries);
-            package.Write(Orders.Count);
-            foreach (StructureOrder order in Orders) WriteOrder(package, order);
+            List<StructureOrder> orders = Orders;
+            if (orders.Count > MaxEntries)
+            {
+                Log.Warning($"[colony] a structure holds {orders.Count} orders - keeping the first {MaxEntries}.");
+                orders = orders.GetRange(0, MaxEntries);
+            }
+
+            package.Write(orders.Count);
+            foreach (StructureOrder order in orders) WriteOrder(package, order);
         }
 
         /// <summary>
@@ -251,8 +265,20 @@ namespace Kukolony.Colonies
 
             settings.InService = package.ReadBool();
             settings.Repairs = package.ReadBool();
-            settings.Work = (StationWork)package.ReadInt();
-            settings.Carries = (StationCargo)package.ReadInt();
+
+            // Compared rather than cast, as the order's mode is. The version gate does not cover
+            // this: adding a value to either enum changes no layout, so a later build can write
+            // one while still calling itself version 4 - and casting an unknown number into an
+            // enum produces a value no branch handles and none rejects.
+            int work = package.ReadInt();
+            settings.Work = work == (int)StationWork.Supply ? StationWork.Supply
+                : work == (int)StationWork.Collect ? StationWork.Collect
+                : StationWork.Both;
+
+            int carries = package.ReadInt();
+            settings.Carries = carries == (int)StationCargo.Fuel ? StationCargo.Fuel
+                : carries == (int)StationCargo.Material ? StationCargo.Material
+                : StationCargo.Both;
 
             // Thrown for the same reason the cap count is: every record after this one is read
             // from the same stream, so a count this wrong has already lost the position.
@@ -299,9 +325,25 @@ namespace Kukolony.Colonies
         /// <summary>Guards against a malformed record claiming an absurd list length.</summary>
         private const int MaxEntries = 256;
 
+        /// <summary>
+        ///     Writes a list, refusing to produce one this file's reader would reject.
+        /// </summary>
+        /// <remarks>
+        ///     Clamped on write as well as on read, which is the rule <see cref="Jobs.JobDefinition" />
+        ///     states and follows: a writer willing to produce a count its own reader refuses does
+        ///     not merely lose that list, it loses the stream's position and every field after it.
+        ///     The item picker is an unbounded multi-select over the whole catalogue, so this is
+        ///     reachable by clicking.
+        /// </remarks>
         private static void WriteList(ZPackage package, List<string> values)
         {
             List<string> list = values ?? new List<string>();
+            if (list.Count > MaxEntries)
+            {
+                Log.Warning($"[colony] a structure lists {list.Count} items - keeping the first {MaxEntries}.");
+                list = list.GetRange(0, MaxEntries);
+            }
+
             package.Write(list.Count);
             foreach (string value in list) package.Write(value ?? string.Empty);
         }
@@ -309,11 +351,15 @@ namespace Kukolony.Colonies
         private static List<string> ReadList(ZPackage package)
         {
             List<string> values = new List<string>();
+
             int count = package.ReadInt();
             if (count < 0 || count > MaxEntries)
             {
-                Log.Warning($"[colony] structure settings claim {count} entries - ignoring them.");
-                return values;
+                // Thrown rather than shrugged off, as the caps and the orders are. Returning an
+                // empty list without consuming the entries leaves the position wrong for every
+                // remaining field of this record and every record after it - so the settlement
+                // would not lose one list, it would decode into nonsense from here on.
+                throw new System.IO.InvalidDataException($"structure settings claim {count} entries");
             }
 
             for (int i = 0; i < count; i++) values.Add(package.ReadString());
