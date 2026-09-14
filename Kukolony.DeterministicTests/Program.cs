@@ -6,6 +6,7 @@ using Kukolony.Villagers;
 using Kukolony.Jobs.Haul;
 using Kukolony.Jobs.Chop;
 using Kukolony.Jobs.Tend;
+using Kukolony.Jobs.Craft;
 
 /// <summary>
 ///     Verification for logic that needs no game running.
@@ -66,6 +67,8 @@ static class Program
         Chopping();
         Appetite();
         OrderArithmetic();
+        CraftingPlan();
+        Crafting();
         Tending();
 
         Console.WriteLine(_failed == 0
@@ -819,6 +822,213 @@ static class Program
 
         Case("nothing is outstanding when everything is satisfied",
             Orders.Outstanding(mixed, hundred).Count == 0);
+    }
+
+
+    /// <summary>
+    ///     How much a villager should make, and whether it can.
+    /// </summary>
+    static void CraftingPlan()
+    {
+        Console.WriteLine("craft plan");
+
+        List<CraftNeed> nail = new List<CraftNeed> { new CraftNeed("Iron", 1) };
+        Func<string, int> plenty = _ => 1000;
+        Func<string, int> none = _ => 0;
+
+        Case("nothing wanted is nothing made",
+            CraftPlan.HowMany(0, 1, nail, plenty, 100) == 0);
+
+        Case("control: something wanted is something made",
+            CraftPlan.HowMany(5, 1, nail, plenty, 100) == 5);
+
+        // Rounded up. A recipe yielding two against a target of five makes six, because the
+        // settlement asked to have five and stopping at four is not having five.
+        Case("a recipe yielding two runs three times for a target of five, not two",
+            CraftPlan.HowMany(5, 2, nail, plenty, 100) == 3);
+
+        Case("the scarcest material decides",
+            CraftPlan.HowMany(100, 1, new List<CraftNeed>
+            {
+                new CraftNeed("Iron", 2),
+                new CraftNeed("Wood", 1)
+            }, item => item == "Iron" ? 10 : 1000, 1000) == 5);
+
+        Case("no materials is nothing made", CraftPlan.HowMany(10, 1, nail, none, 100) == 0);
+
+        // Rounded down, and the opposite way from the target: a craft whose product will not
+        // fit in the bag is a craft that lands on the floor.
+        Case("room in the bag caps it, rounded down",
+            CraftPlan.HowMany(10, 4, nail, plenty, 9) == 2);
+
+        Case("no room is nothing made", CraftPlan.HowMany(10, 1, nail, plenty, 0) == 0);
+
+        Case("a recipe that yields nothing makes nothing",
+            CraftPlan.HowMany(10, 0, nail, plenty, 100) == 0);
+
+        Case("a recipe needing nothing is limited only by the order",
+            CraftPlan.HowMany(7, 1, new List<CraftNeed>(), plenty, 100) == 7);
+
+        // Enough and Missing answer the two questions a villager asks either side of a walk.
+        Case("everything to hand is enough", CraftPlan.Enough(nail, plenty));
+        Case("nothing to hand is not", !CraftPlan.Enough(nail, none));
+
+        Case("short of one of two is not enough",
+            !CraftPlan.Enough(new List<CraftNeed>
+            {
+                new CraftNeed("Iron", 2),
+                new CraftNeed("Wood", 1)
+            }, item => item == "Iron" ? 1 : 100));
+
+        Case("the thing it is short of is the thing it names",
+            CraftPlan.Missing(new List<CraftNeed>
+            {
+                new CraftNeed("Wood", 1),
+                new CraftNeed("Iron", 2)
+            }, item => item == "Iron" ? 1 : 100) == "Iron");
+
+        Case("and it names nothing when it is short of nothing",
+            CraftPlan.Missing(nail, plenty) == string.Empty);
+    }
+
+    static CraftFacts Craft(bool hasStation = false, bool hasSupply = false, bool atSupply = false,
+        bool atStation = false, bool hasMaterials = false, bool stationUsable = true,
+        bool wantsMade = true, bool bagRoom = true, bool tired = false) =>
+        new CraftFacts(hasStation, hasSupply, atSupply, atStation, hasMaterials, stationUsable,
+            wantsMade, bagRoom, tired);
+
+    static void Step(string what, CraftState state, CraftFacts facts, CraftAction expected)
+    {
+        CraftAction actual = CraftTransitions.Next(state, facts).Action;
+        Case($"{what} (got {actual})", actual == expected);
+    }
+
+    /// <summary>
+    ///     The crafting state machine, exhaustively.
+    /// </summary>
+    static void Crafting()
+    {
+        Console.WriteLine("crafting");
+
+        Step("with nothing chosen it looks for work", CraftState.Choosing, Craft(), CraftAction.ChooseWork);
+
+        Step("with a station wanting something and a chest to fetch from, it sets off",
+            CraftState.Choosing, Craft(hasStation: true, hasSupply: true), CraftAction.MoveToSupply);
+
+        Step("at the chest it takes what the recipe needs",
+            CraftState.Fetching, Craft(hasStation: true, hasSupply: true, atSupply: true),
+            CraftAction.Collect);
+
+        Step("holding the materials it carries them to the station",
+            CraftState.Collecting, Craft(hasStation: true, hasMaterials: true),
+            CraftAction.MoveToStation);
+
+        Step("at the station it makes one",
+            CraftState.Delivering, Craft(hasStation: true, hasMaterials: true, atStation: true),
+            CraftAction.Craft);
+
+        Step("and goes on making while it still has materials",
+            CraftState.Working, Craft(hasStation: true, hasMaterials: true, atStation: true),
+            CraftAction.Craft);
+
+        Step("materials spent, the trip is over",
+            CraftState.Working, Craft(hasStation: true, atStation: true), CraftAction.Complete);
+
+        // The three ways a station stops being worth walking to, each of which must send the
+        // villager back to choosing rather than on to a forge that cannot help it.
+        Step("a station that lost its fire is abandoned mid-walk",
+            CraftState.Delivering, Craft(hasStation: true, hasMaterials: true, stationUsable: false),
+            CraftAction.ChooseWork);
+
+        Step("an order filled by somebody else is abandoned mid-walk",
+            CraftState.Delivering, Craft(hasStation: true, hasMaterials: true, wantsMade: false),
+            CraftAction.ChooseWork);
+
+        Step("a station that is gone is abandoned mid-walk",
+            CraftState.Delivering, Craft(hasMaterials: true), CraftAction.ChooseWork);
+
+        // A full bag stops the job where it stands. The product waits with its maker until a
+        // hauler comes, which is the arrangement - so this is a yield and not a delivery.
+        Step("a full bag stops the job rather than diverting it",
+            CraftState.Choosing, Craft(hasStation: true, hasSupply: true, bagRoom: false),
+            CraftAction.Yield);
+
+        Step("and stops it between crafts, because the last one can be the one that fills it",
+            CraftState.Working, Craft(hasStation: true, hasMaterials: true, atStation: true, bagRoom: false),
+            CraftAction.Complete);
+
+        Step("being tired is not a failure", CraftState.Choosing,
+            Craft(hasStation: true, hasSupply: true, tired: true), CraftAction.Yield);
+
+        // Already holding what it needs - a reload mid-trip. Going back for more would fetch a
+        // second set of materials nothing asked for.
+        Step("a villager that reloads holding materials carries on to the station",
+            CraftState.Choosing, Craft(hasStation: true, hasMaterials: true, hasSupply: true),
+            CraftAction.MoveToStation);
+
+        // Reached with the state recorded but standing nowhere near the chest.
+        Step("it will not take from a chest it is not at",
+            CraftState.Collecting, Craft(hasStation: true, hasSupply: true), CraftAction.MoveToSupply);
+
+        Step("an unknown state starts over", (CraftState)99, Craft(), CraftAction.ChooseWork);
+
+        // Every combination, against the things that must never happen.
+        int madeWithNothing = 0, madeUnwanted = 0, madeFromAfar = 0, madeUnusable = 0;
+        int madeWithNoRoom = 0, tookFromNowhere = 0, idle = 0;
+
+        CraftState[] states =
+        {
+            CraftState.Choosing, CraftState.Fetching, CraftState.Collecting,
+            CraftState.Delivering, CraftState.Working
+        };
+
+        for (int bits = 0; bits < 512; bits++)
+        {
+            CraftFacts facts = new CraftFacts(
+                hasStation: (bits & 1) != 0,
+                hasSupply: (bits & 2) != 0,
+                atSupply: (bits & 4) != 0,
+                atStation: (bits & 8) != 0,
+                hasMaterials: (bits & 16) != 0,
+                stationUsable: (bits & 32) != 0,
+                wantsMade: (bits & 64) != 0,
+                bagRoom: (bits & 128) != 0,
+                tired: (bits & 256) != 0);
+
+            foreach (CraftState from in states)
+            {
+                CraftStep step = CraftTransitions.Next(from, facts);
+
+                if (step.Action == CraftAction.Craft)
+                {
+                    if (!facts.HasMaterials) madeWithNothing++;
+                    if (!facts.WantsMade) madeUnwanted++;
+                    if (!facts.AtStation) madeFromAfar++;
+                    if (!facts.StationUsable) madeUnusable++;
+                    if (!facts.BagRoom) madeWithNoRoom++;
+                }
+
+                if (step.Action == CraftAction.Collect && !(facts.HasSupply && facts.AtSupply))
+                {
+                    tookFromNowhere++;
+                }
+            }
+
+            // Every combination produces an action. A state machine that can fall through
+            // returns whatever the default was and the villager stands still for ever.
+            foreach (CraftState from in states)
+            {
+                if (!Enum.IsDefined(typeof(CraftAction), CraftTransitions.Next(from, facts).Action)) idle++;
+            }
+        }
+
+        Case($"no combination ever crafts empty-handed (did {madeWithNothing})", madeWithNothing == 0);
+        Case($"no combination ever crafts what nothing wants (did {madeUnwanted})", madeUnwanted == 0);
+        Case($"no combination ever crafts away from the station (did {madeFromAfar})", madeFromAfar == 0);
+        Case($"no combination ever crafts at an unusable station (did {madeUnusable})", madeUnusable == 0);
+        Case($"no combination ever crafts with nowhere to put it (did {madeWithNoRoom})", madeWithNoRoom == 0);
+        Case($"no combination ever takes from a chest it is not at (did {tookFromNowhere})", tookFromNowhere == 0);
+        Case($"every combination produces an action (undefined in {idle})", idle == 0);
     }
 
     static void Appetite()

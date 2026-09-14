@@ -818,6 +818,19 @@ namespace Kukolony.Villagers
                         DeltaTime = deltaTime
                     }, out doing);
 
+                case Jobs.JobKind.Craft:
+                    return Jobs.Craft.CraftJob.Tick(new Jobs.Craft.CraftContext
+                    {
+                        Villager = this,
+                        Colony = colony,
+                        Bag = _bag,
+                        Walk = _walk,
+                        Animation = _animation,
+                        Job = job,
+                        State = state,
+                        DeltaTime = deltaTime
+                    }, out doing);
+
                 default:
                     // Work with no engine is work somebody has not finished adding. Failing
                     // loudly beats a villager standing still for a reason nothing reports.

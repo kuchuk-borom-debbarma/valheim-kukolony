@@ -13,6 +13,8 @@
     <Compile Include="../Kukolony/Jobs/Haul/HaulTransitions.cs" Link="HaulTransitions.cs" />
     <Compile Include="../Kukolony/Jobs/Chop/ChopTransitions.cs" Link="ChopTransitions.cs" />
     <Compile Include="../Kukolony/Jobs/Tend/TendTransitions.cs" Link="TendTransitions.cs" />
+    <Compile Include="../Kukolony/Jobs/Craft/CraftTransitions.cs" Link="CraftTransitions.cs" />
+    <Compile Include="../Kukolony/Jobs/Craft/CraftPlan.cs" Link="CraftPlan.cs" />
     <Compile Include="../Kukolony/Jobs/Placement.cs" Link="Placement.cs" />
     <Compile Include="../Kukolony/Jobs/Stacking.cs" Link="Stacking.cs" />
     <Compile Include="../Kukolony/Villagers/Navigation/Reckoning.cs" Link="Reckoning.cs" />

@@ -108,6 +108,7 @@ namespace Kukolony.Villagers
             // dead villager plus an entry per target each of them ever gave up on.
             Jobs.Chop.ChopJob.Forget(villager);
             Jobs.Tend.TendJob.Forget(villager);
+            Jobs.Craft.CraftJob.Forget(villager);
             Jobs.Unreachable.Forget(villager);
 
             Log.Info($"Villager removed from colony '{colony.State.Name}'");

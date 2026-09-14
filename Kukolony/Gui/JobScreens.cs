@@ -72,27 +72,57 @@ namespace Kukolony.Gui
 
             if (!column.TryRow(out Row adding)) return;
 
-            // One button per kind, because the kind cannot be changed afterwards - a job's
+            // A picker rather than a button per kind. The row held three - 190 for the caption
+            // and 170 each against a content width of 800 - and said in its own comment that a
+            // fourth would not fit, with the symptom being a silently half-width button rather
+            // than an error. A fourth kind arrived, so this is that day.
+            //
+            // The kind is still chosen when the job is created and never afterwards: a job's
             // settings only mean anything for the work it does, and letting a configured haul
-            // job become a chop job would silently reinterpret every one of them. Naming them
-            // here is also the only way a new kind becomes reachable at all: a single "New
-            // job" button that hardcoded Haul is exactly how the previous kind stayed
-            // unreachable after being added to the enum.
-            // Three fit: 190 for the caption and 170 each, against a content width of 800. A
-            // fourth kind will not, and the symptom would be a silently half-width button
-            // rather than an error - so the row has to be split when that day comes.
-            Widgets.Caption(adding, "Add a job", 190f);
-            Add(host, adding, JobKind.Haul);
-            Add(host, adding, JobKind.Chop);
-            Add(host, adding, JobKind.Tend);
+            // job become a chop job would silently reinterpret every one of them. And the list
+            // is built from the enum, which is what stops a newly added kind being unreachable
+            // - the way Tend was, behind a "New job" button that hardcoded Haul.
+            Widgets.Choice(adding, "Add a job", "Choose a kind...",
+                () => host.Push(new PickerScreen("What kind of job", Kinds, null, false,
+                    chosen =>
+                    {
+                        if (chosen.Count > 0 && int.TryParse(chosen[0], out int kind)) Add(host, (JobKind)kind);
+                        host.Pop();
+                    })), 260f);
         }
 
-        private static void Add(ColonyScreen host, Row row, JobKind kind)
+        /// <summary>Every kind of job there is, read off the enum rather than listed.</summary>
+        private static List<PickerScreen.Option> Kinds(string filter)
+        {
+            List<PickerScreen.Option> options = new List<PickerScreen.Option>();
+
+            foreach (JobKind kind in System.Enum.GetValues(typeof(JobKind)))
+            {
+                string label = JobDefinition.Describe(kind);
+
+                // An unnamed kind is one somebody added to the enum and did not give a name to.
+                // Skipped rather than shown as a blank row - and Describe has no default branch
+                // for the same reason, because a fallback that returned a plausible name once
+                // made a new kind appear on screen as an existing one.
+                if (string.IsNullOrEmpty(label)) continue;
+
+                if (filter.Length > 0 &&
+                    label.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                options.Add(new PickerScreen.Option(((int)kind).ToString(), label));
+            }
+
+            return options;
+        }
+
+        private static void Add(ColonyScreen host, JobKind kind)
         {
             string label = JobDefinition.Describe(kind);
             if (string.IsNullOrEmpty(label)) return;
 
-            Widgets.Button(row, label, 170f, () =>
             {
                 Colony colony = host.Colony;
                 if (colony == null) return;
@@ -110,7 +140,7 @@ namespace Kukolony.Gui
                 colony.State.SetJobs(next);
                 Report.Say($"Added '{fresh.Name}'.");
                 host.Refresh();
-            });
+            }
         }
 
         /// <summary>
@@ -303,6 +333,7 @@ namespace Kukolony.Gui
             if (job.Kind == JobKind.Haul) BuildHaul(host, column, job);
             if (job.Kind == JobKind.Chop) BuildChop(host, column, job);
             if (job.Kind == JobKind.Tend) BuildTend(host, column, colony, job);
+            if (job.Kind == JobKind.Craft) BuildCraft(host, column, colony, job);
 
             // Where it works. The Kolony itself and its work-area flags, and nothing else:
             // any registered thing can still serve as a centre, but offering every chest and
@@ -441,6 +472,25 @@ namespace Kukolony.Gui
         ///         a protocol is added rather than when a prefab is.
         ///     </para>
         /// </remarks>
+        /// <summary>
+        ///     A crafting job's own settings, of which there are none.
+        /// </summary>
+        /// <remarks>
+        ///     What to make, how many, and whether the order stands are all facts about a
+        ///     station, so they live on the station. What is left - a name, where it works, how
+        ///     many trips before the queue moves on - the rows above have already said. An empty
+        ///     panel would read as a screen that had not finished loading, so it says where the
+        ///     rest is instead.
+        /// </remarks>
+        private void BuildCraft(ColonyScreen host, Column column, Colony colony, JobDefinition job)
+        {
+            if (column.TryRow(out Row where))
+            {
+                Widgets.Label(where, "What gets made is set on each station: open one and give " +
+                                     "it an order.", Color.gray);
+            }
+        }
+
         private void BuildTend(ColonyScreen host, Column column, Colony colony, JobDefinition job)
         {
             // Almost nothing, and that is the change. Which stations, what to feed them, how

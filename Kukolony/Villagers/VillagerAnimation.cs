@@ -80,6 +80,18 @@ namespace Kukolony.Villagers
         /// </remarks>
         private const string WeaponStatef = "statef";
 
+        /// <summary>
+        ///     Which crafting animation to play, if any.
+        /// </summary>
+        /// <remarks>
+        ///     The game drives this exactly the same way for the player - Player.UpdateCrafting
+        ///     does <c>m_zanim.SetInt("crafting", m_currentStation.m_useAnimation)</c> while
+        ///     standing at a station and writes zero on leaving - so the number comes from the
+        ///     station rather than from anything chosen here, and a modded station's own
+        ///     animation works untouched.
+        /// </remarks>
+        private const string CraftState = "crafting";
+
         private static bool _describedRig;
 
         private readonly ZSyncAnimation _animation;
@@ -88,6 +100,7 @@ namespace Kukolony.Villagers
         private readonly string _sleep;
         private readonly bool _canHold;
         private readonly bool _canHoldFloat;
+        private readonly bool _canCraft;
 
         /// <summary>What the rig was last told it is holding, so a swing can reassert it.</summary>
         private int _holding;
@@ -144,6 +157,13 @@ namespace Kukolony.Villagers
 
             // Probed like everything else here. Without it the swing trigger has no state to
             // enter, which looks exactly like the trigger not firing.
+            _canCraft = _animation.HasParameter(CraftState, AnimatorControllerParameterType.Int);
+            if (!_canCraft)
+            {
+                Log.Info($"[villager] the rig has no '{CraftState}'; " +
+                         "it will craft without appearing to work at the station");
+            }
+
             _canHold = _animation.HasParameter(WeaponState, AnimatorControllerParameterType.Int);
             _canHoldFloat = _animation.HasParameter(WeaponStatef, AnimatorControllerParameterType.Float);
             if (!_canHold && !_canHoldFloat)
@@ -319,6 +339,15 @@ namespace Kukolony.Villagers
         {
             if (_animation == null || _sleep == null) return;
             _animation.SetBool(_sleep, value);
+        }
+
+        /// <summary>
+        ///     Works at a station, or stops. Zero is "not crafting", as it is for the player.
+        /// </summary>
+        internal void Crafting(int animation)
+        {
+            if (_animation == null || !_canCraft) return;
+            _animation.SetInt(CraftState, animation);
         }
 
         internal void SetFlag(string parameter, bool value)

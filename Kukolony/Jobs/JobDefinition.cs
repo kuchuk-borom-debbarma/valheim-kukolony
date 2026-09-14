@@ -14,7 +14,10 @@ namespace Kukolony.Jobs
         Chop = 1,
 
         /// <summary>Keep stations supplied, and take off what they have finished.</summary>
-        Tend = 2
+        Tend = 2,
+
+        /// <summary>Make what the settlement's stations have been told to make.</summary>
+        Craft = 3
     }
 
     /// <summary>
@@ -326,6 +329,7 @@ namespace Kukolony.Jobs
                 case JobKind.Haul: return "Haul";
                 case JobKind.Chop: return "Chop";
                 case JobKind.Tend: return "Tend";
+                case JobKind.Craft: return "Craft";
                 default: return string.Empty;
             }
         }

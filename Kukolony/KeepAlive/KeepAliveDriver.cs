@@ -129,6 +129,7 @@ namespace Kukolony.KeepAlive
             Resources.ChoppingGround.Clear();
             Jobs.Chop.ChopJob.Clear();
             Jobs.Tend.TendJob.Clear();
+            Jobs.Craft.CraftJob.Clear();
             Jobs.Unreachable.Clear();
             StopAllCoroutines();
         }
