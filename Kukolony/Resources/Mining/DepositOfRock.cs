@@ -113,6 +113,24 @@ namespace Kukolony.Resources.Mining
             return BlowResult.TooHard;
         }
 
+        internal override float Remaining()
+        {
+            float total = 0f;
+            for (int i = 0; i < _parts.Length; i++)
+            {
+                float health = Health(i);
+
+                // The untouched sentinel is not a number to add up. A part nobody has hit is
+                // whole, and the prefab's own figure is the closest honest stand-in for that -
+                // wrong on an NG+ world in absolute terms, but this is only ever compared with
+                // itself.
+                total += health == float.MaxValue ? (_rock != null ? _rock.m_health : 0f)
+                    : Mathf.Max(0f, health);
+            }
+
+            return total;
+        }
+
         /// <summary>
         ///     One part's health, from the ZDO.
         /// </summary>

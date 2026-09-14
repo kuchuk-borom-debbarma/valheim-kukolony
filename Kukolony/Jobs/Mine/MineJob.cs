@@ -581,13 +581,33 @@ namespace Kukolony.Jobs.Mine
         ///     was mined does not count towards the target - which is right, because a settlement
         ///     does not have what nobody has carried home.
         /// </remarks>
-        private static bool Enough(MineContext context)
+        private static bool Enough(MineContext context) => HasEnough(context.Colony, context.Job);
+
+        private static bool HasEnough(Colony colony, JobDefinition job)
         {
-            JobDefinition job = context.Job;
             if (job == null || job.StockTarget <= 0 || string.IsNullOrEmpty(job.StockItem)) return false;
 
-            return Stock.Held(context.Colony, job.StockItem) >= job.StockTarget;
+            return Stock.Held(colony, job.StockItem) >= job.StockTarget;
         }
+
+        /// <summary>
+        ///     The predicates a check may ask, rather than reimplement.
+        /// </summary>
+        /// <remarks>
+        ///     The same arrangement <c>ChopJob</c> exposes and for the reason it records: a check
+        ///     that writes out the rule again passes while the job quietly ignores the setting.
+        ///     Asked of a prefab hash rather than of an object, because mining's answer needs no
+        ///     instance - which is what lets a settings check assert things it never has to
+        ///     spawn.
+        /// </remarks>
+        internal static bool WouldTake(JobDefinition job, int prefabHash) => Wanted(job, prefabHash);
+
+        internal static bool WouldTake(JobDefinition job, ZDO zdo) =>
+            zdo != null && zdo.IsValid() && Wanted(job, zdo.GetPrefab());
+
+        internal static bool WouldBreak(int prefabHash, int toolTier) => Breakable(prefabHash, toolTier);
+
+        internal static bool WouldStop(Colony colony, JobDefinition job) => HasEnough(colony, job);
 
         private static string WhyNothing(ItemDrop.ItemData pick, bool enough)
         {

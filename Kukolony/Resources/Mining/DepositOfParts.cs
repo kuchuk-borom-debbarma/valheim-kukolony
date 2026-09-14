@@ -133,6 +133,8 @@ namespace Kukolony.Resources.Mining
             return BlowResult.TooHard;
         }
 
+        internal override float Remaining() => Total();
+
         /// <summary>
         ///     Every part's health added up, read from the ZDO rather than the instance.
         /// </summary>

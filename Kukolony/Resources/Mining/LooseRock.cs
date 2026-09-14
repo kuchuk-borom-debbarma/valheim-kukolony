@@ -84,6 +84,13 @@ namespace Kukolony.Resources.Mining
             return BlowResult.TooHard;
         }
 
+        internal override float Remaining()
+        {
+            float health = Health();
+            return health == float.MaxValue ? (_rock != null ? _rock.m_health : 0f)
+                : Mathf.Max(0f, health);
+        }
+
         /// <summary>
         ///     What is left of it, or the maximum when nothing has been written yet.
         /// </summary>

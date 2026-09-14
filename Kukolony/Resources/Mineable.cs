@@ -187,6 +187,29 @@ namespace Kukolony.Resources
             return string.Empty;
         }
 
+        /// <summary>
+        ///     A real prefab name for loose rock, or empty when this world has none.
+        /// </summary>
+        /// <remarks>
+        ///     So a check can assert what the boulder setting does without naming a prefab - and
+        ///     without spawning one, which is the point. What this returns may be a boulder, a
+        ///     crate or a piece of scenery: the game cannot tell them apart, which is the whole
+        ///     reason that setting is opt-in. A check may honestly assert that the setting is
+        ///     consulted; it cannot honestly photograph a villager smashing the result.
+        /// </remarks>
+        internal static string SampleBoulder()
+        {
+            if (!IsReady) Rebuild();
+
+            foreach (GameObject prefab in Prefabs)
+            {
+                if (prefab == null) continue;
+                if (Of(prefab.name.GetStableHashCode()) == MineKind.Boulder) return prefab.name;
+            }
+
+            return string.Empty;
+        }
+
         /// <summary>The tool tier a prefab demands, whichever component says so.</summary>
         internal static int TierOf(GameObject prefab)
         {

@@ -364,7 +364,7 @@ namespace Kukolony.Jobs
                 // list is re-read from the ZDO per villager per work tick.
                 if (job.Kind == JobKind.Tend)
                 {
-                    Chatter.Warn($"[job] tending moved: {job.Id}",
+                    Chatter.Warn(MigrationNotice(job.Id),
                         $"[job] '{job.Name}' was set up before tending moved onto the stations. " +
                         "Its station settings were dropped - open each station to set them again.");
                 }
@@ -395,6 +395,17 @@ namespace Kukolony.Jobs
         ///     convincing, wrong, and invisible to a check that counted job types rather than
         ///     asking whether each was named. Unnamed work returns empty and fails loudly.
         /// </remarks>
+        /// <summary>
+        ///     The key the tending-moved notice is said under, for one job.
+        /// </summary>
+        /// <remarks>
+        ///     Shared with whatever wants to know whether it was said, rather than written out
+        ///     twice. A check that hand-copies a key answers <c>false</c> for ever the day the
+        ///     key changes, which is indistinguishable from the thing never having been said -
+        ///     and this codebase has one of those already.
+        /// </remarks>
+        internal static string MigrationNotice(string id) => $"[job] tending moved: {id}";
+
         internal static string Describe(JobKind kind)
         {
             switch (kind)

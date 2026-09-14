@@ -167,3 +167,33 @@ places this side of it. That is now the fourth run placement has cost.
 - Terminal report without exit: wait for save grace, then terminate only that stale process.
 - Missing screenshot: inspect capture errors and `screenshots.manifest.json`.
 - Reload failure: compare create/reload logs and the persisted colony/ZDO fields.
+
+## Mining
+
+Seven checks, run from the `mine` slice and from the acceptance run through one shared list, so
+the two cannot drift apart. The order is the one a failure is most useful in: the classifier
+first, because everything below it passes by finding nothing to contradict if the index is empty.
+
+**The one that matters is `CheckMiningBreaksADeposit`**, and it matters because for a while it did
+not exist. Everything else strikes the rock through the protocol or asks a predicate directly,
+which meant `MineJob.Tick` had never been executed by anything in the suite — it could have failed
+on its first line and every check would still have passed.
+
+It stages three rocks and two of them are controls:
+
+| Rock | Why |
+|---|---|
+| The subject, 8 m off | What the villager should take. Disowned first, because that is the state every world-generated rock is in and damage routed to nobody is absorbed in silence |
+| Something harder, **nearer** | Catches a tier gate that stopped working: without one, nearest-wins takes it |
+| The same soft rock, outside the work area | Proves deposits do not come apart on their own *and* that the area bounds the job |
+
+And it runs past the life of a claim on purpose — *"its claim was refreshed while it worked"* is
+the assertion that needs it, and thirty seconds is how long one lives.
+
+**What is deliberately not checked in game.** The blunt-pickaxe tolerance: since the tier gate
+moved ahead of the walk, what reaches that path is damage modifiers reducing a blow to nothing,
+and no prefab announces that in advance — so there is no honest way to find a fixture for it, and
+staging one would mean faking the hit and testing the fake. It lives in the deterministic suite.
+Loose rock is asserted as a *setting*, never as behaviour: what the classifier calls a boulder may
+be a crate, so a behavioural check would either name a prefab or photograph a villager smashing a
+barrel and call it mining.

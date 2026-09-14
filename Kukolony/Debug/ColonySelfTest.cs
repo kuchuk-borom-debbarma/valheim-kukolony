@@ -6,6 +6,7 @@ using System.Reflection;
 using Kukolony.Colonies;
 using Kukolony.Jobs;
 using Kukolony.Jobs.Chop;
+using Kukolony.Jobs.Mine;
 using Kukolony.Gui;
 using Kukolony.KeepAlive;
 using Kukolony.Resources;
@@ -230,6 +231,7 @@ namespace Kukolony.Debug
             yield return CheckChopSettings(report, origin);
             yield return CheckChopStoppingRules(report, colony, origin);
             yield return CheckChoppingFellsATree(report, colony, origin);
+            yield return Mining(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
@@ -321,10 +323,7 @@ namespace Kukolony.Debug
 
                 case "mine":
                     CheckJobsSurviveAVersion(report);
-                    yield return CheckMiningIndex(report);
-                    yield return CheckRockIsKeptLoaded(report);
-                    yield return CheckThePickaxeIsPutAway(report, colony);
-                    yield return CheckAVeinIsMinedPartByPart(report, colony, origin);
+                    yield return Mining(report, colony, origin);
                     break;
 
                 case "queue":
@@ -1444,16 +1443,10 @@ namespace Kukolony.Debug
         {
             ZPackage stream = new ZPackage();
 
-            JobDefinition first = new JobDefinition
-            {
-                Id = "older", Name = "Older tend", Kind = JobKind.Tend, Repeat = 4
-            };
-            JobDefinition second = new JobDefinition
-            {
-                Id = "after", Name = "The one after it", Kind = JobKind.Chop, Repeat = 9,
-                LeaveStanding = 6, StockItem = "Wood", StockTarget = 80
-            };
-
+            // Written as bytes rather than as objects. The fields a JobDefinition would carry
+            // are not all written by WriteSix, so building one here would state numbers that
+            // nothing under test ever sees - the values asserted below are WriteSix's own.
+            //
             // A version-5 record is version *six's* layout plus the four retired fields.
             //
             // It used to be built from today's writer plus that tail, which was true exactly
@@ -1463,9 +1456,9 @@ namespace Kukolony.Debug
             // catches that, so it took the whole run with it, and every check after this one
             // silently never ran. A fixture built from the live writer is a fixture that
             // changes when the writer does.
-            WriteSix(stream, first.Id, first.Name, first.Kind, first.Repeat);
+            WriteSix(stream, "older", "Older tend", JobKind.Tend, 4);
             WriteRetired(stream);
-            WriteSix(stream, second.Id, second.Name, second.Kind, second.Repeat);
+            WriteSix(stream, "after", "The one after it", JobKind.Chop, 9);
             WriteRetired(stream);
 
             ZPackage reading = new ZPackage(stream.GetArray());
@@ -1473,7 +1466,7 @@ namespace Kukolony.Debug
             JobDefinition readSecond = JobDefinition.Read(reading, 5);
 
             report.Check(readFirst.Id == "older" && readFirst.Repeat == 4 &&
-                         readFirst.Kind == JobKind.Tend && readFirst.Ores.Count == 0,
+                         readFirst.Kind == JobKind.Tend,
                 "a job written before tending moved onto the stations still decodes",
                 $"id='{readFirst.Id}' repeat={readFirst.Repeat} kind={readFirst.Kind}");
 
@@ -1525,6 +1518,30 @@ namespace Kukolony.Debug
             ZPackage today = new ZPackage(now.GetArray());
             JobDefinition readMine = JobDefinition.Read(today, ColonyState.JobFormat);
             JobDefinition readBeside = JobDefinition.Read(today, ColonyState.JobFormat);
+
+            // The migration notice belongs to version 5 alone. It escaped that branch once
+            // already, when the mining fields were appended below it, and then fired for every
+            // job this build writes - per villager, per tick. Asserted in both directions,
+            // because a notice that never fires and one that always fires look identical from
+            // any single blob.
+            Core.Chatter.Forget(JobDefinition.MigrationNotice("old-tend"));
+
+            ZPackage saying = new ZPackage();
+            WriteSix(saying, "old-tend", "Older tend", JobKind.Tend, 1);
+            WriteRetired(saying);
+            JobDefinition.Read(new ZPackage(saying.GetArray()), 5);
+
+            report.Check(Core.Chatter.Said(JobDefinition.MigrationNotice("old-tend")),
+                "a version-5 tending job says its station settings were dropped");
+
+            Core.Chatter.Forget(JobDefinition.MigrationNotice("now"));
+
+            ZPackage quiet = new ZPackage();
+            new JobDefinition { Id = "now", Name = "Tend", Kind = JobKind.Tend, Repeat = 1 }.Write(quiet);
+            JobDefinition.Read(new ZPackage(quiet.GetArray()), ColonyState.JobFormat);
+
+            report.Check(!Core.Chatter.Said(JobDefinition.MigrationNotice("now")),
+                "control: a tending job written today says nothing of the sort");
 
             report.Check(readMine.Kind == JobKind.Mine && readMine.MineBoulders &&
                          readMine.Ores.Count == 2 && readMine.Ores[0] == "TinOre" &&
@@ -5605,7 +5622,10 @@ namespace Kukolony.Debug
         ///         suite armed was carrying one.
         ///     </para>
         /// </remarks>
-        private static ItemDrop.ItemData AnyPickaxe()
+        private static ItemDrop.ItemData AnyPickaxe() => FindPickaxe(0, 99);
+
+        /// <summary>A real pickaxe within a tier range, ready to be carried or worn.</summary>
+        private static ItemDrop.ItemData FindPickaxe(int lowestTier, int highestTier)
         {
             if (ObjectDB.instance?.m_items == null) return null;
 
@@ -5616,6 +5636,7 @@ namespace Kukolony.Debug
                 ItemDrop.ItemData.SharedData shared = drop.m_itemData?.m_shared;
                 if (shared == null || shared.m_damages.m_pickaxe <= 0f) continue;
                 if (shared.m_skillType != Skills.SkillType.Pickaxes) continue;
+                if (shared.m_toolTier < lowestTier || shared.m_toolTier > highestTier) continue;
 
                 ItemDrop.ItemData worn = drop.m_itemData.Clone();
                 worn.m_dropPrefab = prefab;
@@ -5635,6 +5656,447 @@ namespace Kukolony.Debug
         ///     where it came back empty would mean the job's picker offers nothing and the
         ///     failure would show up as "nothing to mine" with no explanation.
         /// </remarks>
+        /// <summary>
+        ///     What a mining job takes and what it leaves, asked of the job's own predicate.
+        /// </summary>
+        /// <remarks>
+        ///     Through <c>WouldTake</c> rather than by reimplementing the rule, for the reason
+        ///     chopping records: a check that writes the rule out again goes on passing while the
+        ///     job quietly ignores the setting. Nothing is spawned for the loose-rock half -
+        ///     what the classifier calls a boulder may be a crate or a barrel, and a fixture
+        ///     whose content misleads the reader costs more than it proves.
+        /// </remarks>
+        /// <summary>How long a villager is given to break some of a deposit.</summary>
+        private const float MineSeconds = 120f;
+
+        /// <summary>
+        ///     A villager chooses a deposit, walks to it, and takes it apart.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>The one check in which the mining job actually runs.</b> Everything else
+        ///         here strikes the rock through the protocol or asks a predicate directly, which
+        ///         means the engine - choosing, claiming, walking, the arrival latch, the blow
+        ///         cadence, the hand - was never executed by anything. <c>MineJob.Tick</c> could
+        ///         have failed on its first line and every other check would have passed.
+        ///     </para>
+        ///     <para>
+        ///         <b>Three rocks, and two of them are controls.</b> One the villager should
+        ///         take; one nearer but too hard for its pickaxe, which catches a tier gate that
+        ///         stopped working; one outside the work area, which proves both that deposits do
+        ///         not come apart on their own and that the area bounds the job.
+        ///     </para>
+        ///     <para>
+        ///         The subject is disowned before the villager is released, because that is the
+        ///         state every world-generated rock is in - and damage routed to nobody is
+        ///         absorbed silently, which is the failure chopping calls the worst in the job.
+        ///     </para>
+        /// </remarks>
+        /// <summary>
+        ///     Everything mining, in the order a failure is most useful in.
+        /// </summary>
+        /// <remarks>
+        ///     Shared by the slice and by the acceptance run rather than listed in both. The
+        ///     chop block is listed twice and has stayed in step by luck; the newer jobs were
+        ///     slice-only, which meant the command that gates a release asserted nothing about
+        ///     them at all.
+        ///
+        ///     Index first, because every check below it is meaningless if the classifier is
+        ///     empty - and an empty classifier makes them all pass by finding nothing to
+        ///     contradict.
+        /// </remarks>
+        private static IEnumerator Mining(TestReport report, Colony colony, Vector3 origin)
+        {
+            yield return CheckMiningIndex(report);
+            yield return CheckRockIsKeptLoaded(report);
+            yield return CheckThePickaxeIsPutAway(report, colony);
+            yield return CheckMineSettings(report);
+            yield return CheckMineStoppingRules(report, colony, origin);
+            yield return CheckAVeinIsMinedPartByPart(report, colony, origin);
+            yield return CheckMiningBreaksADeposit(report, colony, origin);
+        }
+
+        private static IEnumerator CheckMiningBreaksADeposit(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            Vector3 site = MiningSite(origin);
+            SweepDrops(site, 40f);
+            MineJob.Clear();
+            MiningGround.ResetForTest();
+            if (!Mineable.IsReady) Mineable.Rebuild();
+
+            string soft = Mineable.SampleDeposit(0, 0);
+            if (string.IsNullOrEmpty(soft)) soft = Mineable.SampleDeposit(0, 99);
+
+            if (string.IsNullOrEmpty(soft))
+            {
+                report.Check(false, "control: the mining check could name a deposit to break");
+                yield break;
+            }
+
+            GameObject flag = Spawn(WorkFlagPrefab.PrefabName, site);
+            yield return new WaitForSecondsRealtime(.3f);
+
+            WorkFlag planted = flag != null ? flag.GetComponent<WorkFlag>() : null;
+            if (planted == null || ColonyOperations.AssignFlag(colony.Id, planted) != RegisterOutcome.Registered)
+            {
+                report.Check(false, "control: the mining check could plant and claim a flag");
+                Release(flag);
+                yield break;
+            }
+
+            StructureRecord flagRecord = colony.State.GetStructures().Find(r => r.Id == planted.Id);
+
+            GameObject subject = Spawn(soft, site + new Vector3(8f, 0f, 0f));
+            GameObject outside = Spawn(soft, site + new Vector3(26f, 0f, 0f));
+
+            // Nearer than the subject on purpose: without a tier gate, nearest-wins takes it.
+            string hard = Mineable.SampleDeposit(2, 99);
+            GameObject tough = string.IsNullOrEmpty(hard)
+                ? null
+                : Spawn(hard, site + new Vector3(4f, 0f, 4f));
+
+            yield return new WaitForSecondsRealtime(.5f);
+
+            if (subject == null || outside == null ||
+                !MineProbe.TryFind(subject, out MineProtocol rock) ||
+                !MineProbe.TryFind(outside, out MineProtocol spare))
+            {
+                report.Check(false, "control: the mining check could place its deposits",
+                    $"deposit={soft} subject={(subject != null)} outside={(outside != null)}");
+                Cleanup(colony, planted, null, flag, null);
+                Release(subject);
+                Release(outside);
+                Release(tough);
+                yield break;
+            }
+
+            List<MineArea> parts = new List<MineArea>();
+            rock.Areas(parts);
+            int whole = parts.Count;
+
+            List<MineArea> untouched = new List<MineArea>();
+            spare.Areas(untouched);
+            int away = untouched.Count;
+
+            report.Check(whole > 0, "control: there is a deposit with parts to work",
+                $"deposit={soft} parts={whole} protocol={rock.GetType().Name}");
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition
+                {
+                    Id = "mine", Name = "Mine", Kind = JobKind.Mine, Repeat = 30,
+                    Areas = new List<string> { flagRecord?.PersistentId ?? string.Empty },
+                    WorkRadius = 14f
+                }
+            });
+
+            Villager miner = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (miner == null || !miner.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "control: the mining check could spawn a villager");
+                Cleanup(colony, planted, null, flag, null);
+                Release(subject);
+                Release(outside);
+                Release(tough);
+                colony.State.SetJobs(new List<JobDefinition>());
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+
+            Container bag = VillagerInventory.Attach(miner.gameObject, view);
+
+            // Tier zero only. That is what makes the nearer deposit unbreakable, and so what
+            // makes the tier assertion below mean anything.
+            bool armed = GivePickaxe(bag, view, 0, 0);
+            report.Check(armed, "control: the villager has a plain pickaxe, without which this does nothing");
+
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "mine" });
+            miner.transform.position = site + new Vector3(2f, 0f, 2f);
+
+            // Unowned, as every rock the world generated is.
+            if (subject.TryGetComponent(out ZNetView subjectView) && subjectView.IsValid())
+            {
+                subjectView.GetZDO().SetOwner(0L);
+            }
+
+            MiningGround.ResetForTest();
+
+            ZDOID toughId = tough != null && tough.TryGetComponent(out ZNetView toughView) && toughView.IsValid()
+                ? toughView.GetZDO().m_uid
+                : ZDOID.None;
+
+            bool everHeldTheHardOne = false;
+            bool everHeldTheSubject = false;
+            bool everHeldThePickaxe = false;
+            bool photographed = false;
+            double claimAtFirst = 0d;
+            double claimAtLast = 0d;
+            float workedFor = 0f;
+            int left = whole;
+            float elapsed = 0f;
+
+            // Long enough to outlive a claim, because "the claim is refreshed while mining" is
+            // the assertion that needs it and thirty seconds is the life of one.
+            float atLeast = ModConfig.ClaimTtlSeconds != null ? ModConfig.ClaimTtlSeconds.Value + 8f : 38f;
+
+            while (elapsed < MineSeconds && (left > 0 || elapsed < atLeast))
+            {
+                yield return new WaitForSecondsRealtime(.2f);
+                elapsed += .2f;
+
+                if (miner == null || !view.IsValid()) break;
+
+                VillagerState state = new VillagerState(view.GetZDO());
+                if (!toughId.IsNone() && state.Target == toughId) everHeldTheHardOne = true;
+
+                if (subjectView != null && subjectView.IsValid() && state.Target == subjectView.GetZDO().m_uid)
+                {
+                    everHeldTheSubject = true;
+
+                    if (claimAtFirst <= 0d) claimAtFirst = state.ClaimedSince;
+                    claimAtLast = state.ClaimedSince;
+                    workedFor = elapsed;
+                }
+
+                if (VillagerWardrobe.Worn(view.GetZDO(), WearSlot.RightHand) != 0) everHeldThePickaxe = true;
+
+                parts.Clear();
+                if (subject != null && MineProbe.TryFind(subject, out MineProtocol live)) live.Areas(parts);
+                left = parts.Count;
+
+                if (left < whole && !photographed)
+                {
+                    photographed = true;
+                    yield return BenchmarkUiScenario.PhotographAtWork("mine-at-work.png",
+                        miner.transform.position, "a villager mining, with the deposit part-broken",
+                        subject.transform.position);
+                }
+            }
+
+            report.Check(everHeldTheSubject,
+                "a villager chose a deposit itself - nothing here pointed it at one",
+                $"held={everHeldTheSubject} after {elapsed:0}s energy={new VillagerState(view.GetZDO()).StoredEnergy:0}");
+
+            report.Check(left < whole,
+                "and the deposit came apart under it, with this check striking no blow",
+                $"parts {whole} -> {left} in {elapsed:0}s did='{(miner != null ? miner.Activity : "gone")}'");
+
+            untouched.Clear();
+            if (outside != null && MineProbe.TryFind(outside, out MineProtocol still)) still.Areas(untouched);
+
+            report.Check(untouched.Count == away,
+                "control: the deposit outside the work area still has every part",
+                $"outside {away} -> {untouched.Count}");
+
+            report.Check(everHeldThePickaxe,
+                "control: it had the pickaxe in its hand while it worked");
+
+            if (!toughId.IsNone())
+            {
+                report.Check(!everHeldTheHardOne,
+                    "a plain pickaxe never went for the rock it could not break, though it was nearer",
+                    $"hard={hard} tier={Mineable.TierOf(ZNetScene.instance.GetPrefab(hard))}");
+            }
+            else
+            {
+                report.Check(true, "tier check: this world has no rock a plain pickaxe cannot break");
+            }
+
+            report.Check(workedFor >= atLeast - 2f,
+                "control: it worked that deposit for longer than a claim lives",
+                $"worked={workedFor:0}s ttl={(ModConfig.ClaimTtlSeconds != null ? ModConfig.ClaimTtlSeconds.Value : 30f):0}s");
+
+            report.Check(claimAtLast > claimAtFirst,
+                "and its claim was refreshed while it worked, so nobody can take a half-mined vein",
+                $"claimed {claimAtFirst} -> {claimAtLast}");
+
+            VillagerLifecycle.Remove(colony, who);
+            Cleanup(colony, planted, null, flag, null);
+            Release(subject);
+            Release(outside);
+            Release(tough);
+            SweepDrops(site, 40f);
+            colony.State.SetJobs(new List<JobDefinition>());
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        private static IEnumerator CheckMineSettings(TestReport report)
+        {
+            if (!Mineable.IsReady) Mineable.Rebuild();
+
+            string deposit = Mineable.SampleDeposit(0, 99);
+            if (string.IsNullOrEmpty(deposit))
+            {
+                report.Check(false, "control: the settings check could name a deposit");
+                yield break;
+            }
+
+            int hash = deposit.GetStableHashCode();
+            List<string> drops = Mineable.Yields(hash);
+
+            JobDefinition any = new JobDefinition { Id = "any", Kind = JobKind.Mine };
+            report.Check(MineJob.WouldTake(any, hash),
+                "control: a mining job with no ore named takes any deposit",
+                $"deposit={deposit} drops={string.Join(",", drops.ToArray())}");
+
+            // Drawn from the world rather than invented: an ore this deposit does not drop.
+            List<string> ores = new List<string>();
+            Mineable.Ores(ores);
+
+            string elsewhere = ores.Find(ore => !drops.Contains(ore));
+            if (string.IsNullOrEmpty(elsewhere))
+            {
+                report.Check(true, "ore filter: this world has one ore, so the narrowing did not run",
+                    $"ores={ores.Count}");
+            }
+            else
+            {
+                JobDefinition other = new JobDefinition
+                    { Id = "other", Kind = JobKind.Mine, Ores = new List<string> { elsewhere } };
+
+                report.Check(!MineJob.WouldTake(other, hash),
+                    "a job told to mine one ore leaves a deposit that does not drop it",
+                    $"wanted={elsewhere} drops={string.Join(",", drops.ToArray())}");
+            }
+
+            if (drops.Count > 0)
+            {
+                JobDefinition mine = new JobDefinition
+                    { Id = "mine", Kind = JobKind.Mine, Ores = new List<string> { drops[0] } };
+
+                report.Check(MineJob.WouldTake(mine, hash),
+                    "control: and takes the deposit that does drop it", $"wanted={drops[0]}");
+            }
+
+            string boulder = Mineable.SampleBoulder();
+            if (string.IsNullOrEmpty(boulder))
+            {
+                report.Check(true, "loose rock: this world has none classified, so that did not run");
+            }
+            else
+            {
+                int loose = boulder.GetStableHashCode();
+
+                report.Check(!MineJob.WouldTake(any, loose),
+                    "a mining job leaves loose rock alone - it is opt-in", $"boulder={boulder}");
+
+                JobDefinition breaking = new JobDefinition
+                    { Id = "rock", Kind = JobKind.Mine, MineBoulders = true };
+
+                report.Check(MineJob.WouldTake(breaking, loose),
+                    "control: a job told to break loose rock takes it");
+
+                // The asymmetry nobody would think to write down: an ore list narrows deposits
+                // and says nothing about loose rock, which has a switch of its own.
+                JobDefinition both = new JobDefinition
+                {
+                    Id = "both", Kind = JobKind.Mine, MineBoulders = true,
+                    Ores = new List<string> { elsewhere ?? "nothing-drops-this" }
+                };
+
+                report.Check(MineJob.WouldTake(both, loose),
+                    "an ore list narrows deposits only, so it does not exclude loose rock",
+                    $"boulder={boulder}");
+            }
+
+            // The tier gate, asked where the job asks it: before anybody walks anywhere.
+            string hard = Mineable.SampleDeposit(2, 99);
+            if (string.IsNullOrEmpty(hard))
+            {
+                report.Check(true, "tier check: this world has no rock a plain pickaxe cannot break");
+            }
+            else
+            {
+                int tough = hard.GetStableHashCode();
+                int needs = Mineable.TierOf(ZNetScene.instance.GetPrefab(hard));
+
+                report.Check(!MineJob.WouldBreak(tough, 0),
+                    "a pickaxe too weak for a deposit is refused before anybody walks to it",
+                    $"deposit={hard} needs={needs} pick=0");
+
+                report.Check(MineJob.WouldBreak(tough, needs),
+                    "control: and the same deposit is taken with a pickaxe that can break it",
+                    $"needs={needs}");
+            }
+
+            yield break;
+        }
+
+        /// <summary>
+        ///     A mining job stops when the settlement has what it asked for.
+        /// </summary>
+        /// <remarks>
+        ///     The terminus matters more here than anywhere else: a forest grows back and a vein
+        ///     does not, so a rule that never fires strips a region permanently while every
+        ///     individual decision is correct.
+        /// </remarks>
+        private static IEnumerator CheckMineStoppingRules(TestReport report, Colony colony, Vector3 origin)
+        {
+            if (!Mineable.IsReady) Mineable.Rebuild();
+
+            List<string> ores = new List<string>();
+            Mineable.Ores(ores);
+
+            if (ores.Count == 0)
+            {
+                report.Check(false, "control: the stopping check could name an ore this world drops");
+                yield break;
+            }
+
+            string ore = ores[0];
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(-3f, 0f, 9f));
+            yield return new WaitForSecondsRealtime(.4f);
+
+            StructureRecord store = Register(colony, chest, "Ore store");
+            Container box = chest != null ? chest.GetComponentInChildren<Container>(true) : null;
+
+            if (store == null || box == null)
+            {
+                report.Check(false, "control: the stopping check could register a chest");
+                Release(chest);
+                yield break;
+            }
+
+            JobDefinition job = new JobDefinition
+                { Id = "pit", Kind = JobKind.Mine, StockItem = ore, StockTarget = 10 };
+
+            Stock.ResetForTest();
+            report.Check(!MineJob.WouldStop(colony, job),
+                "control: an empty settlement has not got enough of anything",
+                $"ore={ore} held={Stock.Held(colony, ore)}");
+
+            int put = PutIn(box, ore, 12);
+            Stock.ResetForTest();
+
+            report.Check(put > 0 && Stock.Held(colony, ore) >= 12,
+                "control: the settlement can say how much ore it is holding",
+                $"put={put} held={Stock.Held(colony, ore)}");
+
+            report.Check(MineJob.WouldStop(colony, job),
+                "at its target a mining job stops asking for more",
+                $"held={Stock.Held(colony, ore)} target=10");
+
+            job.StockTarget = 500;
+            report.Check(!MineJob.WouldStop(colony, job),
+                "control: below it the same job carries on", $"target=500");
+
+            job.StockTarget = 0;
+            report.Check(!MineJob.WouldStop(colony, job),
+                "control: a target of zero means never stop");
+
+            colony.RemoveStructure(store.Id);
+            Release(chest);
+            Stock.ResetForTest();
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
         private static IEnumerator CheckMiningIndex(TestReport report)
         {
             if (!Mineable.IsReady) Mineable.Rebuild();
@@ -5722,6 +6184,11 @@ namespace Kukolony.Debug
             // `left < whole`, which passes just as well for a protocol that removes every part
             // at once - and that is the failure worth catching, because it is what aiming at
             // the wrong thing looks like.
+            //
+            // Not asserted as *exactly* one, though. A deposit kills its own unsupported parts
+            // when their footing goes, several at a time, so a blow at the base legitimately
+            // drops more than it struck - and a check that demanded one would fail on the
+            // game working correctly.
             HitData single = new HitData { m_toolTier = 100, m_point = parts[0].At };
             single.m_damage.m_pickaxe = 5000f;
 
@@ -5736,16 +6203,18 @@ namespace Kukolony.Debug
                 "control: a blow with an overwhelming pickaxe lands",
                 $"blow={first} said='{said}'");
 
-            report.Check(afterOne == whole - 1,
-                "and it takes exactly one part off, not the whole deposit",
+            report.Check(afterOne < whole && afterOne > 0,
+                "and it takes the deposit apart rather than all at once",
                 $"parts {whole} -> {afterOne}");
 
-            // Deliberately short of finishing it. The persistence assertions below used to sit
-            // behind `if (left > 0)` while the loop above mined the rock to nothing, so on any
-            // deposit small enough to exhaust they were skipped in silence and the run still
-            // said PASS - the headline claim of this check, never once asserted.
-            int blows = Mathf.Min(3, Mathf.Max(0, afterOne - 1));
-            for (int blow = 0; blow < blows; blow++)
+            // What the record says, which is the claim this check exists for. Read before the
+            // rest of the blows so the comparison afterwards means something.
+            float recorded = rock.Remaining();
+
+            // Deliberately short of finishing it. These assertions used to sit behind an
+            // `if (left > 0)` while the loop above mined the rock to nothing, so on any deposit
+            // small enough to exhaust they were skipped in silence.
+            for (int blow = 0; blow < 3; blow++)
             {
                 parts.Clear();
                 rock.Areas(parts);
@@ -5766,25 +6235,26 @@ namespace Kukolony.Debug
                 "control: the deposit is left part-mined, which is what the next claim is about",
                 $"parts {whole} -> {left}");
 
-            // The half that only matters for mining: health is per part and lives on the record,
-            // so what is left of a deposit is not held in memory. Asserted unconditionally now.
-            ZDOID id = view.GetZDO().m_uid;
+            // The half that only matters for mining: what is left lives on the record rather
+            // than in memory, so a deposit half-mined is half-mined to anything that reads it.
+            //
+            // Asked through the protocol, which reads the record in whichever shape its
+            // component uses - a base64 package, a float per part, or a single float. The
+            // previous version of this compared two live protocols over the same object, which
+            // both answered from the same collider hierarchy and so could only ever agree.
+            float now = rock.Remaining();
 
-            report.Check(!id.IsNone() && ZDOMan.instance.GetZDO(id) != null,
-                "a part-mined deposit's record is there to be read");
+            report.Check(now < recorded && now > 0f,
+                "a part-mined deposit records what is left of it, and it is not nothing",
+                $"recorded {recorded:0} -> {now:0}");
 
-            // Asked through the protocol rather than through one component's storage shape.
-            // Reading ZDOVars.s_health directly only works for a MineRock5 - the older deposit
-            // writes a float per part under its own key and loose rock writes a single float -
-            // so which shape this fixture happened to be decided whether the check meant
-            // anything, and nothing controlled that.
-            MineProbe.TryFind(deposit, out MineProtocol reread);
-            List<MineArea> again = new List<MineArea>();
-            reread?.Areas(again);
-
-            report.Check(reread != null && !reread.Spent() && again.Count == left,
-                "and reading it back says exactly what is still standing",
-                $"reread={again.Count} expected={left}");
+            // And the record outlives the reading. Guarded, because the deposit may have been
+            // destroyed by the blows above - reading a destroyed object's ZDO is how a check
+            // takes the whole run down with it.
+            bool standing = view != null && view.IsValid();
+            report.Check(standing && ZDOMan.instance.GetZDO(view.GetZDO().m_uid) != null,
+                "control: and the deposit is still there to be read",
+                $"standing={standing}");
 
             Release(deposit);
             SweepLooseItems(colony);
@@ -6971,6 +7441,47 @@ namespace Kukolony.Debug
         ///     this repo has already destroyed a benchmark chest, and it surfaced two phases
         ///     later as a persistence failure rather than as a falling tree.
         /// </remarks>
+        /// <summary>
+        ///     Where mining fixtures go: beside ground three other checks already use, on an
+        ///     offset none of them does.
+        /// </summary>
+        private static Vector3 MiningSite(Vector3 origin)
+        {
+            Vector3 site = ChoppingSite(origin) + new Vector3(-40f, 0f, 0f);
+            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(site, out float ground))
+            {
+                site.y = ground;
+            }
+
+            return site;
+        }
+
+        /// <summary>Clears loose items from a patch, so a count of what fell means this run's.</summary>
+        private static void SweepDrops(Vector3 site, float radius)
+        {
+            foreach (ItemDrop drop in new List<ItemDrop>(ItemDrop.s_instances))
+            {
+                if (drop != null && Vector3.Distance(drop.transform.position, site) <= radius)
+                    Release(drop.gameObject);
+            }
+        }
+
+        /// <summary>Puts a pickaxe of a given tier range into a villager's bag.</summary>
+        /// <remarks>
+        ///     Cloned with its prefab attached, as <see cref="GiveAxe" /> is: item data taken
+        ///     straight off a prefab has no <c>m_dropPrefab</c>, and everything that names an
+        ///     item reads exactly that.
+        /// </remarks>
+        private static bool GivePickaxe(Container bag, ZNetView view, int lowestTier, int highestTier)
+        {
+            ItemDrop.ItemData pick = FindPickaxe(lowestTier, highestTier);
+            if (bag == null || pick == null) return false;
+
+            bag.GetInventory().AddItem(pick);
+            VillagerInventory.Persist(bag, view);
+            return true;
+        }
+
         private static Vector3 ChoppingSite(Vector3 origin)
         {
             Vector3 site = origin + new Vector3(90f, 0f, -90f);

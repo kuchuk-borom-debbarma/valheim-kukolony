@@ -88,6 +88,18 @@ namespace Kukolony.Resources.Mining
         /// <summary>Strikes one part, and says what actually happened.</summary>
         internal abstract BlowResult Strike(MineArea area, HitData hit, out string what);
 
+        /// <summary>
+        ///     How much of this is left, according to its record.
+        /// </summary>
+        /// <remarks>
+        ///     Read from the ZDO rather than from the object, which is the whole point: what is
+        ///     left of a deposit lives on the record, so it is the same answer whether or not
+        ///     anybody is looking at the rock. Each component stores it differently - a base64
+        ///     package of every part, a float per part, one float - which is why this is asked
+        ///     of the protocol and not of a field.
+        /// </remarks>
+        internal abstract float Remaining();
+
         /// <summary>Whether anything is left to hit.</summary>
         internal bool Spent()
         {
