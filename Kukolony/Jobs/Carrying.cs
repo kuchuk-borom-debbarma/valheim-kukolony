@@ -126,7 +126,9 @@ namespace Kukolony.Jobs
         {
             taken = string.Empty;
             if (from == null || item == null || bag == null) return TakeResult.Unavailable;
-            if (!from.TryGetComponent(out ZNetView view) || !view.IsValid()) return TakeResult.Unavailable;
+
+            ZNetView view = ViewOf(from);
+            if (view == null || !view.IsValid()) return TakeResult.Unavailable;
 
             if (!view.IsOwner())
             {
@@ -148,6 +150,36 @@ namespace Kukolony.Jobs
 
             taken = NameOf(item);
             return bag.MoveItemToThis(contents, item, amount, x, y) ? TakeResult.Took : TakeResult.Full;
+        }
+
+        /// <summary>
+        ///     The network view a container belongs to.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>Not always its own.</b> A container may sit on a child object with no view
+        ///         of its own and point at its owner's through <c>m_rootObjectOverride</c> -
+        ///         which is what that field is for, and what a villager's bag does: the bag hangs
+        ///         off the villager and saves into the villager's record.
+        ///     </para>
+        ///     <para>
+        ///         Asking the component's own GameObject therefore answered nothing for exactly
+        ///         the container this mod builds itself, and the cost was silent and total:
+        ///         taking from a villager's bag returned <c>Unavailable</c> every single time, so
+        ///         a hauler could never relieve a crafter of what it had made. The haul job puts
+        ///         that ahead of everything on the floor, and it had never once worked.
+        ///     </para>
+        ///     <para>
+        ///         Resolved the way the game resolves it in <c>Container.Awake</c>: the override
+        ///         where there is one, the object's own view otherwise.
+        ///     </para>
+        /// </remarks>
+        internal static ZNetView ViewOf(Container container)
+        {
+            if (container == null) return null;
+            if (container.m_rootObjectOverride != null) return container.m_rootObjectOverride;
+
+            return container.TryGetComponent(out ZNetView view) ? view : null;
         }
 
         /// <summary>
@@ -239,7 +271,9 @@ namespace Kukolony.Jobs
             int allowed = -1)
         {
             if (bag == null || item == null || into == null) return TakeResult.Unavailable;
-            if (!into.TryGetComponent(out ZNetView view) || !view.IsValid()) return TakeResult.Unavailable;
+
+            ZNetView view = ViewOf(into);
+            if (view == null || !view.IsValid()) return TakeResult.Unavailable;
 
             // Writing a container's inventory requires owning it; the container saves itself
             // once we do, through its own change hook.
