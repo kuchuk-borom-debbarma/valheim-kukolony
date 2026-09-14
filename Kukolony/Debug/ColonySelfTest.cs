@@ -6,10 +6,12 @@ using System.Reflection;
 using Kukolony.Colonies;
 using Kukolony.Jobs;
 using Kukolony.Jobs.Chop;
+using Kukolony.Jobs.Forage;
 using Kukolony.Jobs.Mine;
 using Kukolony.Gui;
 using Kukolony.KeepAlive;
 using Kukolony.Resources;
+using Kukolony.Resources.Foraging;
 using Kukolony.Resources.Mining;
 using Kukolony.Villagers;
 using UnityEngine;
@@ -232,6 +234,7 @@ namespace Kukolony.Debug
             yield return CheckChopStoppingRules(report, colony, origin);
             yield return CheckChoppingFellsATree(report, colony, origin);
             yield return Mining(report, colony, origin);
+            yield return Foraging(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
@@ -326,6 +329,11 @@ namespace Kukolony.Debug
                     yield return Mining(report, colony, origin);
                     break;
 
+                case "forage":
+                    CheckJobsSurviveAVersion(report);
+                    yield return Foraging(report, colony, origin);
+                    break;
+
                 case "queue":
                     yield return CheckAStuckTripEndsAndTheQueueMovesOn(report, colony);
                     yield return CheckAPresetKeepsItsOrder(report, colony);
@@ -341,7 +349,7 @@ namespace Kukolony.Debug
                     // Named but unknown. Failing beats running everything under a name that
                     // says otherwise, or running nothing and reporting a pass.
                     report.Check(false, $"'{wanted}' is not a slice this run knows",
-                        "known: chop, travel, queue, tend, craft, mine, swing");
+                        "known: chop, travel, queue, tend, craft, mine, forage, swing");
                     break;
             }
 
@@ -1500,9 +1508,33 @@ namespace Kukolony.Debug
                 "and so does the one after it",
                 $"id='{afterIt.Id}' repeat={afterIt.Repeat} kind={afterIt.Kind}");
 
-            // Today's layout, written and read back with the mining fields actually set. The
-            // version checks above all decode blobs this build cannot write, so a Read that
-            // consumed the mining tail in the wrong order would have passed every one of them.
+            // Version 7, which foraging appended to. Built by hand for the reason version 6 is:
+            // the writer only writes today's layout, and a reader that ran past the end of a
+            // version-7 record would decode the next job from inside this one and produce
+            // plausible nonsense rather than an error.
+            ZPackage seven = new ZPackage();
+            WriteSeven(seven, "eighth", "Older mine", JobKind.Mine, 6);
+            WriteSeven(seven, "ninth", "The one after it", JobKind.Haul, 13);
+
+            ZPackage sevens = new ZPackage(seven.GetArray());
+            JobDefinition beforeForaging = JobDefinition.Read(sevens, 7);
+            JobDefinition afterThat = JobDefinition.Read(sevens, 7);
+
+            report.Check(beforeForaging.Id == "eighth" && beforeForaging.Repeat == 6 &&
+                         beforeForaging.MineBoulders && beforeForaging.Ores.Count == 1 &&
+                         !beforeForaging.ForageRegrowingOnly && beforeForaging.Harvest.Count == 0,
+                "a job written before foraging decodes, with the foraging settings at their defaults",
+                $"id='{beforeForaging.Id}' ores={beforeForaging.Ores.Count} " +
+                $"regrowing={beforeForaging.ForageRegrowingOnly} harvest={beforeForaging.Harvest.Count}");
+
+            report.Check(afterThat.Id == "ninth" && afterThat.Repeat == 13 &&
+                         afterThat.Kind == JobKind.Haul,
+                "and so does the one after it, which is where a lost byte would show",
+                $"id='{afterThat.Id}' repeat={afterThat.Repeat} kind={afterThat.Kind}");
+
+            // Today's layout, written and read back with the mining and foraging fields actually
+            // set. The version checks above all decode blobs this build cannot write, so a Read
+            // that consumed either tail in the wrong order would have passed every one of them.
             ZPackage now = new ZPackage();
             JobDefinition mining = new JobDefinition
             {
@@ -1511,12 +1543,21 @@ namespace Kukolony.Debug
             };
             mining.Write(now);
 
+            JobDefinition foraging = new JobDefinition
+            {
+                Id = "patch", Name = "Forage", Kind = JobKind.Forage, Repeat = 7,
+                ForageRegrowingOnly = true,
+                Harvest = new List<string> { "Raspberry", "Mushroom" }
+            };
+            foraging.Write(now);
+
             JobDefinition alongside = new JobDefinition
                 { Id = "beside", Name = "Haul", Kind = JobKind.Haul, Repeat = 2 };
             alongside.Write(now);
 
             ZPackage today = new ZPackage(now.GetArray());
             JobDefinition readMine = JobDefinition.Read(today, ColonyState.JobFormat);
+            JobDefinition readForage = JobDefinition.Read(today, ColonyState.JobFormat);
             JobDefinition readBeside = JobDefinition.Read(today, ColonyState.JobFormat);
 
             // The migration notice belongs to version 5 alone. It escaped that branch once
@@ -1550,6 +1591,30 @@ namespace Kukolony.Debug
                 "a mining job written today reads back with its ores, and so does the job after it",
                 $"boulders={readMine.MineBoulders} ores={readMine.Ores.Count} " +
                 $"next='{readBeside.Id}'x{readBeside.Repeat}");
+
+            report.Check(readForage.Kind == JobKind.Forage && readForage.Repeat == 7 &&
+                         readForage.ForageRegrowingOnly && readForage.Harvest.Count == 2 &&
+                         readForage.Harvest[0] == "Raspberry" && readForage.Harvest[1] == "Mushroom",
+                "and a foraging job reads back with what it gathers, between two jobs that are not one",
+                $"kind={readForage.Kind} regrowing={readForage.ForageRegrowingOnly} " +
+                $"harvest={readForage.Harvest.Count} next='{readBeside.Id}'x{readBeside.Repeat}");
+        }
+
+        /// <summary>One job in the layout version 7 wrote - version six's, plus the mining tail.</summary>
+        /// <remarks>
+        ///     Built on <see cref="WriteSix" /> rather than on the live writer, for the reason
+        ///     that one records: a fixture built from today's writer is a fixture that changes
+        ///     when the writer does, and the last time that happened the record after it decoded
+        ///     from five bytes out and threw, which took the whole run with it in silence.
+        /// </remarks>
+        private static void WriteSeven(ZPackage package, string id, string name, JobKind kind, int repeat)
+        {
+            WriteSix(package, id, name, kind, repeat);
+
+            package.Write(true);
+
+            package.Write(1);
+            package.Write("TinOre");
         }
 
         /// <summary>One job in the layout version 6 wrote - today's, without the mining tail.</summary>
@@ -5650,28 +5715,15 @@ namespace Kukolony.Debug
             return null;
         }
 
-        /// <summary>
-        ///     The mining classifier knows what this world holds, and can name it.
-        /// </summary>
-        /// <remarks>
-        ///     Asked of the index rather than written down, for the reason every list here is:
-        ///     the mod does not ship the assets and has been wrong about a prefab name before.
-        ///     The ore list is the interesting half - it is read from drop tables, so a world
-        ///     where it came back empty would mean the job's picker offers nothing and the
-        ///     failure would show up as "nothing to mine" with no explanation.
-        /// </remarks>
-        /// <summary>
-        ///     What a mining job takes and what it leaves, asked of the job's own predicate.
-        /// </summary>
-        /// <remarks>
-        ///     Through <c>WouldTake</c> rather than by reimplementing the rule, for the reason
-        ///     chopping records: a check that writes the rule out again goes on passing while the
-        ///     job quietly ignores the setting. Nothing is spawned for the loose-rock half -
-        ///     what the classifier calls a boulder may be a crate or a barrel, and a fixture
-        ///     whose content misleads the reader costs more than it proves.
-        /// </remarks>
         /// <summary>How long a villager is given to break some of a deposit.</summary>
         private const float MineSeconds = 120f;
+
+        /// <summary>How long a villager is given to find something and pick it.</summary>
+        /// <remarks>
+        ///     Shorter than mining's, because one reach finishes a bush where a vein takes forty
+        ///     blows. What this has to cover is the walk, not the work.
+        /// </remarks>
+        private const float ForageSeconds = 90f;
 
         /// <summary>
         ///     A villager chooses a deposit, walks to it, and takes it apart.
@@ -5846,6 +5898,434 @@ namespace Kukolony.Debug
             colony.State.SetJobs(new List<JobDefinition>());
             SweepLooseItems(colony);
             yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Everything foraging, in the order a failure is most useful in.
+        /// </summary>
+        /// <remarks>
+        ///     Shared by the slice and by the acceptance run rather than listed in both, as
+        ///     mining's block is. Index first, because every check below it is meaningless if the
+        ///     classifier is empty - and an empty classifier makes them all pass by finding
+        ///     nothing to contradict.
+        /// </remarks>
+        private static IEnumerator Foraging(TestReport report, Colony colony, Vector3 origin)
+        {
+            yield return CheckForagingIndex(report);
+            yield return CheckWhatGrowsIsKeptLoaded(report);
+            yield return CheckForageSettings(report);
+            yield return CheckForageStoppingRules(report, colony, origin);
+            yield return CheckForagingPicksABush(report, colony, origin);
+        }
+
+        /// <summary>
+        ///     The foraging classifier knows what this world holds, and can name it.
+        /// </summary>
+        /// <remarks>
+        ///     Asked of the index rather than written down, for the reason every list here is:
+        ///     the mod does not ship the assets and has been wrong about a prefab name before.
+        ///     The harvest list is the interesting half - it is read from the pickables
+        ///     themselves, so a world where it came back empty would mean the job's picker
+        ///     offers nothing and every check below passes by finding nothing.
+        /// </remarks>
+        private static IEnumerator CheckForagingIndex(TestReport report)
+        {
+            if (!Forageable.IsReady) Forageable.Rebuild();
+
+            report.Check(Forageable.IsReady, "the foraging classifier found prefabs to classify");
+
+            string regrows = Forageable.Sample(ForageKind.Regrows);
+            string once = Forageable.Sample(ForageKind.Once);
+
+            report.Check(!string.IsNullOrEmpty(regrows),
+                "it can name something that grows back, so checks need not guess at prefab names",
+                $"sample={regrows}");
+
+            // The pair a "leave what does not grow back" check depends on. A world with only one
+            // kind cannot stage that check and should say so rather than pass.
+            report.Check(!string.IsNullOrEmpty(once),
+                "control: and it can tell that from something picked once and gone",
+                $"regrows={regrows} once={once}");
+
+            List<string> gathered = new List<string>();
+            Forageable.Harvest(gathered);
+            report.Check(gathered.Count > 0,
+                "the harvest picker has real things to offer, read off the pickables themselves",
+                $"items={gathered.Count}");
+
+            // What a bush yields, asked of the one that was named. An index that classified
+            // everything and knew what nothing dropped would satisfy every line above.
+            List<string> fromOne = Forageable.Yields(regrows.GetStableHashCode());
+            report.Check(fromOne.Count > 0,
+                "control: and it knows what a named bush gives up, which is what the filter reads",
+                $"{regrows} -> {string.Join(",", fromOne.ToArray())}");
+
+            yield break;
+        }
+
+        private static IEnumerator CheckWhatGrowsIsKeptLoaded(TestReport report)
+        {
+            if (!LoadAllowlist.IsReady) LoadAllowlist.Rebuild();
+            if (!Forageable.IsReady) Forageable.Rebuild();
+
+            string bush = Forageable.Sample(ForageKind.Regrows);
+            if (string.IsNullOrEmpty(bush) || ZNetScene.instance == null)
+            {
+                report.Check(false, "kept-bush check could name something pickable");
+                yield break;
+            }
+
+            report.Check(LoadAllowlist.Contains(bush.GetStableHashCode()),
+                "what grows is loaded in a zone kept open for a villager, so foraging works off-screen",
+                $"bush={bush}");
+
+            report.Check(!LoadAllowlist.Contains("not_a_real_prefab".GetStableHashCode()),
+                "control: the allowlist still excludes what a colony has no use for");
+
+            yield break;
+        }
+
+        /// <summary>
+        ///     The two settings a foraging job has, asked of the job rather than reimplemented.
+        /// </summary>
+        /// <remarks>
+        ///     Through <see cref="ForageJob.WouldTake" />, which is the predicate the engine
+        ///     itself uses. A check that wrote the rule out again would pass while the job
+        ///     quietly ignored the setting, which is the failure this codebase has already paid
+        ///     for once.
+        /// </remarks>
+        private static IEnumerator CheckForageSettings(TestReport report)
+        {
+            if (!Forageable.IsReady) Forageable.Rebuild();
+
+            string regrows = Forageable.Sample(ForageKind.Regrows);
+            string once = Forageable.Sample(ForageKind.Once);
+
+            if (string.IsNullOrEmpty(regrows))
+            {
+                report.Check(false, "control: the settings check could name something pickable");
+                yield break;
+            }
+
+            int hash = regrows.GetStableHashCode();
+            List<string> gives = Forageable.Yields(hash);
+
+            JobDefinition any = new JobDefinition { Id = "any", Kind = JobKind.Forage };
+            report.Check(ForageJob.WouldTake(any, hash),
+                "control: a foraging job with nothing named gathers anything",
+                $"bush={regrows} gives={string.Join(",", gives.ToArray())}");
+
+            // Drawn from the world rather than invented: something no bush of this kind gives.
+            List<string> everything = new List<string>();
+            Forageable.Harvest(everything);
+            string elsewhere = everything.Find(item => !gives.Contains(item));
+
+            if (string.IsNullOrEmpty(elsewhere))
+            {
+                report.Check(true, "harvest filter: this world offers one thing, so the narrowing did not run",
+                    $"items={everything.Count}");
+            }
+            else
+            {
+                JobDefinition narrowed = new JobDefinition
+                {
+                    Id = "narrow", Kind = JobKind.Forage,
+                    Harvest = new List<string> { elsewhere }
+                };
+
+                report.Check(!ForageJob.WouldTake(narrowed, hash),
+                    "a job set to one thing leaves alone what does not give it",
+                    $"asked={elsewhere} bush={regrows}");
+
+                if (gives.Count > 0)
+                {
+                    JobDefinition raised = new JobDefinition
+                    {
+                        Id = "raised", Kind = JobKind.Forage,
+                        Harvest = new List<string> { gives[0] }
+                    };
+
+                    report.Check(ForageJob.WouldTake(raised, hash),
+                        "control: and takes it once what it gives is asked for",
+                        $"asked={gives[0]} bush={regrows}");
+                }
+            }
+
+            // The conservation switch, both ways round. Stated as an if-and-only-if because a
+            // switch that refused everything and one that refused nothing look identical from
+            // either half alone.
+            if (string.IsNullOrEmpty(once))
+            {
+                report.Check(true, "regrowing filter: this world has nothing that is picked once");
+            }
+            else
+            {
+                JobDefinition careful = new JobDefinition
+                    { Id = "careful", Kind = JobKind.Forage, ForageRegrowingOnly = true };
+
+                report.Check(!ForageJob.WouldTake(careful, once.GetStableHashCode()),
+                    "told to leave what does not grow back, a job leaves it",
+                    $"once={once}");
+
+                report.Check(ForageJob.WouldTake(careful, hash),
+                    "control: and still takes what does grow back",
+                    $"regrows={regrows}");
+
+                JobDefinition ordinary = new JobDefinition { Id = "ordinary", Kind = JobKind.Forage };
+                report.Check(ForageJob.WouldTake(ordinary, once.GetStableHashCode()),
+                    "control: and without the switch it takes that too, so a farm is harvested",
+                    $"once={once}");
+            }
+
+            yield break;
+        }
+
+        private static IEnumerator CheckForageStoppingRules(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            if (!Forageable.IsReady) Forageable.Rebuild();
+
+            List<string> gathered = new List<string>();
+            Forageable.Harvest(gathered);
+
+            if (gathered.Count == 0)
+            {
+                report.Check(false, "control: the stopping check could name something this world grows");
+                yield break;
+            }
+
+            string item = gathered[0];
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(-6f, 0f, 12f));
+            yield return new WaitForSecondsRealtime(.4f);
+
+            StructureRecord store = Register(colony, chest, "Larder");
+            Container box = chest != null ? chest.GetComponentInChildren<Container>(true) : null;
+
+            if (store == null || box == null)
+            {
+                report.Check(false, "control: the stopping check could register a chest");
+                Release(chest);
+                yield break;
+            }
+
+            JobDefinition job = new JobDefinition
+                { Id = "patch", Kind = JobKind.Forage, StockItem = item, StockTarget = 10 };
+
+            Stock.ResetForTest();
+            report.Check(!ForageJob.WouldStop(colony, job),
+                "control: an empty settlement has not got enough of anything",
+                $"item={item} held={Stock.Held(colony, item)}");
+
+            int put = PutIn(box, item, 12);
+            Stock.ResetForTest();
+
+            report.Check(put > 0 && Stock.Held(colony, item) >= 12,
+                "control: the settlement can say how much of it is holding",
+                $"put={put} held={Stock.Held(colony, item)}");
+
+            report.Check(ForageJob.WouldStop(colony, job),
+                "at its target a foraging job stops asking for more",
+                $"held={Stock.Held(colony, item)} target=10");
+
+            job.StockTarget = 500;
+            report.Check(!ForageJob.WouldStop(colony, job),
+                "control: below it the same job carries on", "target=500");
+
+            job.StockTarget = 0;
+            report.Check(!ForageJob.WouldStop(colony, job),
+                "control: a target of zero means never stop");
+
+            colony.RemoveStructure(store.Id);
+            Release(chest);
+            Stock.ResetForTest();
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A villager finds a bush, picks it, and stops - and the one outside its work area
+        ///     keeps its berries.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The behaviour unique to this job is in the ending. Everywhere else finishing
+        ///         means the thing is gone; here the bush is still standing and the only
+        ///         difference is a flag on its record. So the two assertions that matter are that
+        ///         it went bare, and that the villager then <em>stopped</em> - a job that could
+        ///         not tell a picked bush from a full one would stand in front of it reaching for
+        ///         ever, and every other assertion here would still pass.
+        ///     </para>
+        ///     <para>
+        ///         The subject is disowned before the villager is released, because that is the
+        ///         state every world-generated bush is in - and an RPC routed to nobody is
+        ///         absorbed silently, which is the failure the mining and chopping jobs both
+        ///         found the hard way.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckForagingPicksABush(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            Vector3 site = ForagingSite(origin);
+            SweepDrops(site, 40f);
+            ForageJob.Clear();
+            ForagingGround.ResetForTest();
+            if (!Forageable.IsReady) Forageable.Rebuild();
+
+            string named = Forageable.Sample(ForageKind.Regrows);
+            if (string.IsNullOrEmpty(named)) named = Forageable.Sample(ForageKind.Once);
+
+            if (string.IsNullOrEmpty(named))
+            {
+                report.Check(false, "control: the foraging check could name something to pick");
+                yield break;
+            }
+
+            GameObject flag = Spawn(WorkFlagPrefab.PrefabName, site);
+            yield return new WaitForSecondsRealtime(.3f);
+
+            WorkFlag planted = flag != null ? flag.GetComponent<WorkFlag>() : null;
+            if (planted == null || ColonyOperations.AssignFlag(colony.Id, planted) != RegisterOutcome.Registered)
+            {
+                report.Check(false, "control: the foraging check could plant and claim a flag");
+                Release(flag);
+                yield break;
+            }
+
+            StructureRecord flagRecord = colony.State.GetStructures().Find(r => r.Id == planted.Id);
+
+            GameObject subject = Spawn(named, site + new Vector3(8f, 0f, 0f));
+            GameObject outside = Spawn(named, site + new Vector3(26f, 0f, 0f));
+            yield return new WaitForSecondsRealtime(.5f);
+
+            if (subject == null || outside == null ||
+                !Harvest.TryFind(subject, out Pickable bush) ||
+                !Harvest.TryFind(outside, out Pickable spare))
+            {
+                report.Check(false, "control: the foraging check could place what it picks",
+                    $"named={named} subject={(subject != null)} outside={(outside != null)}");
+                Cleanup(colony, planted, null, flag, null);
+                Release(subject);
+                Release(outside);
+                yield break;
+            }
+
+            report.Check(Harvest.Ripe(bush) && Harvest.Ripe(spare),
+                "control: both have something on them before anybody touches them",
+                $"subject={Harvest.Ripe(bush)} outside={Harvest.Ripe(spare)}");
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition
+                {
+                    Id = "pick", Name = "Forage", Kind = JobKind.Forage, Repeat = 30,
+                    Areas = new List<string> { flagRecord?.PersistentId ?? string.Empty },
+                    WorkRadius = 14f
+                }
+            });
+
+            Villager picker = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (picker == null || !picker.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                report.Check(false, "control: the foraging check could spawn a villager");
+                Cleanup(colony, planted, null, flag, null);
+                Release(subject);
+                Release(outside);
+                colony.State.SetJobs(new List<JobDefinition>());
+                yield break;
+            }
+
+            ZDOID who = view.GetZDO().m_uid;
+            SendRested(view);
+
+            new VillagerState(view.GetZDO()).SetQueue(new List<string> { "pick" });
+            picker.transform.position = site + new Vector3(2f, 0f, 2f);
+
+            // Unowned, as every bush the world generated is.
+            if (subject.TryGetComponent(out ZNetView subjectView) && subjectView.IsValid())
+            {
+                subjectView.GetZDO().SetOwner(0L);
+            }
+
+            ForagingGround.ResetForTest();
+
+            bool everHeldTheSubject = false;
+            bool bare = false;
+            float elapsed = 0f;
+            float wentBareAt = 0f;
+
+            while (elapsed < ForageSeconds && (!bare || elapsed < wentBareAt + 6f))
+            {
+                yield return new WaitForSecondsRealtime(.2f);
+                elapsed += .2f;
+
+                if (picker == null || !view.IsValid()) break;
+
+                VillagerState state = new VillagerState(view.GetZDO());
+                if (subjectView != null && subjectView.IsValid() && state.Target == subjectView.GetZDO().m_uid)
+                {
+                    everHeldTheSubject = true;
+                }
+
+                bool ripe = subject != null && Harvest.TryFind(subject, out Pickable live) && Harvest.Ripe(live);
+                if (!ripe && !bare)
+                {
+                    bare = true;
+                    wentBareAt = elapsed;
+                }
+            }
+
+            report.Check(everHeldTheSubject,
+                "a villager chose something to pick itself - nothing here pointed it at one",
+                $"held={everHeldTheSubject} after {elapsed:0}s doing='{(picker != null ? picker.Activity : "gone")}'");
+
+            report.Check(bare,
+                "and it went bare under it, with this check picking nothing",
+                $"bare={bare} in {elapsed:0}s doing='{(picker != null ? picker.Activity : "gone")}'");
+
+            // The ending this job has and no other does. A bush that is picked is still a bush,
+            // so a job that could not tell would go on reaching at it - and every assertion
+            // above would still pass while it did.
+            if (bare && picker != null && view.IsValid())
+            {
+                ZDOID stillHeld = new VillagerState(view.GetZDO()).Target;
+                ZDOID subjectId = subjectView != null && subjectView.IsValid()
+                    ? subjectView.GetZDO().m_uid
+                    : ZDOID.None;
+
+                report.Check(stillHeld.IsNone() || stillHeld != subjectId,
+                    "and it let the bush go once there was nothing on it, rather than reaching for ever",
+                    $"held={stillHeld} subject={subjectId} doing='{picker.Activity}' " +
+                    $"{elapsed - wentBareAt:0}s after it went bare");
+            }
+
+            bool outsideStillRipe = outside != null && Harvest.TryFind(outside, out Pickable still) &&
+                                    Harvest.Ripe(still);
+
+            report.Check(outsideStillRipe,
+                "control: the one outside the work area still has everything on it",
+                $"ripe={outsideStillRipe}");
+
+            VillagerLifecycle.Remove(colony, who);
+            Cleanup(colony, planted, null, flag, null);
+            Release(subject);
+            Release(outside);
+            SweepDrops(site, 40f);
+            colony.State.SetJobs(new List<JobDefinition>());
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>Somewhere to forage, away from the chopping and mining sites.</summary>
+        private static Vector3 ForagingSite(Vector3 origin)
+        {
+            Vector3 site = ChoppingSite(origin) + new Vector3(-80f, 0f, 0f);
+            if (ZoneSystem.instance != null && ZoneSystem.instance.GetSolidHeight(site, out float ground))
+            {
+                site.y = ground;
+            }
+
+            return site;
         }
 
         private static IEnumerator CheckMiningBreaksADeposit(TestReport report, Colony colony,
@@ -6058,6 +6538,16 @@ namespace Kukolony.Debug
             yield return new WaitForSecondsRealtime(.2f);
         }
 
+        /// <summary>
+        ///     What a mining job takes and what it leaves, asked of the job's own predicate.
+        /// </summary>
+        /// <remarks>
+        ///     Through <c>WouldTake</c> rather than by reimplementing the rule, for the reason
+        ///     chopping records: a check that writes the rule out again goes on passing while the
+        ///     job quietly ignores the setting. Nothing is spawned for the loose-rock half -
+        ///     what the classifier calls a boulder may be a crate or a barrel, and a fixture
+        ///     whose content misleads the reader costs more than it proves.
+        /// </remarks>
         private static IEnumerator CheckMineSettings(TestReport report)
         {
             if (!Mineable.IsReady) Mineable.Rebuild();
@@ -6229,6 +6719,16 @@ namespace Kukolony.Debug
             yield return new WaitForSecondsRealtime(.2f);
         }
 
+        /// <summary>
+        ///     The mining classifier knows what this world holds, and can name it.
+        /// </summary>
+        /// <remarks>
+        ///     Asked of the index rather than written down, for the reason every list here is:
+        ///     the mod does not ship the assets and has been wrong about a prefab name before.
+        ///     The ore list is the interesting half - it is read from drop tables, so a world
+        ///     where it came back empty would mean the job's picker offers nothing and the
+        ///     failure would show up as "nothing to mine" with no explanation.
+        /// </remarks>
         private static IEnumerator CheckMiningIndex(TestReport report)
         {
             if (!Mineable.IsReady) Mineable.Rebuild();

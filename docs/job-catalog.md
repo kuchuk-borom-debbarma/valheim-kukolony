@@ -802,6 +802,92 @@ asked for, the stock rule stops it, and two villagers never work one vein.
 
 ---
 
+# Forage — picking what is already there
+
+The third gathering job and the simplest, which is the point: chopping needs an axe, mining needs
+a pickaxe and a tier good enough for the rock. Foraging needs a pair of hands. It is also the first
+job that makes a **farm** mean anything to a settlement — a planted field is a field of `Pickable`s
+the moment it is ripe, and the same job harvests it without knowing that is what it is doing.
+
+## What it does
+
+Finds something in its work area with anything on it, walks there, and picks it. What falls lands
+on the ground where it stood, and hauling files it — the same division chopping and mining have,
+for the same reason.
+
+## The one thing that is not like the others
+
+**Everywhere else in this mod, finishing means the thing stopped existing.** A felled tree, an
+emptied vein, a delivered load. A picked bush is still a bush: it stands exactly where it was,
+looks the same to anything that works by object identity, and grows its berries back an hour
+later.
+
+So the job asks two questions where the others ask one — *is it there* and *is there anything on
+it* — and never collapses them. A job that collapsed them would either pick one bush and mime at
+it for ever, or report every bush as destroyed. Both of those look like working from a distance,
+which is the class of failure this mod guards hardest against, so the state machine carries a
+`Ripe` fact of its own and the in-game check asserts that the villager **let go** after picking.
+
+## Classifying — one component, and no ambiguous tail
+
+`Pickable`, and nothing else. Unlike `Destructible` — which may be a stump or a wagon, and forced
+both chopping and mining to gate a tail of scenery behind an opt-in switch — `Pickable` exists for
+exactly one purpose: a person walking up and taking the thing. **So there is no "what to pick"
+toggle, and its absence is deliberate rather than unfinished.**
+
+Two kinds, told apart by `m_respawnTimeMinutes`:
+
+| Kind | What it is | Comes back |
+|---|---|---|
+| **Regrows** | berries, mushrooms, thistle, dandelion | yes |
+| **Once** | a grown crop, obsidian, a surtling core | no |
+
+**An unripe crop is not classified at all**, because it is a `Plant` rather than a `Pickable` —
+it becomes a different prefab when it grows. So "only harvest what is ready" costs nothing and
+needs no rule.
+
+## Settings
+
+| Setting | Meaning |
+|---|---|
+| **What to gather** — multi-select, empty means all | By what a thing *yields*, read off `m_itemPrefab` and `m_extraDrops`, so it covers a modded berry without the mod hearing of it |
+| **Leave alone: what does not grow back** — **off** by default | The conservation switch, and the opposite default from *loose rock* and *undergrowth*. Those gate scenery the game cannot tell from work, so the safe default is not to touch it. Nothing here is ambiguous — and the commonest thing in the finite half is a field somebody planted on purpose, so refusing it by default would mean a forage job that does not harvest the farm |
+| **Stop when we have** | Reused unchanged |
+| **Where it works**, **Repeat** | Unchanged |
+
+## What it does not do
+
+**It does not go through `Interact`.** That method credits the local player's foraging skill,
+increments their profile statistics and rolls a level bonus — a villager going through it steals
+the player's skill-ups on a good day and throws on a dedicated server. The job claims ownership
+and invokes `RPC_Pick` directly, which is what `Interact` does at the end anyway.
+
+**It does not count its own picks.** Ripeness is read back from the world after every reach, the
+same doctrine mining uses for a blow and tending uses for a feed.
+
+**It does not know what is dangerous.** `Pickable.m_aggravateRange` is real and readable — a
+Fuling totem is a `Pickable` that calls the village when it is taken — and this job does not
+consult it. That is the same answer chopping gives about a tree beside a troll: **the work area is
+the control**, and a settlement whose flags reach into a Fuling village has bigger problems than
+its forager. Written down rather than left to be discovered, because the first person to find it
+will find it as a dead villager.
+
+**It does not pay for a stripped clearing.** A picked bush stays in the world and stays in the
+sweep, so a forager that emptied a meadow would otherwise reject the same forty candidates every
+tick, for as long as it stood there. Every question in the choosing loop is answered from the
+ZDO — prefab hash for what it is, one bool for whether anything is on it — so choosing costs no
+scene lookups at all. Mining learned this the expensive way.
+
+## Done when
+
+A villager chooses something itself, picks it, lets it go once it is bare rather than reaching for
+ever, and leaves alone what is outside its work area; the harvest filter narrows it and the
+control raises it again; *leave what does not grow back* refuses the finite half and still takes
+the rest; the stock rule stops it; and a version-7 job blob still decodes with the new settings at
+their defaults.
+
+---
+
 # The tool errand — a rule the tool-holding jobs share
 
 Not a job. Nothing queues it, nothing on any screen shows it, and it has no settings of its own.

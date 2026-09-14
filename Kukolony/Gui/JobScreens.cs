@@ -333,6 +333,7 @@ namespace Kukolony.Gui
             if (job.Kind == JobKind.Tend) BuildTend(host, column, colony, job);
             if (job.Kind == JobKind.Craft) BuildCraft(host, column, colony, job);
             if (job.Kind == JobKind.Mine) BuildMine(host, column, job);
+            if (job.Kind == JobKind.Forage) BuildForage(host, column, job);
 
             // Where it works. The Kolony itself and its work-area flags, and nothing else:
             // any registered thing can still serve as a centre, but offering every chest and
@@ -569,6 +570,59 @@ namespace Kukolony.Gui
             }
         }
 
+        /// <summary>
+        ///     What a foraging job gathers, and whether it takes what will not come back.
+        /// </summary>
+        /// <remarks>
+        ///     Two rows and no "what to pick" toggles, because there is nothing to toggle:
+        ///     chopping and mining each offer a switch for the tail of scenery the game cannot
+        ///     tell from work, and foraging has no such tail. The one switch here is about
+        ///     afterwards rather than about what something is - and it is off by default, so a
+        ///     job set over a farm harvests the farm.
+        /// </remarks>
+        private void BuildForage(ColonyScreen host, Column column, JobDefinition job)
+        {
+            if (column.TryRow(out Row what))
+            {
+                Widgets.Choice(what, "What to gather",
+                    job.Harvest.Count == 0 ? "anything" : Summarise(job.Harvest),
+                    () => host.Push(new PickerScreen("What to gather", SearchHarvest, job.Harvest, true,
+                        chosen => { Edit(host, j => j.Harvest = chosen); host.Refresh(); })));
+            }
+
+            if (column.TryRow(out Row finite))
+            {
+                Widgets.Caption(finite, "Leave alone", 220f);
+                Toggle(host, finite, "What does not grow back", job.ForageRegrowingOnly,
+                    (j, on) => j.ForageRegrowingOnly = on, 300f);
+            }
+
+            BuildStock(host, column, job);
+        }
+
+        /// <summary>Everything anything in this world can be picked for, for the picker.</summary>
+        private static List<PickerScreen.Option> SearchHarvest(string filter)
+        {
+            List<string> gathered = new List<string>();
+            Resources.Forageable.Harvest(gathered);
+
+            List<PickerScreen.Option> options = new List<PickerScreen.Option>();
+            foreach (string item in gathered)
+            {
+                string label = ItemCatalogue.Label(item);
+                if (filter.Length > 0 &&
+                    label.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0 &&
+                    item.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                options.Add(new PickerScreen.Option(item, label));
+            }
+
+            return options;
+        }
+
         /// <summary>Every ore the deposits in this world drop, for the picker.</summary>
         private static List<PickerScreen.Option> SearchOres(string filter)
         {
@@ -713,6 +767,7 @@ namespace Kukolony.Gui
             {
                 case JobKind.Chop: return Resources.ChoppingGround.SearchRadius;
                 case JobKind.Mine: return Resources.MiningGround.SearchRadius;
+                case JobKind.Forage: return Resources.ForagingGround.SearchRadius;
 
                 // Nothing bounds the rest: hauling, tending and crafting work from the
                 // settlement's own records rather than from a sweep of the loaded world.

@@ -277,15 +277,10 @@ namespace Kukolony.Resources
         }
 
         /// <summary>What a prefab's drop table holds, by prefab name.</summary>
-        /// <remarks>
-        ///     The table's own list rather than a roll of it. <c>GetDropList</c> picks at random
-        ///     and would answer differently every time it was asked, which is no use for a
-        ///     question a player is answering once on a screen.
-        /// </remarks>
         private static List<string> Yield(GameObject prefab)
         {
             List<string> dropped = new List<string>();
-            Add(dropped, Table(prefab));
+            DropNames.Add(dropped, Table(prefab));
             return dropped;
         }
 
@@ -298,19 +293,6 @@ namespace Kukolony.Resources
             // them simply do not have - so "nothing known to drop" is an ordinary answer here
             // rather than a sign something is wrong.
             return prefab.TryGetComponent(out DropOnDestroyed drops) ? drops.m_dropWhenDestroyed : null;
-        }
-
-        private static void Add(List<string> into, DropTable table)
-        {
-            if (table?.m_drops == null) return;
-
-            foreach (DropTable.DropData drop in table.m_drops)
-            {
-                if (drop.m_item == null) continue;
-
-                string name = drop.m_item.name;
-                if (name.Length > 0 && !into.Contains(name)) into.Add(name);
-            }
         }
 
         /// <summary>Whether pickaxe damage does anything at all to something with these resistances.</summary>

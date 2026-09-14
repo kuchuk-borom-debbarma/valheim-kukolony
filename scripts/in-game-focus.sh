@@ -10,6 +10,8 @@
 #   scripts/in-game-focus.sh chop
 #   scripts/in-game-focus.sh travel
 #   scripts/in-game-focus.sh tend
+#   scripts/in-game-focus.sh mine
+#   scripts/in-game-focus.sh forage
 #   scripts/in-game-focus.sh swing
 #
 # The checks themselves are shared with the full run rather than copied, so a focused

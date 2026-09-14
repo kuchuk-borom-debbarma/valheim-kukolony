@@ -170,13 +170,16 @@ settlement's record every time somebody is reassigned.
   fills the bag before setting out; chopping adds what it takes and when to stop; mining adds
   which ore, whether loose rock counts, and the same stopping rule — with a line saying that ore
   does not grow back, because a mining job without a limit clears the area while every individual
-  decision is correct. Tending and crafting add nothing at all, because everything they used to
+  decision is correct; foraging adds what to gather and one switch for leaving alone what does not
+  grow back, and **no "what to pick" toggles**, because `Pickable` carries no tail of scenery the
+  game cannot tell from work and a screen must not offer a choice the job does not have. Tending
+  and crafting add nothing at all, because everything they used to
   ask is a fact about a station and is now set on the station. Both screens say so rather than showing an empty panel, which reads
   as one that has not finished loading.
-- **Add a job** opens a picker over the kinds — five of them now. It was a button per kind until a
+- **Add a job** opens a picker over the kinds — six of them now. It was a button per kind until a
   fourth arrived: three fitted the row and the fourth would have been a silently half-width
-  button. The list is
-  built from the enum, which is what stops the next kind being unreachable.
+  button. The list is built from the enum, which is what stops the next kind being unreachable —
+  foraging appeared on that screen without a line of screen code being written.
 
 "Where it works" offers the whole settlement first, then the colony's work-area flags. A work
 area is still a registered structure used as a centre plus a radius — any registered thing can

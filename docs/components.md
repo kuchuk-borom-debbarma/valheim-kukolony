@@ -58,6 +58,14 @@ paragraphs above. The drift it invites is named in `Mineable`'s own docstring: a
 minable but unworkable is a villager walking to a rock it cannot work, and one that is workable
 but never kept loaded is an outpost that silently idles.
 
+**Foraging is what mining should have looked like.** One component, `Pickable`, and one public
+predicate on it, `CanBePicked()`, which answers *is there anything on this right now* for every
+surface that asks. `Forageable.Classify` still exists for the prefab-level question the keep-alive
+allowlist needs — a prefab has no `ZNetView`, so it cannot be asked the instance question — but it
+is the same component test in the same file as everything else foraging asks, rather than a second
+one written out elsewhere. The lesson from mining was taken: there is no tail of scenery to gate,
+so there is no second rule that two files have to keep agreeing about.
+
 **Processing and Crafting hold to this; Storage does not yet.** Every processing question goes
 through `StationProbe` and every crafting question through `CraftProbe` — including the one
 prefab-level question, *what kind of station is this prefab*, which lives beside the instance

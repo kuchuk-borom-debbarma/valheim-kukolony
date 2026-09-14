@@ -20,7 +20,10 @@ namespace Kukolony.Jobs
         Craft = 3,
 
         /// <summary>Break rock for what is in it.</summary>
-        Mine = 4
+        Mine = 4,
+
+        /// <summary>Pick what is there to be picked, wild or planted.</summary>
+        Forage = 5
     }
 
     /// <summary>
@@ -166,6 +169,39 @@ namespace Kukolony.Jobs
         /// </remarks>
         internal bool MineBoulders;
 
+        /// <summary>
+        ///     What this job goes out to gather. Empty means all of it.
+        /// </summary>
+        /// <remarks>
+        ///     By what a thing <em>yields</em> rather than by which bush it is, for the reason
+        ///     <see cref="Ores" /> is: "gather mushrooms" is the sentence a player has in mind,
+        ///     and the item is on the prefab, so this is answerable with nothing loaded and
+        ///     covers a modded berry without this mod ever hearing of it.
+        /// </remarks>
+        internal List<string> Harvest = new List<string>();
+
+        /// <summary>
+        ///     Whether to leave alone anything that does not come back.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Off by default, which is the opposite of <see cref="MineBoulders" /> and
+        ///         <see cref="ChopUndergrowth" /> - and the difference is real rather than an
+        ///         inconsistency. Those two gate a tail of scenery the game cannot tell from
+        ///         work, so the safe default is not to touch it. Nothing here is ambiguous:
+        ///         everything a forager sees exists to be picked. What this governs is whether
+        ///         the job takes the half that never grows back, and the commonest thing in that
+        ///         half is a field of crops somebody planted on purpose - so refusing it by
+        ///         default would mean a forage job that does not harvest the farm.
+        ///     </para>
+        ///     <para>
+        ///         It is offered because the opposite mistake is permanent: a job with no
+        ///         stopping rule set over a stand of obsidian or a burial chamber clears it for
+        ///         good, and every individual decision looks correct while it happens.
+        ///     </para>
+        /// </remarks>
+        internal bool ForageRegrowingOnly;
+
         /// <summary>What the settlement is gathering, for the purpose of knowing when to stop.</summary>
         internal string StockItem = string.Empty;
 
@@ -245,6 +281,21 @@ namespace Kukolony.Jobs
 
             package.Write(ores.Count);
             foreach (string ore in ores) package.Write(ore ?? string.Empty);
+
+            // Version 8 and after. Appended last, for the reason the mining fields were: nothing
+            // an older reader knows how to find has moved, which is what lets a version-7 record
+            // decode against this layout.
+            package.Write(ForageRegrowingOnly);
+
+            List<string> harvest = Harvest ?? new List<string>();
+            if (harvest.Count > MaxNames)
+            {
+                Log.Warning($"[job] '{Name}' names {harvest.Count} things to gather - keeping the first {MaxNames}.");
+                harvest = harvest.GetRange(0, MaxNames);
+            }
+
+            package.Write(harvest.Count);
+            foreach (string item in harvest) package.Write(item ?? string.Empty);
         }
 
         /// <summary>
@@ -382,19 +433,23 @@ namespace Kukolony.Jobs
 
             for (int i = 0; i < ores; i++) job.Ores.Add(package.ReadString());
 
+            if (version < 8) return job;
+
+            job.ForageRegrowingOnly = package.ReadBool();
+
+            int harvest = package.ReadInt();
+            if (harvest < 0 || harvest > MaxNames)
+            {
+                throw new System.IO.InvalidDataException(
+                    $"job '{job.Name}' names {harvest} things to gather");
+            }
+
+            for (int i = 0; i < harvest; i++) job.Harvest.Add(package.ReadString());
+
             return job;
         }
 
 
-        /// <summary>
-        ///     What this kind of work is called, for a player.
-        /// </summary>
-        /// <remarks>
-        ///     Explicit, with no fallback that invents a plausible name. The previous catalogue
-        ///     had one, and a newly added job reached the screen labelled "Collect beehives" —
-        ///     convincing, wrong, and invisible to a check that counted job types rather than
-        ///     asking whether each was named. Unnamed work returns empty and fails loudly.
-        /// </remarks>
         /// <summary>
         ///     The key the tending-moved notice is said under, for one job.
         /// </summary>
@@ -406,6 +461,15 @@ namespace Kukolony.Jobs
         /// </remarks>
         internal static string MigrationNotice(string id) => $"[job] tending moved: {id}";
 
+        /// <summary>
+        ///     What this kind of work is called, for a player.
+        /// </summary>
+        /// <remarks>
+        ///     Explicit, with no fallback that invents a plausible name. The previous catalogue
+        ///     had one, and a newly added job reached the screen labelled "Collect beehives" -
+        ///     convincing, wrong, and invisible to a check that counted job types rather than
+        ///     asking whether each was named. Unnamed work returns empty and fails loudly.
+        /// </remarks>
         internal static string Describe(JobKind kind)
         {
             switch (kind)
@@ -415,6 +479,7 @@ namespace Kukolony.Jobs
                 case JobKind.Tend: return "Tend";
                 case JobKind.Craft: return "Craft";
                 case JobKind.Mine: return "Mine";
+                case JobKind.Forage: return "Forage";
                 default: return string.Empty;
             }
         }

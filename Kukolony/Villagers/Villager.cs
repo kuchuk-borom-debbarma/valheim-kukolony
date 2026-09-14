@@ -861,6 +861,19 @@ namespace Kukolony.Villagers
                         DeltaTime = deltaTime
                     }, out doing);
 
+                case Jobs.JobKind.Forage:
+                    return Jobs.Forage.ForageJob.Tick(new Jobs.Forage.ForageContext
+                    {
+                        Villager = this,
+                        Colony = colony,
+                        Bag = _bag,
+                        Walk = _walk,
+                        Animation = _animation,
+                        Job = job,
+                        State = state,
+                        DeltaTime = deltaTime
+                    }, out doing);
+
                 case Jobs.JobKind.Craft:
                     return Jobs.Craft.CraftJob.Tick(new Jobs.Craft.CraftContext
                     {

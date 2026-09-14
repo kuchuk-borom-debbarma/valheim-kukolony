@@ -841,3 +841,85 @@ hauling — one miner will out-produce one hauler.
 crate are both `Default`, so the type says nothing. `MineRock` and `MineRock5` are unambiguous;
 plain `Destructible` is the ambiguous tail and belongs behind a setting, exactly as undergrowth
 does for chopping.
+
+---
+
+## Foraging: one component answers the whole question, and `Interact` is the wrong door
+
+`Pickable` is the simplest thing this mod has ever had to work with, and the temptation is
+therefore to reach for the obvious method and be wrong in a way nothing reports.
+
+### `CanBePicked()` is the single predicate
+
+```
+public bool CanBePicked() =>
+    (m_hideWhenPicked == null || m_hideWhenPicked.activeInHierarchy) && !m_picked && m_enabled != 0;
+```
+
+Public, cheap, and exactly "is there anything on this right now". The component doctrine asks for
+one predicate per question and rarely gets it; this is it. There is no classification problem
+here at all — unlike `Destructible`, which may be a stump or a wagon, `Pickable` exists for one
+purpose and carries no ambiguous tail. **That is why the forage job has no opt-in switch for what
+to pick**, only one for what to do afterwards.
+
+### An unripe crop is not a `Pickable`
+
+A planted seed is a **`Plant`**, a different component with `m_growTime` and `m_grownPrefabs`.
+When it is ready it calls `Grow()` and **replaces itself with a different prefab**, and it is that
+one that carries `Pickable`. So "only harvest what is ready" needs no rule, no timer and no
+growth check — the classifier simply never sees the unripe one, and wild berries and farmed
+carrots come out of the same predicate.
+
+### `Interact` belongs to the player, not to a villager
+
+`Pickable.Interact(Humanoid, repeat, alt)` does far more than pick:
+
+- `Game.instance.IncrementPlayerStat(m_harvestStat)`
+- `Game.instance.GetPlayerProfile().IncrementStatPickable(m_itemPrefab.name)`
+- `RaiseSkill(m_pickRaiseSkill)` and a level-bonus roll off `GetSkillFactor`
+- a floating `+{0}` text at the spawn point
+
+All of it against the **local player**. A villager going through that door credits the player's
+foraging skill for berries it picked itself, and has nothing to credit at all on a dedicated
+server. What `Interact` does at the *end* is the only part a villager wants:
+
+```
+m_nview.InvokeRPC("RPC_Pick", bonus);
+```
+
+### The RPC takes an argument, and omitting it fails in silence
+
+`Awake` registers it as `Register<int>("RPC_Pick", RPC_Pick)` — the method signature is
+`RPC_Pick(long sender, int bonus)`. A `ZNetView.InvokeRPC("RPC_Pick")` with no argument **does not
+match the registered handler and does nothing at all**, with no error. This mod passes `0`, which
+is also the honest number: the bonus comes from a skill, and a villager has none.
+
+### `RPC_Pick` runs on the owner, so ownership comes first
+
+It opens with `if (!m_nview.IsOwner()) return;` — and a bush the world generated has no owner at
+all, so there is nobody for an un-owned invocation to route to. Claim first, then invoke, and the
+call runs locally in the same tick. This is the third time the same rule has been found: felling,
+mining and now picking all absorb work silently when it is sent to nobody.
+
+### Where the picked flag lives
+
+`SetPicked` writes `ZDOVars.s_picked` (bool) and `ZDOVars.s_pickedTime` (long ticks) on the ZDO,
+and `Awake` reads them back as `zdo.GetBool(s_picked, m_defaultPicked)`. Two consequences:
+
+1. **Ripeness is answerable from the record alone** — no instance, no `GetComponent`. That is what
+   lets the forage job's choosing loop reject a stripped clearing for nothing, which matters
+   because a picked bush stays in the world and stays in the sweep.
+2. **The default is the prefab's, not `false`.** Reading an unwritten record as "not picked"
+   offers work on things that start empty.
+
+`RPC_Pick` finishes by sending `RPC_SetPicked` to **Everybody**, which includes the sender — so
+the flag comes back as a routed call rather than as a return value. A reach that overlaps that
+answer is indistinguishable from one that was refused, which is why the job tolerates a few
+before writing a bush off.
+
+### Respawn is asset data, and it is the only conservation signal available
+
+`m_respawnTimeMinutes` is a public float on the prefab: above zero and the thing grows back,
+zero and it is gone for good. That is the one fact that separates a raspberry bush from an
+obsidian outcrop or a surtling core, and it is readable with nothing loaded — which is what makes
+*leave what does not grow back* a setting the mod can honestly offer.

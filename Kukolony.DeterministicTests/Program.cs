@@ -8,6 +8,7 @@ using Kukolony.Jobs.Chop;
 using Kukolony.Jobs.Tend;
 using Kukolony.Jobs.Craft;
 using Kukolony.Jobs.Mine;
+using Kukolony.Jobs.Forage;
 
 /// <summary>
 ///     Verification for logic that needs no game running.
@@ -72,6 +73,7 @@ static class Program
         Crafting();
         MiningParts();
         Mining();
+        Foraging();
         Tending();
 
         Console.WriteLine(_failed == 0
@@ -1207,6 +1209,162 @@ static class Program
         // would leave a villager unable to finish and no other case would notice.
         bool every = true;
         foreach (MineAction action in Enum.GetValues(typeof(MineAction))) every &= reached[(int)action];
+        Case("every action the table can name is reached by some combination", every);
+    }
+
+    static ForageFacts Pick(bool hasTarget = false, bool ripe = true, bool atTarget = false,
+        bool enough = false, bool tired = false) =>
+        new ForageFacts(hasTarget, ripe, atTarget, enough, tired);
+
+    static void Reach(string what, ForageState state, ForageFacts facts, ForageAction expected)
+    {
+        ForageAction actual = ForageTransitions.Next(state, facts).Action;
+        Case($"{what} (got {actual})", actual == expected);
+    }
+
+    /// <summary>
+    ///     The foraging state machine, exhaustively.
+    /// </summary>
+    /// <remarks>
+    ///     The cases worth reading twice are the ones about ripeness, because that is the only
+    ///     thing this table has that the other gathering tables do not. Everywhere else in this
+    ///     mod finishing means the thing stopped existing; a picked bush is still a bush, so the
+    ///     two questions must never collapse into one - and a table that collapsed them would
+    ///     pass every case that did not ask.
+    /// </remarks>
+    static void Foraging()
+    {
+        Console.WriteLine("foraging");
+
+        Reach("with nothing chosen it looks for work", ForageState.Choosing, Pick(),
+            ForageAction.ChooseWork);
+
+        Reach("with something chosen it walks to it", ForageState.Choosing, Pick(hasTarget: true),
+            ForageAction.MoveToTarget);
+
+        Reach("standing at it, it picks", ForageState.Approaching,
+            Pick(hasTarget: true, atTarget: true), ForageAction.Pick);
+
+        Reach("and goes on picking while there is anything on it", ForageState.Picking,
+            Pick(hasTarget: true, atTarget: true), ForageAction.Pick);
+
+        // The three that are this job's whole shape. A bush outlives being picked, so bare is
+        // what finishing looks like - and it is finishing, not failure.
+        Reach("a bush that is bare when the picking is done ends the trip", ForageState.Picking,
+            Pick(hasTarget: true, ripe: false, atTarget: true), ForageAction.Complete);
+
+        Reach("one stripped by somebody else while walking is dropped, not completed",
+            ForageState.Approaching, Pick(hasTarget: true, ripe: false), ForageAction.ChooseWork);
+
+        Reach("and one already bare when chosen is never walked to", ForageState.Choosing,
+            Pick(hasTarget: true, ripe: false), ForageAction.ChooseWork);
+
+        // The other way of finishing: some pickable things are destroyed rather than emptied.
+        Reach("something destroyed under it ends the trip too", ForageState.Picking,
+            Pick(hasTarget: false, atTarget: true), ForageAction.Complete);
+
+        Reach("shoved away from it, it walks back", ForageState.Picking,
+            Pick(hasTarget: true, atTarget: false), ForageAction.MoveToTarget);
+
+        Reach("having enough stops it", ForageState.Choosing, Pick(enough: true), ForageAction.Yield);
+        Reach("being tired stops it", ForageState.Choosing, Pick(tired: true), ForageAction.Yield);
+
+        // Deliberate, and the same call chopping and mining make: a stopping rule stops a
+        // villager starting, never mid-reach. Walking away from a bush already stood at wastes
+        // the walk and leaves the berries.
+        Reach("a villager already at a bush finishes it even once the store is full",
+            ForageState.Picking, Pick(hasTarget: true, atTarget: true, enough: true),
+            ForageAction.Pick);
+
+        Reach("an unknown state starts over", (ForageState)99, Pick(), ForageAction.ChooseWork);
+
+        // Every combination. The "never" properties below are all counted inside
+        // `action == Pick`, so a table that never picked at all would satisfy every one of them -
+        // which is why the liveness counter and the two-way check beside them are not
+        // decoration. A suite that cannot tell a correct table from a dead one is not a suite.
+        int pickedNothing = 0, pickedBare = 0, pickedFromAfar = 0, walkedToNothing = 0;
+        int picked = 0, disagreed = 0, yieldedWithoutReason = 0, completedRipe = 0;
+        bool[] reached = new bool[5];
+        ForageState[] states = { ForageState.Choosing, ForageState.Approaching, ForageState.Picking };
+
+        for (int bits = 0; bits < 32; bits++)
+        {
+            ForageFacts facts = new ForageFacts(
+                hasTarget: (bits & 1) != 0,
+                ripe: (bits & 2) != 0,
+                atTarget: (bits & 4) != 0,
+                enough: (bits & 8) != 0,
+                tired: (bits & 16) != 0);
+
+            foreach (ForageState from in states)
+            {
+                ForageAction action = ForageTransitions.Next(from, facts).Action;
+
+                reached[(int)action] = true;
+
+                if (action == ForageAction.Pick)
+                {
+                    picked++;
+                    if (!facts.HasTarget) pickedNothing++;
+                    if (!facts.Ripe) pickedBare++;
+                    if (!facts.AtTarget) pickedFromAfar++;
+                }
+
+                // Finishing means there was nothing left to take. A table that reported a full
+                // bush as done would strip nothing and look busy the whole time - and no case
+                // above asks it of the choosing arm, which is where it would be easiest to get
+                // wrong.
+                if (action == ForageAction.Complete && facts.HasTarget && facts.Ripe) completedRipe++;
+
+                // The engine walks to `held.transform.position`, so this arm carrying no target
+                // is a null reference twenty times a second rather than a wrong answer. Asserted
+                // here because the engine reads it off the table and cannot check it itself.
+                if (action == ForageAction.MoveToTarget && !facts.HasTarget) walkedToNothing++;
+
+                // The same rule stated as an if-and-only-if, so it fails for a table that picks
+                // when it should not *and* for one that never picks. Written out here rather
+                // than derived from the table, which would only prove the table agrees with
+                // itself.
+                bool should = facts.HasTarget && facts.Ripe && facts.AtTarget &&
+                              (from != ForageState.Choosing || (!facts.Enough && !facts.Tired));
+
+                if (should != (action == ForageAction.Pick)) disagreed++;
+
+                // Yielding is for the two ordinary reasons and nothing else. Without this the
+                // stock rule could be ignored entirely and every other case would still pass.
+                if (action == ForageAction.Yield && !facts.Tired && !facts.Enough)
+                {
+                    yieldedWithoutReason++;
+                }
+            }
+        }
+
+        Case($"no combination ever reaches for something it has not got (did {pickedNothing})",
+            pickedNothing == 0);
+        Case($"no combination ever reaches for a bush with nothing on it (did {pickedBare})",
+            pickedBare == 0);
+        Case($"no combination ever reaches from away from it (did {pickedFromAfar})",
+            pickedFromAfar == 0);
+        Case($"nothing is ever reported finished while there is still something on it (did {completedRipe})",
+            completedRipe == 0);
+        Case($"no combination ever walks to a target it has not got (did {walkedToNothing})",
+            walkedToNothing == 0);
+
+        // The control the four above need. Every one of them is satisfied by a table that does
+        // nothing at all, which is a suite that cannot fail.
+        Case($"control: something does get picked when everything is right (picked {picked} times)",
+            picked > 0);
+
+        Case($"picking happens exactly when it should, and never otherwise ({disagreed} disagreed)",
+            disagreed == 0);
+
+        Case($"yielding is always for a reason ({yieldedWithoutReason} were not)",
+            yieldedWithoutReason == 0);
+
+        // Every arm is reachable. A reordered condition that made one dead - Complete, say -
+        // would leave a villager unable to finish and no other case would notice.
+        bool every = true;
+        foreach (ForageAction action in Enum.GetValues(typeof(ForageAction))) every &= reached[(int)action];
         Case("every action the table can name is reached by some combination", every);
     }
 

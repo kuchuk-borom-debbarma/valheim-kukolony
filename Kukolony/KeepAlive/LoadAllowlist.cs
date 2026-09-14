@@ -123,6 +123,16 @@ namespace Kukolony.KeepAlive
                 return true;
             }
 
+            // And what a pair of hands can pick, which is the cheapest of the three: one
+            // component, carried by berry bushes, mushrooms, herbs and grown crops, and by very
+            // little else. Unlike the two above it admits no tail of scenery - Pickable exists
+            // for exactly one purpose - so the zone budget pays for what a forager actually
+            // wants and nothing more.
+            if (Resources.Forageable.Classify(prefab) != Resources.ForageKind.None)
+            {
+                return true;
+            }
+
             // And the colony itself.
             // The flag is a Piece already, but name it anyway: a marker that got filtered
             // out of its own kept zone would be an outpost nobody can interact with.
