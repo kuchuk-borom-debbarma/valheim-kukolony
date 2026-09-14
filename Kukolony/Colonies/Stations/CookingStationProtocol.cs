@@ -45,6 +45,12 @@ namespace Kukolony.Colonies.Stations
                 if (logs > 0) return new StationWant(fuel, true, logs);
             }
 
+            // A grill has no fuel of its own: it sits over a fire pit and cooks only while that
+            // fire burns. Asked before anything is carried, because loading a cold grill is the
+            // quietest way this job can fail - the food never cooks, nothing ever comes off, and
+            // the villager looks busy for as long as anybody watches.
+            if (!Lit()) return StationWant.Nothing;
+
             int slots = Slots();
             int wanted = StationAppetite.InputWanted(Used(), slots, settings.KeepFull);
             if (wanted <= 0) return StationWant.Nothing;
@@ -123,6 +129,7 @@ namespace Kukolony.Colonies.Stations
             }
 
             if (!Cooks(prefab)) return FeedResult.Refused;
+            if (!Lit()) return FeedResult.Refused;
 
             return _station.GetFreeSlot() < 0 ? FeedResult.Full : FeedResult.Fed;
         }
@@ -134,6 +141,28 @@ namespace Kukolony.Colonies.Stations
             if (asFuel) View.InvokeRPC("RPC_AddFuel");
             else View.InvokeRPC("RPC_AddItem", prefab, false);
         }
+
+        /// <summary>
+        ///     Whether this station has the fire it needs, if it needs one.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Through the same helper <see cref="CraftStation" /> uses for
+        ///         <c>m_craftRequireFire</c>, because it is the same question: <em>is there fire
+        ///         here</em>. The station's own <c>IsFireLit</c> is private, and writing a second
+        ///         way to ask would be two answers to one question - which is the thing
+        ///         docs/components.md exists to prevent.
+        ///     </para>
+        ///     <para>
+        ///         <b>Proximity, not ownership.</b> This says there is fire at this point, not
+        ///         that it is <em>this</em> grill's fire - so a grill beside somebody else's
+        ///         bonfire will cook. That is exactly what the game does too, and matching it is
+        ///         better than inventing a stricter rule a player would have to learn.
+        ///     </para>
+        /// </remarks>
+        private bool Lit() =>
+            !_station.m_requireFire ||
+            EffectArea.IsPointPlus025InsideBurningArea(_station.transform.position);
 
         /// <summary>What this station burns, or empty if it burns nothing.</summary>
         private string Burns() =>

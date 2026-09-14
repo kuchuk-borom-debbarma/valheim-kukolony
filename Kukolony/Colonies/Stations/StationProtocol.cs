@@ -8,7 +8,10 @@ namespace Kukolony.Colonies.Stations
     {
         Smelter = 0,
         Cooking = 1,
-        Fermenter = 2
+        Fermenter = 2,
+
+        /// <summary>A hearth or fire pit: fuel goes in and nothing comes out.</summary>
+        Fire = 3
     }
 
     /// <summary>What a station is short of, and whether it burns it or converts it.</summary>

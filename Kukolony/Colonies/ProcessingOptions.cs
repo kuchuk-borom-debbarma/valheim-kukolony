@@ -41,8 +41,18 @@ namespace Kukolony.Colonies
             // ever, and a villager loaded it with meat and left it cold. The failure the whole
             // job was specified around, arrived at through the settings screen.
             CookingStation cooking = Component<CookingStation>(prefabName);
-            return cooking != null && cooking.m_useFuel && cooking.m_fuelItem != null
-                ? cooking.m_fuelItem.gameObject.name
+            if (cooking != null && cooking.m_useFuel && cooking.m_fuelItem != null)
+            {
+                return cooking.m_fuelItem.gameObject.name;
+            }
+
+            // And a hearth, which burns and does nothing else. Refused here on the same two
+            // grounds the protocol refuses it on, so the screen never offers to keep fuelled
+            // something that cannot be: a fire that never runs down does not want fuel, and one
+            // that refuses refills would take the call and do nothing with it.
+            Fireplace fire = Component<Fireplace>(prefabName);
+            return fire != null && !fire.m_infiniteFuel && fire.m_canRefill && fire.m_fuelItem != null
+                ? fire.m_fuelItem.gameObject.name
                 : string.Empty;
         }
 

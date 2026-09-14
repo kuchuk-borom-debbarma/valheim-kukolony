@@ -14,6 +14,7 @@ is the whole of what a colony can do, and growing it is how the mod grows.
 | **Crafting** | `CraftingStation` | Things are made here by hand — workbench, forge, stonecutter, artisan and galdr tables, black forge, and the cauldron, which is why food recipes are craftable |
 | **Rest** | `Bed` | One villager can sleep here |
 | **Work area** | `WorkFlag` | Ground far from the hearth that the Kolony works |
+| **Processing** *(also)* | `Fireplace` | A hearth or fire pit: fuel goes in and nothing comes out. Probed **last**, because an oven is a cooking station *and* a fireplace |
 | **Field** | `Field` | Ground the Kolony grows things in — what to grow is written on the field rather than on the job |
 
 **Detected by component, never by prefab name** — the rule, and the reasoning behind it, is
@@ -40,11 +41,22 @@ field inside it.
 
 Cooking stations and fermenters were registerable under the previous design, were withdrawn
 because nothing could use them, and return here with the Tend job that gives them meaning.
-**Fireplaces and beehives are still out**, and for reasons rather than by omission: a fireplace
-that burns for ever or refuses refills still accepts fuel and still reports a change, so feeding
-one destroys the fuel silently; a beehive produces a world drop rather than changing what it
-holds, so the work is not finished when the call returns. Each returns with the protocol that
-handles it honestly.
+**Fireplaces are in, and the objection that kept them out turned out to be readable.** The worry
+was that "a fireplace that burns for ever or refuses refills still accepts fuel and still reports a
+change, so feeding one destroys the fuel silently" — and both halves are public fields on the
+prefab. `m_infiniteFuel` and `m_canRefill` are refused before a villager picks up a log, and the
+third half, that the call reports nothing useful, is what the station protocol's before-and-after
+reading of `ZDOVars.s_fuel` already does for every station here. Measured in game: of twenty
+fireplaces this game ships, fifteen can be fed and four burn for ever — the trader and boss fires,
+which villagers would otherwise haul wood to in perpetuity.
+
+This is what makes cooking work at all. A grill has no fuel of its own (`m_useFuel` false,
+`m_requireFire` true): it sits on a fire pit and cooks only while that fire burns. Registering the
+fire pit *and* the grill is the whole arrangement — the first one a player builds.
+
+**Beehives are still out**, for the reason they always were: a beehive produces a world drop rather
+than changing what it holds, so the work is not finished when the call returns. It returns with the
+protocol that handles it honestly.
 
 ### Capability bits are chosen, not sequential
 

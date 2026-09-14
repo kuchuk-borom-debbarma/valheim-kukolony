@@ -60,6 +60,20 @@ namespace Kukolony.Colonies.Stations
                 return true;
             }
 
+            // Last, and it has to be. An oven is a cooking station *and* a fireplace, and a
+            // fuelled cooking station is both - so anything that also cooks or smelts has already
+            // been claimed above by the component that actually does the work. What falls through
+            // to here is a thing whose only trade is burning: a hearth, a fire pit, a brazier.
+            //
+            // Getting this order wrong would not fail loudly. Every oven in the world would
+            // become a fire pit that takes wood and cooks nothing, and the settlement would look
+            // busy the entire time.
+            if (Own(candidate, view, out Fireplace fire))
+            {
+                protocol = new FireplaceProtocol(view, fire);
+                return true;
+            }
+
             return false;
         }
 

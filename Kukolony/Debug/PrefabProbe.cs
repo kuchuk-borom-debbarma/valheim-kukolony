@@ -57,6 +57,108 @@ namespace Kukolony.Debug
             ReportCultivators(prefabs);
             ReportRepairables(prefabs);
             ReportBuildTools();
+            ReportFireplaces(prefabs);
+        }
+
+        /// <summary>
+        ///     What burns, what it burns, and which of them refuse to be fed.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The registry excluded fireplaces because "one that burns for ever or refuses
+        ///         refills still accepts fuel and still reports a change". Both are prefab fields,
+        ///         so this prints how many of each this game actually ships - if every fireplace
+        ///         turned out to be infinite, the whole protocol would be dead code that looked
+        ///         alive.
+        ///     </para>
+        ///     <para>
+        ///         <b>And which value of the state key means off</b>, which is the one thing the
+        ///         rule you asked for hangs on. A fire pit is spawned lit, read, switched off,
+        ///         and read again - because guessing this would silently invert "off means off"
+        ///         into "never feed anything that can be switched off", and both look like a job
+        ///         quietly deciding not to work.
+        ///     </para>
+        /// </remarks>
+        private static void ReportFireplaces(List<GameObject> prefabs)
+        {
+            int total = 0, infinite = 0, noRefill = 0, canTurnOff = 0, feedable = 0;
+            List<string> lines = new List<string>();
+
+            foreach (GameObject prefab in prefabs)
+            {
+                if (prefab == null || !prefab.TryGetComponent(out Fireplace fire)) continue;
+
+                total++;
+                if (fire.m_infiniteFuel) infinite++;
+                if (!fire.m_canRefill) noRefill++;
+                if (fire.m_canTurnOff) canTurnOff++;
+
+                bool takes = !fire.m_infiniteFuel && fire.m_canRefill && fire.m_fuelItem != null;
+                if (takes) feedable++;
+
+                // Also a cooking station or a smelter? Those are claimed by the component that
+                // does the work, and only what falls through is a fire this job should feed.
+                string also = prefab.GetComponent<CookingStation>() != null ? " ALSO-COOKS"
+                    : prefab.GetComponent<Smelter>() != null ? " ALSO-SMELTS" : string.Empty;
+
+                if (lines.Count < 14)
+                {
+                    lines.Add($"{prefab.name}: fuel={(fire.m_fuelItem == null ? "none" : fire.m_fuelItem.name)} " +
+                              $"max={fire.m_maxFuel:0} infinite={fire.m_infiniteFuel} " +
+                              $"canRefill={fire.m_canRefill} canTurnOff={fire.m_canTurnOff}{also}");
+                }
+            }
+
+            Log.Info($"[Probe:fire] {total} fireplace(s): {feedable} can be fed, {infinite} burn for ever, " +
+                     $"{noRefill} refuse refills, {canTurnOff} can be switched off");
+
+            foreach (string line in lines) Log.Info($"[Probe:fire] {line}");
+
+            ReportFireState(prefabs);
+        }
+
+        /// <summary>Which value of the state key means a fire is switched off.</summary>
+        private static void ReportFireState(List<GameObject> prefabs)
+        {
+            GameObject named = null;
+            foreach (GameObject prefab in prefabs)
+            {
+                if (prefab == null || !prefab.TryGetComponent(out Fireplace candidate)) continue;
+                if (!candidate.m_canTurnOff || candidate.m_infiniteFuel) continue;
+
+                named = prefab;
+                break;
+            }
+
+            if (named == null || Player.m_localPlayer == null || ZNetScene.instance == null)
+            {
+                Log.Info("[Probe:fire] no fire that can be switched off - the state rule is untestable here");
+                return;
+            }
+
+            Vector3 at = Player.m_localPlayer.transform.position + new Vector3(3f, 0f, 3f);
+            GameObject lit = Object.Instantiate(named, at, Quaternion.identity);
+
+            if (lit == null || !lit.TryGetComponent(out ZNetView view) || !view.IsValid())
+            {
+                Log.Warning("[Probe:fire] could not place a fire to read its state");
+                return;
+            }
+
+            ZDO zdo = view.GetZDO();
+            Fireplace fire = lit.GetComponent<Fireplace>();
+
+            Log.Info($"[Probe:fire] {named.name} as placed: state={zdo.GetInt(ZDOVars.s_state, -99)} " +
+                     $"fuel={zdo.GetFloat(ZDOVars.s_fuel, -1f):0.##} burning={fire.IsBurning()}");
+
+            // Switched off the way the game does it, then read again. The pair is the answer.
+            view.ClaimOwnership();
+            view.InvokeRPC("RPC_ToggleOn");
+
+            Log.Info($"[Probe:fire] {named.name} after toggling: state={zdo.GetInt(ZDOVars.s_state, -99)} " +
+                     $"fuel={zdo.GetFloat(ZDOVars.s_fuel, -1f):0.##} burning={fire.IsBurning()}");
+
+            ZNetScene.instance.Destroy(lit);
         }
 
         /// <summary>

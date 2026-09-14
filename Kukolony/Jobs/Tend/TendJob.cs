@@ -224,7 +224,7 @@ namespace Kukolony.Jobs.Tend
                         return JobResult.Running;
                     }
 
-                    StationWant want = Allowed(context.Colony, record,
+                    StationWant want = Allowed(context.Colony, context.Job, record,
                         protocol.WhatItWants(record.Settings, string.Empty));
                     if (!want.Any) continue;
 
@@ -302,7 +302,7 @@ namespace Kukolony.Jobs.Tend
                     StationProtocol protocol = Operating(instance);
                     if (protocol == null) continue;
 
-                    StationWant want = Allowed(context.Colony, record,
+                    StationWant want = Allowed(context.Colony, context.Job, record,
                         protocol.WhatItWants(record.Settings, prefab));
                     if (!want.Any || want.Item != prefab) continue;
 
@@ -777,7 +777,8 @@ namespace Kukolony.Jobs.Tend
             // that has moved on to wanting something else does not send a loaded villager back
             // to the chest with what it came for.
             string holding = carried.Count > 0 ? Carrying.NameOf(carried[0]) : string.Empty;
-            return Allowed(context.Colony, record, protocol.WhatItWants(record.Settings, holding));
+            return Allowed(context.Colony, context.Job, record,
+                protocol.WhatItWants(record.Settings, holding));
         }
 
         /// <summary>
@@ -789,11 +790,19 @@ namespace Kukolony.Jobs.Tend
         ///     them on the job, a settlement that wanted one furnace emptied and one oven filled
         ///     needed two jobs and two rosters to say so.
         /// </remarks>
-        private static StationWant Allowed(Colony colony, StructureRecord record, StationWant want)
+        private static StationWant Allowed(Colony colony, JobDefinition job, StructureRecord record,
+            StationWant want)
         {
             if (record == null || !want.Any) return want;
 
             StructureSettings settings = record.Settings;
+
+            // The settlement's own floor, before anything is carried anywhere. A hearth burns
+            // continuously and a settlement keeping six of them lit will eat a forest, so this is
+            // the brake between a warm hall and a woodshed emptied overnight while nobody was
+            // watching. Counted in registered storage, as every "how much have we got" question
+            // here is, and applied to whatever that station burns rather than to a named item.
+            if (want.AsFuel && Reserved(colony, job, want.Item)) return StationWant.Nothing;
 
             // The settlement has as much as it asked for, so there is nothing worth putting in
             // - which is a reason to stop supplying and not a reason to stop clearing. A station
@@ -809,6 +818,45 @@ namespace Kukolony.Jobs.Tend
             // answer - its fuel and input rows - so a second list narrowing the first was the
             // same sentence said twice, in two places that could disagree.
             return settings.Work == StationWork.Collect ? StationWant.Nothing : want;
+        }
+
+        /// <summary>
+        ///     Whether this job would carry fuel to this station right now.
+        /// </summary>
+        /// <remarks>
+        ///     The predicate a check may ask, rather than reimplement - the arrangement every job
+        ///     here exposes and for the reason they record: a check that writes the rule out again
+        ///     passes while the job quietly ignores the setting.
+        /// </remarks>
+        internal static bool WouldCarry(Colony colony, JobDefinition job, StructureRecord record)
+        {
+            if (colony == null || record == null) return false;
+
+            GameObject instance = ZNetScene.instance != null
+                ? ZNetScene.instance.FindInstance(record.Id)
+                : null;
+
+            StationProtocol protocol = Operating(instance);
+            if (protocol == null) return false;
+
+            return Allowed(colony, job, record,
+                protocol.WhatItWants(record.Settings, string.Empty)).Any;
+        }
+
+        /// <summary>
+        ///     Whether burning this would take the settlement below the floor it was given.
+        /// </summary>
+        /// <remarks>
+        ///     Asked of the fuel the station wants rather than of a named item, so one number
+        ///     covers the wood in the hearths and the coal in the furnace. A job with no reserve
+        ///     set answers no to everything, which is what every job written before this field
+        ///     does.
+        /// </remarks>
+        private static bool Reserved(Colony colony, JobDefinition job, string fuel)
+        {
+            if (job == null || job.FuelReserve <= 0 || string.IsNullOrEmpty(fuel)) return false;
+
+            return Stock.Held(colony, fuel) <= job.FuelReserve;
         }
 
         /// <summary>

@@ -1062,3 +1062,57 @@ is cheap compared with sowing.
 **This is the finding that justifies probing before designing.** Nothing in the decompiled
 assembly says which list a terrain op lives in, the wrong list answers "none", and a cultivate
 switch built on it would have done nothing at all while looking perfectly correct.
+
+
+---
+
+## Fireplaces: the state key is not a boolean, and a fresh fire has none
+
+Two things worth knowing before writing anything that feeds a fire.
+
+### `m_infiniteFuel` and `m_canRefill` answer in advance
+
+Of the twenty fireplaces this game ships, **fifteen can be fed, four burn for ever, and one refuses
+refills**. The four are the fires that belong to somebody: `fire_pit_haldor`, `fire_pit_hildir`,
+`BogWitch_Fire_Pit`, `Morkhalla_firepit`. Both fields are public on the prefab, so a settlement can
+refuse them before a villager picks up a log rather than after it has burnt one into a trader's
+campfire for ever.
+
+Fuel is not always wood, either — `Wood`, `Resin`, `Coal` and `GreydwarfEye` all appear — so
+anything reasoning about "the fuel" must read `m_fuelItem` rather than assume.
+
+### The on/off state is not zero and one
+
+This one is a trap, because the wrong guess fails silently and in the direction of doing something.
+Measured on a candle:
+
+```
+as placed:       state=-99 (the key is NOT WRITTEN)  fuel=3  burning=True
+after toggling:  state=2                             fuel=3  burning=False
+```
+
+A freshly placed fire has **no state written at all** — the key reads as whatever default you pass
+— and *off* is **`2`**. Anything comparing against zero would read a fire somebody had deliberately
+put out as still burning, and keep feeding it.
+
+**So do not read the state at all.** *Fuel with no flame* is the observable answer and needs no
+encoding: a fire holding wood and not burning has been put out by somebody, and one holding none
+has simply run down. A rained-on fire reads as put-out too, and is also rightly left alone — it
+already has the fuel it needs and will light again when it dries.
+
+Only one fireplace in the game can be switched off at all (`Candle_resin`), and it also refuses
+refills — so the rule is correct but very nearly untestable here. Worth saying rather than
+implying it is load-bearing.
+
+### A grill is not a cooking station with fuel
+
+`CookingStation` has two shapes and they need different things:
+
+- **an oven** — `m_useFuel` true, carries its own `m_fuelItem`
+- **a grill** — `m_useFuel` false, `m_requireFire` true: it sits on a fire pit and cooks only while
+  that fire burns
+
+`IsFireLit()` is private, but the question is the same one crafting already asks for
+`m_craftRequireFire`, and `EffectArea.IsPointPlus025InsideBurningArea` answers it. That test is
+**proximity, not ownership** — a grill beside somebody else's bonfire will cook, which is exactly
+what the game does too.

@@ -66,9 +66,9 @@ namespace Kukolony.Colonies
         ///     rather than work; a version-5 blob still carries them and is still read, because
         ///     the bytes sit in the middle of a stream holding every job the colony has. Version
         ///     7 appends what a mining job needs, 8 what a foraging one does, and 9 the one
-        ///     number a mending job has.
+        ///     number a mending job has, and 10 the fuel reserve a tending one keeps.
         /// </remarks>
-        internal const int JobFormat = 9;
+        internal const int JobFormat = 10;
 
         internal List<StructureRecord> GetStructures()
         {

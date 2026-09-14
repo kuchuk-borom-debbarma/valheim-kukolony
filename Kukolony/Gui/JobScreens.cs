@@ -517,6 +517,23 @@ namespace Kukolony.Gui
                 Widgets.Label(where, "Tending is set up on each station: open one to say what " +
                                      "it should be fed and how much to make.", Color.gray);
             }
+
+            // The one exception, and it earns it. What a kiln should be fed is a fact about that
+            // kiln; whether the settlement can afford to feed anything is a fact about the
+            // settlement - and putting it on each station would mean setting the same number in
+            // six places and having five of them be wrong.
+            if (column.TryRow(out Row reserve))
+            {
+                Widgets.Number(reserve, "Never burn our last", job.FuelReserve, 0f, 500f, 10f,
+                    value => value <= 0f ? "no reserve" : $"{value:F0} of each fuel",
+                    value => { Edit(host, j => j.FuelReserve = (int)value); host.Refresh(); });
+            }
+
+            if (job.FuelReserve <= 0 && column.TryRow(out Row warn))
+            {
+                Widgets.Label(warn, "A lit hearth burns continuously - without a reserve, a cold " +
+                                    "night can empty the woodshed.", Color.gray);
+            }
         }
 
         /// <summary>

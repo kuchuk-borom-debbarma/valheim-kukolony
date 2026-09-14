@@ -236,6 +236,30 @@ namespace Kukolony.Jobs
         /// </remarks>
         internal const float DefaultRepairBelow = .9f;
 
+        /// <summary>
+        ///     Never burn the settlement's last of something.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         A tending job will not carry fuel to a station if doing so would leave the
+        ///         settlement holding fewer than this many of it. Zero means no reserve, which is
+        ///         what every job written before this field arrives with.
+        ///     </para>
+        ///     <para>
+        ///         <b>One number, applied to whatever that station burns</b>, so it covers wood
+        ///         for the hearths and coal for the furnace without naming either - and keeps
+        ///         working the day somebody registers a station that burns something new.
+        ///     </para>
+        ///     <para>
+        ///         <b>And it lives on the job rather than on the station</b>, which is the one
+        ///         exception to where every other tending setting went. What a kiln should be fed
+        ///         is a fact about that kiln; whether the settlement can afford to feed anything
+        ///         is a fact about the settlement, and putting it on each station would mean
+        ///         setting the same number in six places and having five of them be wrong.
+        ///     </para>
+        /// </remarks>
+        internal int FuelReserve;
+
         /// <summary>What the settlement is gathering, for the purpose of knowing when to stop.</summary>
         internal string StockItem = string.Empty;
 
@@ -335,6 +359,9 @@ namespace Kukolony.Jobs
             // older reader knows how to find has moved, which is what lets a version-8 record
             // decode against this layout.
             package.Write(RepairBelow);
+
+            // Version 10.
+            package.Write(FuelReserve);
         }
 
         /// <summary>
@@ -488,6 +515,10 @@ namespace Kukolony.Jobs
             if (version < 9) return job;
 
             job.RepairBelow = package.ReadSingle();
+
+            if (version < 10) return job;
+
+            job.FuelReserve = package.ReadInt();
 
             return job;
         }

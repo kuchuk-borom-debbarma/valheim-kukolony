@@ -4,12 +4,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Kukolony.Colonies;
+using Kukolony.Colonies.Stations;
 using Kukolony.Jobs;
 using Kukolony.Jobs.Chop;
 using Kukolony.Jobs.Farm;
 using Kukolony.Jobs.Forage;
 using Kukolony.Jobs.Mine;
 using Kukolony.Jobs.Repair;
+using Kukolony.Jobs.Tend;
 using Kukolony.Gui;
 using Kukolony.KeepAlive;
 using Kukolony.Resources;
@@ -240,6 +242,7 @@ namespace Kukolony.Debug
             yield return Foraging(report, colony, origin);
             yield return Farming(report, colony, origin);
             yield return Mending(report, colony, origin);
+            yield return Cooking(report, colony, origin);
             Trace(colony, "CheckSettingsAndIndex");
             yield return ScreenChecks.Run(report, colony, origin);
             ReportVillagerMaterials();
@@ -349,6 +352,11 @@ namespace Kukolony.Debug
                     yield return Mending(report, colony, origin);
                     break;
 
+                case "cook":
+                    CheckJobsSurviveAVersion(report);
+                    yield return Cooking(report, colony, origin);
+                    break;
+
                 case "queue":
                     yield return CheckAStuckTripEndsAndTheQueueMovesOn(report, colony);
                     yield return CheckAPresetKeepsItsOrder(report, colony);
@@ -364,7 +372,7 @@ namespace Kukolony.Debug
                     // Named but unknown. Failing beats running everything under a name that
                     // says otherwise, or running nothing and reporting a pass.
                     report.Check(false, $"'{wanted}' is not a slice this run knows",
-                        "known: chop, travel, queue, tend, craft, mine, forage, farm, repair, swing");
+                        "known: chop, travel, queue, tend, craft, mine, forage, farm, repair, cook, swing");
                     break;
             }
 
@@ -7045,6 +7053,448 @@ namespace Kukolony.Debug
             target != null && target.TryGetComponent(out ZNetView view) && view.IsValid()
                 ? view.GetZDO()
                 : null;
+
+        /// <summary>
+        ///     Everything cooking, in the order a failure is most useful in.
+        /// </summary>
+        /// <remarks>
+        ///     <b>Every villager here starts with an empty bag</b>, and everything the work needs
+        ///     is in a chest. Fetching fuel and ingredients is the whole shape of the tending job
+        ///     and it has never been proven for cooking, so each check below proves it or fails -
+        ///     rather than being staged around with a hand-loaded villager, which would pass
+        ///     identically whether the fetching worked or not.
+        /// </remarks>
+        private static IEnumerator Cooking(TestReport report, Colony colony, Vector3 origin)
+        {
+            yield return CheckFireplacesAreUnderstood(report);
+            yield return CheckAFireIsKeptFuelled(report, colony, origin);
+            yield return CheckAColdGrillIsRefused(report, colony, origin);
+            yield return CheckTheReserveStopsTheBurning(report, colony, origin);
+        }
+
+        /// <summary>
+        ///     The registry understands a fireplace, and refuses the two kinds it cannot feed.
+        /// </summary>
+        /// <remarks>
+        ///     The order inside the probe is what this really guards. An oven is a cooking station
+        ///     <em>and</em> a fireplace; if the fireplace case were asked first, every oven in the
+        ///     world would become a fire pit that takes wood and cooks nothing - and would look
+        ///     busy the whole time it was doing it.
+        /// </remarks>
+        private static IEnumerator CheckFireplacesAreUnderstood(TestReport report)
+        {
+            if (ZNetScene.instance == null)
+            {
+                report.Check(false, "control: the fireplace check has a scene to look in");
+                yield break;
+            }
+
+            // The same helper the checks below use, so "which fire was this" has one answer
+            // rather than two loops that can drift apart about what a feedable hearth is.
+            GameObject hearth = FeedableFireplace();
+            GameObject oven = null, endless = null;
+
+            foreach (GameObject prefab in ZNetScene.instance.m_prefabs)
+            {
+                if (prefab == null || !prefab.TryGetComponent(out Fireplace fire)) continue;
+
+                bool cooks = prefab.GetComponent<CookingStation>() != null;
+
+                if (cooks && oven == null) oven = prefab;
+                if (!cooks && endless == null && (fire.m_infiniteFuel || !fire.m_canRefill)) endless = prefab;
+            }
+
+            report.Check(hearth != null,
+                "this world has a hearth that can be fed, which is what the protocol is for",
+                hearth == null ? "none" : $"{hearth.name} (the fire pit where this world has one)");
+
+            if (hearth != null)
+            {
+                // Asked of the prefab, which is all this check has. StationProbe cannot answer
+                // here - it requires a valid ZNetView and a prefab has none - and the registering
+                // half is proven on a real instance by the hearth check below. What a prefab can
+                // answer is what the screen will offer, which is the other half of being tendable.
+                report.Check(ProcessingOptions.Fuel(hearth.name).Length > 0,
+                    "the screen knows what a hearth burns, so it can be told to keep it lit",
+                    $"{hearth.name} burns '{ProcessingOptions.Fuel(hearth.name)}'");
+            }
+
+            // The order. An oven must still be a cooking station, not a fire pit.
+            if (oven != null)
+            {
+                GameObject spawned = Spawn(oven.name, Player.m_localPlayer.transform.position +
+                                                      new Vector3(6f, 0f, -6f));
+                yield return new WaitForSecondsRealtime(.4f);
+
+                bool cooks = spawned != null && StationProbe.TryFind(spawned, out StationProtocol found) &&
+                             found.Kind == StationKind.Cooking;
+
+                report.Check(cooks,
+                    "an oven is still a cooking station, not a fire pit that cooks nothing",
+                    $"{oven.name} reads as " +
+                    $"{(spawned != null && StationProbe.TryFind(spawned, out StationProtocol k) ? k.Kind.ToString() : "nothing")}");
+
+                Release(spawned);
+            }
+            else
+            {
+                report.Check(true, "order check: this world has no fireplace that also cooks");
+            }
+
+            // And the two that cannot be fed are refused before a villager carries a log to one.
+            if (endless != null)
+            {
+                report.Check(ProcessingOptions.Fuel(endless.name).Length == 0,
+                    "a fire that burns for ever or refuses refills is never offered fuel",
+                    $"{endless.name}");
+            }
+            else
+            {
+                report.Check(true, "refusal check: every fireplace in this world can be fed");
+            }
+
+            yield return null;
+        }
+
+        /// <summary>
+        ///     A villager fetches wood from a chest and keeps a hearth burning.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The debt this pays. A fireplace was excluded because feeding one "destroys the
+        ///         fuel silently" - so what is asserted is the fire's own fuel level rising, read
+        ///         off its record, and not merely that a villager looked busy.
+        ///     </para>
+        ///     <para>
+        ///         And the wood leaving the chest is asserted separately, because that is the
+        ///         fetching half. A check that only watched the fuel level would pass identically
+        ///         if somebody had hand-loaded the villager.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckAFireIsKeptFuelled(TestReport report, Colony colony, Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject prefab = FeedableFireplace();
+            if (prefab == null)
+            {
+                report.Check(false, "control: the hearth check could name a fire it can feed");
+                yield break;
+            }
+
+            Fireplace asset = prefab.GetComponent<Fireplace>();
+            string fuel = asset.m_fuelItem.gameObject.name;
+
+            GameObject hearth = Spawn(prefab.name, OnGround(origin + new Vector3(9f, 0f, -4f)));
+            GameObject chest = Spawn("piece_chest_wood", OnGround(origin + new Vector3(12f, 0f, -4f)));
+            yield return new WaitForSecondsRealtime(.4f);
+
+            StructureRecord fire = hearth == null ? null : Register(colony, hearth, "The hearth");
+            StructureRecord store = chest == null ? null : Register(colony, chest, "Wood store");
+
+            if (fire == null || store == null)
+            {
+                report.Check(false, "control: the hearth check could place and register its fixtures",
+                    $"fire={(fire != null)} store={(store != null)}");
+                Release(hearth);
+                Release(chest);
+                yield break;
+            }
+
+            report.Check((fire.Capabilities & StructureCapability.Processing) != 0,
+                "a hearth registers as something the settlement can tend",
+                $"capabilities={fire.Capabilities}");
+
+            ColonyOperations.EditSettings(colony, fire.Id, s =>
+            {
+                s.Fuel = new List<string> { fuel };
+                s.KeepFull = 1f;
+            });
+
+            Container box = chest.GetComponentInChildren<Container>(true);
+            int seeded = PutIn(box, fuel, 20);
+
+            // Burnt down, so there is something to put right.
+            ZDO record = Zdo(hearth);
+            record.Set(ZDOVars.s_fuel, 0f);
+
+            float before = record.GetFloat(ZDOVars.s_fuel, -1f);
+            int inChest = CountIn(box, fuel);
+
+            report.Check(seeded > 0 && before <= 0f && inChest > 0,
+                "control: the fire is out and the wood to light it is in a chest",
+                $"fuel={before:0.##} chest={inChest} of {fuel}");
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                new JobDefinition { Id = "tend", Name = "Tend", Kind = JobKind.Tend, Repeat = 30 }
+            });
+
+            Villager hand = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (hand == null || !hand.TryGetComponent(out ZNetView who) || !who.IsValid())
+            {
+                report.Check(false, "control: the hearth check could spawn a villager");
+                Cleanup(colony, null, null, hearth, null);
+                colony.RemoveStructure(store.Id);
+                Release(chest);
+                colony.State.SetJobs(new List<JobDefinition>());
+                yield break;
+            }
+
+            SendRested(who);
+
+            // Empty handed, which is the point: the fetching is part of what this proves.
+            Container bag = VillagerInventory.Attach(hand.gameObject, who);
+            Clear(bag.GetInventory());
+            VillagerInventory.Persist(bag, who);
+
+            new VillagerState(who.GetZDO()).SetQueue(new List<string> { "tend" });
+
+            float fuelled = before;
+            float elapsed = 0f;
+
+            while (elapsed < CookSeconds && fuelled <= before)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                elapsed += .5f;
+
+                if (hand == null || !who.IsValid()) break;
+                fuelled = record.GetFloat(ZDOVars.s_fuel, -1f);
+            }
+
+            report.Check(fuelled > before,
+                "a villager fetched wood and put it on the fire, and the fire's own record says so",
+                $"{prefab.name}: fuel {before:0.##} -> {fuelled:0.##} after {elapsed:0}s " +
+                $"doing='{(hand != null ? hand.Activity : "gone")}'");
+
+            report.Check(CountIn(box, fuel) < inChest,
+                "and the wood came out of the chest, which is the half nobody had ever shown",
+                $"{prefab.name}: chest {inChest} -> {CountIn(box, fuel)} of {fuel}");
+
+            VillagerLifecycle.Remove(colony, who.GetZDO().m_uid);
+            colony.RemoveStructure(fire.Id);
+            colony.RemoveStructure(store.Id);
+            Release(hearth);
+            Release(chest);
+            colony.State.SetJobs(new List<JobDefinition>());
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A grill with no fire under it is left alone, and the villager says why.
+        /// </summary>
+        /// <remarks>
+        ///     The silent stall this whole piece of work exists to close. Before it, a villager
+        ///     loaded a cold grill, the food never cooked, nothing ever came off, and the job sat
+        ///     there looking exactly like a job that was working.
+        /// </remarks>
+        private static IEnumerator CheckAColdGrillIsRefused(TestReport report, Colony colony, Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject grill = SpawnFirst(OnGround(origin + new Vector3(-12f, 0f, -14f)),
+                "piece_cookingstation");
+            yield return new WaitForSecondsRealtime(.4f);
+
+            CookingStation station = grill == null ? null : grill.GetComponentInChildren<CookingStation>(true);
+
+            if (station == null)
+            {
+                report.Check(false, "control: the cold-grill check could place a cooking station");
+                Release(grill);
+                yield break;
+            }
+
+            if (!station.m_requireFire)
+            {
+                report.Check(true, "cold-grill check: this world's grill needs no fire beneath it",
+                    $"{grill.name} requireFire={station.m_requireFire}");
+                Release(grill);
+                yield break;
+            }
+
+            List<string> inputs = ProcessingOptions.Inputs(Utils.GetPrefabName(grill));
+            string raw = inputs.Count > 0 ? inputs[0] : string.Empty;
+
+            if (raw.Length == 0 || !StationProbe.TryFind(grill, out StationProtocol protocol))
+            {
+                report.Check(false, "control: the cold-grill check could read what it cooks",
+                    $"inputs={inputs.Count}");
+                Release(grill);
+                yield break;
+            }
+
+            StructureSettings wants = new StructureSettings { Input = new List<string> { raw }, KeepFull = 1f };
+
+            report.Check(!protocol.WhatItWants(wants, string.Empty).Any,
+                "a grill with no fire under it asks for nothing, rather than filling up and stalling",
+                $"{grill.name} wants '{protocol.WhatItWants(wants, string.Empty).Item}'");
+
+            report.Check(protocol.WouldTake(raw, false) == FeedResult.Refused,
+                "and refuses the food outright if somebody brings it anyway",
+                $"would take {raw}: {protocol.WouldTake(raw, false)}");
+
+            // The control, without which the two above pass for a protocol that refuses always.
+            GameObject fire = SpawnFirst(OnGround(grill.transform.position), "fire_pit", "bonfire");
+            yield return new WaitForSecondsRealtime(1f);
+
+            if (fire == null)
+            {
+                report.Check(true, "cold-grill control: this world has no fire pit to light");
+            }
+            else
+            {
+                report.Check(protocol.WouldTake(raw, false) == FeedResult.Fed,
+                    "control: and takes it once a fire burns beneath it",
+                    $"would take {raw}: {protocol.WouldTake(raw, false)}");
+            }
+
+            Release(fire);
+            Release(grill);
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     The settlement stops burning its last wood.
+        /// </summary>
+        /// <remarks>
+        ///     Driven through the job's own gate rather than by staging a settlement down to its
+        ///     last log, because what is under test is the rule and not the hauling - and a check
+        ///     that wrote the rule out again would pass while the job quietly ignored it.
+        /// </remarks>
+        private static IEnumerator CheckTheReserveStopsTheBurning(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            GameObject prefab = FeedableFireplace();
+            if (prefab == null)
+            {
+                report.Check(false, "control: the reserve check could name a fire it can feed");
+                yield break;
+            }
+
+            string fuel = prefab.GetComponent<Fireplace>().m_fuelItem.gameObject.name;
+
+            GameObject hearth = Spawn(prefab.name, OnGround(origin + new Vector3(16f, 0f, -10f)));
+            GameObject chest = Spawn("piece_chest_wood", OnGround(origin + new Vector3(19f, 0f, -10f)));
+            yield return new WaitForSecondsRealtime(.4f);
+
+            StructureRecord fire = hearth == null ? null : Register(colony, hearth, "Reserved hearth");
+            StructureRecord store = chest == null ? null : Register(colony, chest, "Reserve store");
+
+            if (fire == null || store == null)
+            {
+                report.Check(false, "control: the reserve check could place and register its fixtures");
+                Release(hearth);
+                Release(chest);
+                yield break;
+            }
+
+            ColonyOperations.EditSettings(colony, fire.Id, s =>
+            {
+                s.Fuel = new List<string> { fuel };
+                s.KeepFull = 1f;
+            });
+
+            // Read again, because the record this check is holding is a *copy*. The colony
+            // decodes its structures from a ZDO on every call, so editing settings rewrites the
+            // list and leaves the object in hand describing the settlement as it was a moment
+            // ago - with no fuel configured, and therefore wanting nothing. The job never meets
+            // this because it looks the record up fresh each tick; a check that keeps one does.
+            fire = colony.State.GetStructures().Find(r => r.Id == fire.Id);
+
+            Container box = chest.GetComponentInChildren<Container>(true);
+            PutIn(box, fuel, 10);
+            Zdo(hearth).Set(ZDOVars.s_fuel, 0f);
+
+            if (fire == null || fire.Settings.Fuel.Count == 0)
+            {
+                report.Check(false, "control: the reserve check's own record kept what it was told",
+                    fire == null ? "record gone" : $"fuel settings={fire.Settings.Fuel.Count}");
+                Release(hearth);
+                Release(chest);
+                yield break;
+            }
+
+            Stock.ResetForTest();
+            int held = Stock.Held(colony, fuel);
+
+            report.Check(held > 0,
+                "control: the settlement is holding fuel before the rule is asked",
+                $"held={held} of {fuel}");
+
+            JobDefinition open = new JobDefinition { Id = "tend", Kind = JobKind.Tend };
+            JobDefinition guarded = new JobDefinition { Id = "tend", Kind = JobKind.Tend, FuelReserve = held + 5 };
+
+            report.Check(TendJob.WouldCarry(colony, open, fire),
+                "control: with no reserve, a cold hearth is fed",
+                $"held={held} reserve=none");
+
+            report.Check(!TendJob.WouldCarry(colony, guarded, fire),
+                "the settlement will not burn its last wood when a reserve is set",
+                $"held={held} reserve={guarded.FuelReserve}");
+
+            JobDefinition loose = new JobDefinition { Id = "tend", Kind = JobKind.Tend, FuelReserve = 1 };
+            report.Check(TendJob.WouldCarry(colony, loose, fire),
+                "control: and feeds it again once the reserve is below what we hold",
+                $"held={held} reserve=1");
+
+            colony.RemoveStructure(fire.Id);
+            colony.RemoveStructure(store.Id);
+            Release(hearth);
+            Release(chest);
+            Stock.ResetForTest();
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>How long a villager is given to fetch fuel and put it on a fire.</summary>
+        private static float CookSeconds => 120f;
+
+        /// <summary>A fireplace this world ships that can actually be fed, or null.</summary>
+        /// <remarks>
+        ///     <para>
+        ///         Found by what it is rather than by name, and it deliberately skips anything
+        ///         that also cooks or smelts - those are claimed by the component that does the
+        ///         work, and a check that picked one would be testing the wrong protocol.
+        ///     </para>
+        ///     <para>
+        ///         <b>The fire pit is preferred where this world has one.</b> Any feedable
+        ///         fireplace proves the protocol equally well, but the fire pit is the one a
+        ///         player builds on their first night and puts a cooking grill on top of - so a
+        ///         check that uses it is exercising the arrangement people actually have, and a
+        ///         failure in it reads as "my campfire went out" rather than as something about a
+        ///         bonfire nobody has built yet. Falls back to whatever else burns, because the
+        ///         name is a convenience and never a requirement.
+        ///     </para>
+        /// </remarks>
+        private static GameObject FeedableFireplace()
+        {
+            if (ZNetScene.instance == null) return null;
+
+            GameObject first = null;
+
+            foreach (GameObject prefab in ZNetScene.instance.m_prefabs)
+            {
+                if (prefab == null || !prefab.TryGetComponent(out Fireplace fire)) continue;
+                if (prefab.GetComponent<CookingStation>() != null) continue;
+                if (prefab.GetComponent<Smelter>() != null) continue;
+                if (fire.m_infiniteFuel || !fire.m_canRefill || fire.m_fuelItem == null) continue;
+
+                if (prefab.name == "fire_pit") return prefab;
+                if (first == null) first = prefab;
+            }
+
+            return first;
+        }
 
         private static IEnumerator CheckAVillagerFetchesItsOwnTool(TestReport report, Colony colony,
             Vector3 origin)
