@@ -231,6 +231,20 @@ namespace Kukolony.Jobs
             // rather than work, so they moved to the stations themselves and version 6 stops
             // writing them. Read still consumes them from a version-5 blob, because they are
             // not the last thing in the stream: every job after this one is read from it.
+
+            // Version 7 and after. Appended last, so nothing an older reader knows how to find
+            // has moved - which is what lets a version-6 record decode against this layout.
+            package.Write(MineBoulders);
+
+            List<string> ores = Ores ?? new List<string>();
+            if (ores.Count > MaxNames)
+            {
+                Log.Warning($"[job] '{Name}' names {ores.Count} ores - keeping the first {MaxNames}.");
+                ores = ores.GetRange(0, MaxNames);
+            }
+
+            package.Write(ores.Count);
+            foreach (string ore in ores) package.Write(ore ?? string.Empty);
         }
 
         /// <summary>
@@ -323,19 +337,32 @@ namespace Kukolony.Jobs
             // stream, and a reader that skipped four fields would decode the next job from the
             // middle of this one. The same reason retired capability bits are masked on read
             // rather than left out of the format.
-            if (version != 5) return job;
-
-            package.ReadInt();
-            package.ReadInt();
-            package.ReadInt();
-
-            int stations = package.ReadInt();
-            if (stations < 0 || stations > MaxAreas)
+            if (version == 5)
             {
-                throw new System.IO.InvalidDataException($"job '{job.Name}' claims {stations} stations");
+                package.ReadInt();
+                package.ReadInt();
+                package.ReadInt();
+
+                int stations = package.ReadInt();
+                if (stations < 0 || stations > MaxAreas)
+                {
+                    throw new System.IO.InvalidDataException($"job '{job.Name}' claims {stations} stations");
+                }
+
+                for (int i = 0; i < stations; i++) package.ReadString();
             }
 
-            for (int i = 0; i < stations; i++) package.ReadString();
+            if (version < 7) return job;
+
+            job.MineBoulders = package.ReadBool();
+
+            int ores = package.ReadInt();
+            if (ores < 0 || ores > MaxNames)
+            {
+                throw new System.IO.InvalidDataException($"job '{job.Name}' names {ores} ores");
+            }
+
+            for (int i = 0; i < ores; i++) job.Ores.Add(package.ReadString());
 
             // Said rather than dropped in silence. These settings had real effects - a job set
             // to clear only, or to two named kilns, becomes a job that supplies every station in

@@ -58,12 +58,12 @@ namespace Kukolony.Colonies
         ///     The job record format this build writes. Readers accept 2 upwards.
         /// </summary>
         /// <remarks>
-        ///     Version 6 stops writing the four tending settings that described stations rather
-        ///     than work. A version-5 blob still carries them and is still read - they are
-        ///     consumed and dropped, because the bytes sit in the middle of a stream holding
-        ///     every job the colony has.
+        ///     Version 6 stopped writing the four tending settings that described stations
+        ///     rather than work; a version-5 blob still carries them and is still read, because
+        ///     the bytes sit in the middle of a stream holding every job the colony has. Version
+        ///     7 appends what a mining job needs.
         /// </remarks>
-        internal const int JobFormat = 6;
+        internal const int JobFormat = 7;
 
         internal List<StructureRecord> GetStructures()
         {

@@ -332,6 +332,7 @@ namespace Kukolony.Gui
             if (job.Kind == JobKind.Chop) BuildChop(host, column, job);
             if (job.Kind == JobKind.Tend) BuildTend(host, column, colony, job);
             if (job.Kind == JobKind.Craft) BuildCraft(host, column, colony, job);
+            if (job.Kind == JobKind.Mine) BuildMine(host, column, job);
 
             // Where it works. The Kolony itself and its work-area flags, and nothing else:
             // any registered thing can still serve as a centre, but offering every chest and
@@ -521,6 +522,72 @@ namespace Kukolony.Gui
         ///     other, or both, and a full woodshed beside a bare hillside is the failure the
         ///     first one prevents.
         /// </remarks>
+        /// <summary>
+        ///     What a mining job goes after, and when it stops.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>By ore, not by rock.</b> A deposit's drop table is asset data on its prefab,
+        ///         so the list can be built from what this world actually contains - which means
+        ///         a modded deposit that yields copper is covered by asking for copper, and a
+        ///         player never has to know what the rock is called.
+        ///     </para>
+        ///     <para>
+        ///         The stopping rule matters more here than anywhere else: a forest grows back
+        ///         and a vein does not, so a mining job with no target strips a region
+        ///         permanently while every individual decision is correct. The row says so.
+        ///     </para>
+        /// </remarks>
+        private void BuildMine(ColonyScreen host, Column column, JobDefinition job)
+        {
+            if (column.TryRow(out Row ores))
+            {
+                Widgets.Choice(ores, "Which ore",
+                    job.Ores.Count == 0 ? "anything" : Summarise(job.Ores),
+                    () => host.Push(new PickerScreen("Which ore", SearchOres, job.Ores, true,
+                        chosen => { Edit(host, j => j.Ores = chosen); host.Refresh(); })));
+            }
+
+            if (column.TryRow(out Row loose))
+            {
+                // 260, not the default: "loose rock as well" needs the room, and these labels
+                // overflow their cell rather than clipping.
+                Widgets.Caption(loose, "Also break", 220f);
+                Toggle(host, loose, "Loose rock", job.MineBoulders, (j, on) => j.MineBoulders = on, 260f);
+            }
+
+            BuildStock(host, column, job);
+
+            if (job.StockTarget <= 0 && column.TryRow(out Row warn))
+            {
+                Widgets.Label(warn, "Ore does not grow back - without a limit this clears the area.",
+                    Color.gray);
+            }
+        }
+
+        /// <summary>Every ore the deposits in this world drop, for the picker.</summary>
+        private static List<PickerScreen.Option> SearchOres(string filter)
+        {
+            List<string> ores = new List<string>();
+            Resources.Mineable.Ores(ores);
+
+            List<PickerScreen.Option> options = new List<PickerScreen.Option>();
+            foreach (string ore in ores)
+            {
+                string label = ItemCatalogue.Label(ore);
+                if (filter.Length > 0 &&
+                    label.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0 &&
+                    ore.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                options.Add(new PickerScreen.Option(ore, label));
+            }
+
+            return options;
+        }
+
         private void BuildChop(ColonyScreen host, Column column, JobDefinition job)
         {
             if (column.TryRow(out Row what))

@@ -9,6 +9,7 @@ using Kukolony.Jobs.Chop;
 using Kukolony.Gui;
 using Kukolony.KeepAlive;
 using Kukolony.Resources;
+using Kukolony.Resources.Mining;
 using Kukolony.Villagers;
 using UnityEngine;
 
@@ -318,6 +319,12 @@ namespace Kukolony.Debug
                     yield return CheckACraftedOrderIsMadeFiledAndStops(report, colony, origin);
                     break;
 
+                case "mine":
+                    CheckJobsSurviveAVersion(report);
+                    yield return CheckMiningIndex(report);
+                    yield return CheckAVeinIsMinedPartByPart(report, colony, origin);
+                    break;
+
                 case "queue":
                     yield return CheckAStuckTripEndsAndTheQueueMovesOn(report, colony);
                     yield return CheckAPresetKeepsItsOrder(report, colony);
@@ -333,7 +340,7 @@ namespace Kukolony.Debug
                     // Named but unknown. Failing beats running everything under a name that
                     // says otherwise, or running nothing and reporting a pass.
                     report.Check(false, $"'{wanted}' is not a slice this run knows",
-                        "known: chop, travel, queue, tend, craft, swing");
+                        "known: chop, travel, queue, tend, craft, mine, swing");
                     break;
             }
 
@@ -1468,6 +1475,58 @@ namespace Kukolony.Debug
                 "and so does the job written after it, which is where a lost byte would show",
                 $"id='{readSecond.Id}' repeat={readSecond.Repeat} leave={readSecond.LeaveStanding} " +
                 $"stock='{readSecond.StockItem}'x{readSecond.StockTarget}");
+
+            // Version 6, which mining appended to. Built by hand for the same reason version 3
+            // is: the writer only writes today's layout, and this is the branch that fails
+            // silently - a reader that ran past the end of a version-6 record would decode the
+            // next job from inside this one and produce plausible nonsense rather than an error.
+            ZPackage six = new ZPackage();
+            WriteSix(six, "sixth", "Older chop", JobKind.Chop, 5);
+            WriteSix(six, "seventh", "The one after it", JobKind.Haul, 11);
+
+            ZPackage older = new ZPackage(six.GetArray());
+            JobDefinition beforeMining = JobDefinition.Read(older, 6);
+            JobDefinition afterIt = JobDefinition.Read(older, 6);
+
+            report.Check(beforeMining.Id == "sixth" && beforeMining.Repeat == 5 &&
+                         !beforeMining.MineBoulders && beforeMining.Ores.Count == 0,
+                "a job written before mining decodes, with the mining settings at their defaults",
+                $"id='{beforeMining.Id}' repeat={beforeMining.Repeat} " +
+                $"boulders={beforeMining.MineBoulders} ores={beforeMining.Ores.Count}");
+
+            report.Check(afterIt.Id == "seventh" && afterIt.Repeat == 11 &&
+                         afterIt.Kind == JobKind.Haul,
+                "and so does the one after it",
+                $"id='{afterIt.Id}' repeat={afterIt.Repeat} kind={afterIt.Kind}");
+        }
+
+        /// <summary>One job in the layout version 6 wrote - today's, without the mining tail.</summary>
+        private static void WriteSix(ZPackage package, string id, string name, JobKind kind, int repeat)
+        {
+            package.Write(id);
+            package.Write(name);
+            package.Write((int)kind);
+            package.Write(repeat);
+            package.Write(true);
+            package.Write(false);
+
+            package.Write(1);
+            package.Write("some-area-token");
+
+            package.Write(21f);
+
+            package.Write(true);
+            package.Write(true);
+            package.Write(false);
+            package.Write(4);
+            package.Write("Wood");
+            package.Write(60);
+
+            package.Write(1);
+            package.Write("Stone");
+
+            package.Write(1);
+            package.Write("Birch");
         }
 
         /// <summary>The four fields version 5 wrote and this build does not.</summary>
@@ -5422,6 +5481,142 @@ namespace Kukolony.Debug
         ///     meaningless if the index is empty, and an empty index makes them all pass by
         ///     finding nothing to contradict.
         /// </remarks>
+        /// <summary>
+        ///     The mining classifier knows what this world holds, and can name it.
+        /// </summary>
+        /// <remarks>
+        ///     Asked of the index rather than written down, for the reason every list here is:
+        ///     the mod does not ship the assets and has been wrong about a prefab name before.
+        ///     The ore list is the interesting half - it is read from drop tables, so a world
+        ///     where it came back empty would mean the job's picker offers nothing and the
+        ///     failure would show up as "nothing to mine" with no explanation.
+        /// </remarks>
+        private static IEnumerator CheckMiningIndex(TestReport report)
+        {
+            if (!Mineable.IsReady) Mineable.Rebuild();
+
+            report.Check(Mineable.IsReady, "the mining classifier found prefabs to classify");
+
+            string anyDeposit = Mineable.SampleDeposit(0, 99);
+            report.Check(!string.IsNullOrEmpty(anyDeposit),
+                "it can name a real deposit, so checks need not guess at prefab names",
+                $"sample={anyDeposit}");
+
+            // The tiers a tool-tier check depends on. A world with only one tier of rock cannot
+            // stage that check and should say so rather than pass.
+            string soft = Mineable.SampleDeposit(0, 0);
+            string hard = Mineable.SampleDeposit(2, 99);
+            report.Check(!string.IsNullOrEmpty(soft) && !string.IsNullOrEmpty(hard),
+                "control: it can tell rock any pickaxe breaks from rock that needs a good one",
+                $"soft={soft} hard={hard}");
+
+            List<string> ores = new List<string>();
+            Mineable.Ores(ores);
+            report.Check(ores.Count > 0,
+                "the ore picker has real ores to offer, read from drop tables",
+                $"ores={ores.Count}: {string.Join(",", ores.ToArray())}");
+
+            yield break;
+        }
+
+        /// <summary>
+        ///     A deposit is mined part by part, and what is left survives being unloaded.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         The behaviour that is unique to this job. A tree is destroyed or it is not; a
+        ///         deposit is destroyed one part at a time and spends its whole working life
+        ///         partly mined - so the thing that can go wrong, and go wrong silently, is a
+        ///         villager that cannot tell which parts are left.
+        ///     </para>
+        ///     <para>
+        ///         Asserted on the parts rather than on the ore, because ore lands on the ground
+        ///         and hauling is a separate job: counting drops would make this a check of two
+        ///         things, and it would pass or fail for reasons that are not mining's.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckAVeinIsMinedPartByPart(TestReport report, Colony colony,
+            Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            MiningGround.ResetForTest();
+
+            if (!Mineable.IsReady) Mineable.Rebuild();
+
+            // Whatever this world calls a deposit a plain pickaxe can break. Naming one would
+            // be a fixture that keeps passing after the game renames it.
+            string named = Mineable.SampleDeposit(0, 0);
+            if (string.IsNullOrEmpty(named)) named = Mineable.SampleDeposit(0, 99);
+
+            GameObject deposit = string.IsNullOrEmpty(named)
+                ? null
+                : Spawn(named, origin + new Vector3(12f, 0f, 12f));
+
+            yield return new WaitForSecondsRealtime(.5f);
+
+            if (deposit == null || !MineProbe.TryFind(deposit, out MineProtocol rock))
+            {
+                report.Check(false, "control: the mining check could place a deposit",
+                    $"named='{named}' placed={(deposit != null)}");
+                Release(deposit);
+                yield break;
+            }
+
+            List<MineArea> parts = new List<MineArea>();
+            rock.Areas(parts);
+            int whole = parts.Count;
+
+            report.Check(whole > 0, "a deposit offers parts to work", $"parts={whole}");
+
+            // Struck directly rather than through a villager: what is under test is that the
+            // protocol reads the rock correctly, and a villager walking to it would make this a
+            // check of pathing as well.
+            ZNetView view = deposit.GetComponent<ZNetView>();
+            if (view != null) view.ClaimOwnership();
+
+            int struck = 0;
+            for (int blow = 0; blow < 40 && !rock.Spent(); blow++)
+            {
+                parts.Clear();
+                rock.Areas(parts);
+                if (parts.Count == 0) break;
+
+                HitData hit = new HitData { m_toolTier = 100, m_point = parts[0].At };
+                hit.m_damage.m_pickaxe = 500f;
+
+                if (rock.Strike(parts[0], hit, out string _) == BlowResult.Struck) struck++;
+                yield return null;
+            }
+
+            parts.Clear();
+            rock.Areas(parts);
+            int left = parts.Count;
+
+            report.Check(left < whole,
+                "and mining it takes parts off one at a time",
+                $"parts {whole} -> {left} after {struck} blow(s)");
+
+            // The half that only matters for mining: health is per part and lives on the ZDO,
+            // so a deposit half-mined must still be half-mined after it has been out of memory.
+            // Asserted by re-reading the record rather than the instance.
+            if (left > 0 && view != null && view.IsValid())
+            {
+                ZDOID id = view.GetZDO().m_uid;
+                string saved = view.GetZDO().GetString(ZDOVars.s_health, string.Empty);
+
+                report.Check(!string.IsNullOrEmpty(saved),
+                    "a partly-mined deposit records what is left on its own record",
+                    $"saved={(string.IsNullOrEmpty(saved) ? "nothing" : saved.Length + " bytes")}");
+
+                report.Check(!id.IsNone() && ZDOMan.instance.GetZDO(id) != null,
+                    "control: and the record is still there to be read");
+            }
+
+            Release(deposit);
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
         private static IEnumerator CheckChoppingIndex(TestReport report)
         {
             if (!Choppable.IsReady) Choppable.Rebuild();
