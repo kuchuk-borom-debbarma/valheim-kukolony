@@ -180,6 +180,30 @@ namespace Kukolony.Jobs.Haul
                 return JobResult.Running;
             }
 
+            // A crafter waiting to be relieved comes before anything on the floor. What it
+            // makes stays in its own bag, so a full-bagged crafter has stopped working
+            // altogether - and a dropped item will still be there in a minute. Bounded by the
+            // job's work areas like every other search here, so first in priority is not a
+            // licence to cross the map for one nail.
+            if (Selection.TryFindCarriedWork(context.Colony, context.Job, context.Villager,
+                    out Villager carrier, out StructureRecord waiting))
+            {
+                ZDOID who = carrier.Id;
+                if (who.IsNone())
+                {
+                    return JobOutcomes.Skipped(context.State, "nothing to haul", out activity);
+                }
+
+                // The carrier is claimed exactly as a chest is, so two haulers do not converge
+                // on one crafter and walk away with half a load each.
+                state.SetTarget(who);
+                state.SetDestination(waiting.Id);
+                context.Walk.Forget();
+                context.Walk.NewLeg();
+                activity = "collecting from " + carrier.State.Name;
+                return JobResult.Running;
+            }
+
             // Ground first, decided per villager at the moment it picks up work rather than
             // across the whole settlement. A settlement with a permanent trickle of dropped
             // items would otherwise never reorganise itself at all, because there would always
@@ -396,9 +420,19 @@ namespace Kukolony.Jobs.Haul
 
         private static JobResult Collect(HaulContext context, GameObject source, out string activity)
         {
-            // A source is either something lying on the ground or a container being tidied. The
-            // state machine does not care which - it is about where the villager is, not what it
-            // came for - so the only place the difference exists is here.
+            // A source is something on the ground, a container being tidied, or a villager
+            // holding finished goods. The state machine does not care which - it is about where
+            // the villager is, not what it came for - so the only place the difference exists is
+            // here.
+            //
+            // The carrier is tested first, and has to be: a villager's bag is a Container on a
+            // child, so the container branch below would happily claim it and then fail looking
+            // for a structure record that a person does not have.
+            if (source != null && source.TryGetComponent(out Villager carrier))
+            {
+                return CollectFromCarrier(context, carrier, out activity);
+            }
+
             if (source != null && source.GetComponentInChildren<Container>(true) != null)
             {
                 return CollectFromContainer(context, source, out activity);
@@ -449,6 +483,105 @@ namespace Kukolony.Jobs.Haul
         ///     the world never agreed to keep. Deciding on arrival also batches for free:
         ///     everything in this chest bound for that one leaves in the same visit.
         /// </remarks>
+        /// <summary>
+        ///     Takes finished goods off a villager holding them.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Its own path rather than the container one, because the source is a person
+        ///         and not a structure: there is no record, no "may take from", and no caps to
+        ///         consult. What decides here is the job's own item list and whether the
+        ///         settlement has somewhere to put the thing.
+        ///     </para>
+        ///     <para>
+        ///         <b>The carrier stops advertising when its bag is bare.</b> Cleared by the
+        ///         hauler at the moment it empties them rather than left for the crafter to
+        ///         notice, because a crafter with nothing to make is not ticking often and a
+        ///         stale advertisement sends every hauler in the settlement to an empty person.
+        ///     </para>
+        /// </remarks>
+        private static JobResult CollectFromCarrier(HaulContext context, Villager carrier, out string activity)
+        {
+            Container bag = carrier.Bag;
+            StructureRecord to = SettlementIndex.Find(context.Colony, context.State.Destination);
+
+            if (bag == null || to == null)
+            {
+                context.State.ClearTarget();
+                activity = "there was nothing to collect";
+                return JobResult.Running;
+            }
+
+            ItemDrop.ItemData wanted = Wanted(context, bag.GetInventory(), to);
+            if (wanted == null)
+            {
+                // Emptied, or nothing left that this job handles. Either way the advertisement
+                // is stale for anything this hauler could do about it.
+                VillagerState theirs = carrier.State;
+                if (theirs.IsValid && Empty(bag)) theirs.SetHasGoods(false);
+
+                context.State.ClearTarget();
+                activity = "that is collected";
+                return JobResult.Running;
+            }
+
+            context.Animation.Reach();
+
+            switch (Carrying.TakeFromContainer(bag, wanted, context.Bag.GetInventory(), out string lifted))
+            {
+                case TakeResult.Took:
+                    context.State.AddCargo(lifted);
+                    activity = "collecting";
+                    return JobResult.Running;
+
+                case TakeResult.Waiting:
+                    activity = "waiting for " + carrier.State.Name;
+                    return JobResult.Running;
+
+                case TakeResult.Full:
+                    context.State.ClearTarget();
+                    activity = "my bag is full";
+                    return JobResult.Running;
+
+                default:
+                    context.State.ClearTarget();
+                    activity = "it was gone";
+                    return JobResult.Running;
+            }
+        }
+
+        /// <summary>The first thing in a carrier's bag this job handles and this trip can file.</summary>
+        private static ItemDrop.ItemData Wanted(HaulContext context, Inventory bag, StructureRecord to)
+        {
+            if (bag == null) return null;
+
+            foreach (ItemDrop.ItemData item in bag.GetAllItems())
+            {
+                string prefab = Carrying.NameOf(item);
+                if (string.IsNullOrEmpty(prefab)) continue;
+
+                if (context.Job != null && context.Job.Items.Count > 0 &&
+                    !context.Job.Items.Contains(prefab))
+                {
+                    continue;
+                }
+
+                // Only what this trip is actually going to: a hauler bound for the woodshed
+                // does not take ore it would then have nowhere to put.
+                if (!to.Settings.Accepts.Contains(prefab) && to.Settings.Accepts.Count > 0) continue;
+
+                return item;
+            }
+
+            return null;
+        }
+
+        private static bool Empty(Container bag)
+        {
+            Inventory inventory = bag.GetInventory();
+            return inventory == null || inventory.GetAllItems().Count == 0;
+        }
+
         private static JobResult CollectFromContainer(HaulContext context, GameObject source, out string activity)
         {
             Container container = source.GetComponentInChildren<Container>(true);

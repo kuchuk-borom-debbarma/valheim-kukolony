@@ -219,6 +219,24 @@ namespace Kukolony.Villagers
         /// </remarks>
         internal ZDOID Id => Bind() && _nview.IsValid() ? _nview.GetZDO().m_uid : ZDOID.None;
 
+        /// <summary>
+        ///     What this villager is carrying, readable by anyone.
+        /// </summary>
+        /// <remarks>
+        ///     Exposed because a hauler collects finished goods out of a crafter's bag, which
+        ///     means one villager reads another's. Bound on demand like everything else here, so
+        ///     asking before the villager has ever ticked is safe.
+        /// </remarks>
+        internal Container Bag
+        {
+            get
+            {
+                if (!Bind() || !_nview.IsValid()) return null;
+                EnsureBag();
+                return _bag;
+            }
+        }
+
         /// <summary>Whether this villager is partway through a journey longer than one hop.</summary>
         internal bool IsTravelling => _walk != null && _walk.Travelling;
 
@@ -771,6 +789,12 @@ namespace Kukolony.Villagers
         private Jobs.JobResult Run(Colonies.Colony colony, Jobs.JobDefinition job,
             VillagerState state, float deltaTime, out string doing)
         {
+            // Only a crafter advertises goods for collection, and it says so every tick while it
+            // does. A villager that moves on to another job must stop advertising, or it stays a
+            // magnet for every hauler in the settlement while holding nothing anybody wants -
+            // and the job that would have cleared the flag is no longer the one running.
+            if (job.Kind != Jobs.JobKind.Craft) state.SetHasGoods(false);
+
             switch (job.Kind)
             {
                 case Jobs.JobKind.Haul:

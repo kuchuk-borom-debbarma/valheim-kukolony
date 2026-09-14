@@ -111,6 +111,13 @@ namespace Kukolony.Jobs.Craft
                 bagRoom: recipe != null && Room(bag, recipe) > 0,
                 tired: false);
 
+            // Anything held that this recipe does not need is finished work, and a hauler is
+            // told so. Recomputed each tick rather than latched when a craft lands, because the
+            // bag changes for reasons this job does not see - a hauler taking half of it, a
+            // player helping themselves - and a stale advertisement sends every hauler in the
+            // settlement to an empty person.
+            state.SetHasGoods(Goods(bag, needs));
+
             CraftStep step = CraftTransitions.Next((CraftState)state.WorkState, facts);
 
             switch (step.Action)
@@ -555,6 +562,41 @@ namespace Kukolony.Jobs.Craft
         {
             Inventory bag = context.Bag.GetInventory();
             return bag != null && bag.GetEmptySlots() <= 0;
+        }
+
+        /// <summary>
+        ///     Whether the bag holds anything that is not materials for the job in hand.
+        /// </summary>
+        /// <remarks>
+        ///     The definition of "finished goods", and deliberately a wide one. Anything a
+        ///     crafter is holding that its current recipe does not call for is something it is
+        ///     not going to use, whether that is the nails it just made or a stray apple - and
+        ///     both are better in a chest than in a working villager's bag.
+        /// </remarks>
+        private static bool Goods(Inventory bag, List<CraftNeed> needs)
+        {
+            if (bag == null) return false;
+
+            foreach (ItemDrop.ItemData item in bag.GetAllItems())
+            {
+                string prefab = Carrying.NameOf(item);
+                if (string.IsNullOrEmpty(prefab)) continue;
+
+                bool material = false;
+                if (needs != null)
+                {
+                    foreach (CraftNeed need in needs)
+                    {
+                        if (need.Item != prefab) continue;
+                        material = true;
+                        break;
+                    }
+                }
+
+                if (!material) return true;
+            }
+
+            return false;
         }
 
         /// <summary>What one craft consumes, in prefab names.</summary>

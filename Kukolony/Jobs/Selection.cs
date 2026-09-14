@@ -17,6 +17,111 @@ namespace Kukolony.Jobs
     internal static class Selection
     {
         /// <summary>
+        ///     A villager standing about with finished goods, and somewhere for them to go.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         What a crafter makes stays in its own bag, so somebody has to come and get
+        ///         it. This is that somebody, and it is asked <em>first</em> - before the ground
+        ///         and before the chests - because a crafter with a full bag has stopped
+        ///         working, and everything else a hauler might do can wait a minute longer than
+        ///         that can.
+        ///     </para>
+        ///     <para>
+        ///         <b>Still bounded by the job's work areas</b>, through the same
+        ///         <see cref="WorkArea.AllFor" /> every other search uses. Being first in
+        ///         priority is not a licence to cross the map: a hauler working the settlement
+        ///         should not walk to an outpost for one nail, and the areas are what say so.
+        ///     </para>
+        ///     <para>
+        ///         <b>Only villagers that advertise.</b> A bag with things in it is not the same
+        ///         question - a tender carrying coal to a kiln has a full bag and would be
+        ///         stripped of its errand by the first hauler to pass. The carrier says when
+        ///         what it holds is finished and for somebody else to carry.
+        ///     </para>
+        /// </remarks>
+        internal static bool TryFindCarriedWork(Colony colony, JobDefinition job, Villager asker,
+            out Villager carrier, out StructureRecord destination)
+        {
+            carrier = null;
+            destination = null;
+            if (colony == null || asker == null) return false;
+
+            List<WorkArea> areas = new List<WorkArea>();
+            WorkArea.AllFor(colony, job, areas);
+
+            Vector3 here = asker.transform.position;
+
+            foreach (WorkArea area in areas)
+            {
+                Villager nearest = null;
+                StructureRecord home = null;
+                float closest = float.MaxValue;
+
+                foreach (Villager other in Villager.Instances)
+                {
+                    if (other == null || ReferenceEquals(other, asker)) continue;
+
+                    VillagerState theirs = other.State;
+                    if (!theirs.IsValid || !theirs.HasGoods) continue;
+
+                    Vector3 there = other.transform.position;
+                    if (!area.Contains(there)) continue;
+
+                    if (Unreachable.Refuses(asker.Id, other.Id)) continue;
+                    if (TargetClaims.IsClaimedByOther(other.Id, asker)) continue;
+
+                    float distance = Utils.DistanceXZ(here, there);
+                    if (distance >= closest) continue;
+
+                    // A destination before the walk, as everywhere else here: arriving and
+                    // discovering nothing wants what they are holding fails the job after a
+                    // walk, which is a worse answer than choosing something else.
+                    StructureRecord goes = Somewhere(colony, job, other, there, asker.Id);
+                    if (goes == null) continue;
+
+                    nearest = other;
+                    home = goes;
+                    closest = distance;
+                }
+
+                if (nearest == null) continue;
+
+                carrier = nearest;
+                destination = home;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Somewhere for the first thing in a carrier's bag that this job handles.</summary>
+        private static StructureRecord Somewhere(Colony colony, JobDefinition job, Villager carrier,
+            Vector3 there, ZDOID asker)
+        {
+            Container bag = carrier.Bag;
+            Inventory inventory = bag != null ? bag.GetInventory() : null;
+            if (inventory == null) return null;
+
+            foreach (ItemDrop.ItemData item in inventory.GetAllItems())
+            {
+                string prefab = Carrying.NameOf(item);
+                if (string.IsNullOrEmpty(prefab)) continue;
+
+                // The job's own item list still narrows this, so a hauler told to move wood
+                // does not empty a crafter's bag of nails.
+                if (job != null && job.Items.Count > 0 && !job.Items.Contains(prefab)) continue;
+
+                foreach (StructureRecord record in SettlementIndex.WhereDoesItGo(colony, prefab, there, asker))
+                {
+                    return record;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
         ///     The nearest loose item worth hauling, with somewhere for it to go.
         /// </summary>
         /// <remarks>

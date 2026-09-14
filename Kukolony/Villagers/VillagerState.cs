@@ -43,6 +43,18 @@ namespace Kukolony.Villagers
         private static readonly int DestinationTokenKey = "kukolony.job.destination.token".GetStableHashCode();
         private static readonly int CargoKey = "kukolony.job.cargo.v1".GetStableHashCode();
         private static readonly int EnergyKey = "kukolony.energy.v1".GetStableHashCode();
+
+        /// <summary>
+        ///     Whether this villager is holding finished goods somebody should come and fetch.
+        /// </summary>
+        /// <remarks>
+        ///     On the ZDO rather than worked out by looking in the bag, because a bag with items
+        ///     in it is not the same question. A tender carrying coal to a kiln has a full bag
+        ///     and would be stripped of its errand by the first hauler to walk past. Advertising
+        ///     is the crafter's own statement that what it holds is finished and for somebody
+        ///     else to carry.
+        /// </remarks>
+        private static readonly int GoodsKey = "kukolony.goods.v1".GetStableHashCode();
         private static readonly int EnergyAtKey = "kukolony.energy.at.v1".GetStableHashCode();
         private static readonly int RestingKey = "kukolony.energy.resting.v1".GetStableHashCode();
         private static readonly int RestRateKey = "kukolony.energy.rate.v1".GetStableHashCode();
@@ -183,6 +195,23 @@ namespace Kukolony.Villagers
         internal double EnergyAt => _zdo?.GetLong(EnergyAtKey, 0L) ?? 0d;
 
         /// <summary>Whether it is currently resting, which decides which threshold applies.</summary>
+        /// <summary>Whether this villager has finished goods waiting to be collected.</summary>
+        internal bool HasGoods => _zdo?.GetBool(GoodsKey, false) ?? false;
+
+        /// <summary>
+        ///     Says whether there is anything here worth collecting.
+        /// </summary>
+        /// <remarks>
+        ///     Written only on a change. This is asked every tick by the job that holds the
+        ///     goods, and a ZDO write is a revision bump replicated to every peer - so an
+        ///     unconditional Set would put twenty network updates a second behind a villager
+        ///     standing perfectly still.
+        /// </remarks>
+        internal void SetHasGoods(bool holding)
+        {
+            if (_zdo != null && HasGoods != holding) _zdo.Set(GoodsKey, holding);
+        }
+
         internal bool Resting => _zdo?.GetBool(RestingKey, false) ?? false;
 
         /// <summary>
