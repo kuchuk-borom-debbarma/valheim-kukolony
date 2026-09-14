@@ -722,3 +722,63 @@ has and an invented tree never does.
 |---|---|
 | `~/Library/Logs/IronGate/Valheim/Player.log` | everything — Unity, Valheim and BepInEx interleaved. The one to read. |
 | `<install>/BepInEx/LogOutput.log` | BepInEx's own copy |
+
+## Crafting: there is no crafting component, and the removal cannot fail
+
+Every other job in this mod operates a component the game already runs. A `Smelter` turns ore into
+coal whether or not anybody is watching; feeding it is an RPC. **Crafting has none of that** — no
+component that crafts, no RPC, no server-side path. `InventoryGui.DoCrafting(Player)` is the only
+implementation in the game and it is welded to the local player: `Player.m_localPlayer`, skill
+factors, DLC checks, the upgrade dialog. So a villager's craft has to be ours, reproducing
+vanilla's arithmetic exactly.
+
+**What a station can answer**, all of it without a `Player`:
+
+| Constraint | Read from |
+|---|---|
+| Which station a recipe needs | `Recipe.m_craftingStation.m_name` against `CraftingStation.m_name` — a string, which is why a modded forge runs forge recipes |
+| Level | `GetLevel()` = 1 + attached `StationExtension` count, compared as `Mathf.Min(level, 4)` |
+| Roof | `m_craftRequireRoof` → `Cover.GetCoverForPoint(m_roofCheckPoint.position, out cover, out underRoof)`; needs `underRoof && cover >= 0.7f` |
+| Fire | `m_craftRequireFire` → `EffectArea.IsPointPlus025InsideBurningArea(position)` |
+| Animation | `m_useAnimation` → `SetInt("crafting", n)`, exactly as `Player.UpdateCrafting` does |
+
+`CraftingStation.CheckUsable` asks the roof and fire questions already, but it takes a `Player` and
+dereferences it for `NoCostCheat()` and `Message`, so it cannot be called for a villager. Note
+`m_haveFire` holds the same answer as the fire row above and is filled by
+`InvokeRepeating("CheckFire", 1f, 1f)` from `Start` — a **string-named invoke**, which is why
+grepping for `CheckFire()` finds no callers and suggests the field is dead. It is not.
+
+### Three traps, in order of how much they cost
+
+**1. `Inventory.RemoveItem` returns `void` and lies.**
+
+```csharp
+public void RemoveItem(string name, int amount, int itemQuality = -1, bool worldLevelBased = true)
+{
+    foreach (ItemDrop.ItemData item in m_inventory)
+        if (item.m_shared.m_name == name && (itemQuality < 0 || item.m_quality == itemQuality)
+            && (!worldLevelBased || item.m_worldLevel >= Game.m_worldLevel))
+```
+
+No return value, and anything below the world's level is skipped. On an NG+ world a villager
+consumes nothing and produces everything, and **no call fails**. Count under the same rule before
+removing, and measure again after.
+
+**2. It matches on the shared name, not the prefab name.** `Player.ConsumeResources` removes by
+`requirement.m_resItem.m_itemData.m_shared.m_name` — `"$item_wood"`, not `"Wood"`. Our chests and
+`Stock` index by prefab name. Two prefabs can share one shared name, so a count taken by prefab
+either side of a removal matched by shared name reports a spend that did not happen.
+
+**3. `m_requireOnlyOneIngredient` recipes dereference the local player.** `Recipe.GetAmount` calls
+`Player.m_localPlayer.GetFirstRequiredItem(...)` unconditionally for those, so merely asking one
+how much it yields throws on a dedicated server. They are excluded from what villagers may make.
+
+**And never `ItemManager.GetRecipe`** — Jötunn's returns your own mod's recipes and nothing else.
+Scan `ObjectDB.instance.m_recipes`.
+
+### Repair is free
+
+`InventoryGui.RepairOneItem` consumes nothing; it sets `m_durability = GetMaxDurability()`. The
+gate is `m_shared.m_useDurability`, `m_shared.m_canBeReparied` (vanilla's typo), a recipe from
+`ObjectDB.GetRecipe(item)`, a station whose `m_name` matches the recipe's `m_repairStation` **or**
+`m_craftingStation`, and `Mathf.Min(station.GetLevel(), 4) >= recipe.m_minStationLevel`.

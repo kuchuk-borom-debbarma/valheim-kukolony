@@ -573,25 +573,40 @@ it checks the local *player's* inventory.
 
 | Setting | Meaning |
 |---|---|
-| **Which stations** — kinds, multi-select, empty means all | Smelters, ovens, fermenters. One villager runs the smelting yard and another runs the kitchen. The list is built from the protocols that exist, so it grows with them and never names a prefab. |
-| **What it does** — supply / collect / both | Supplying and clearing are different work. A supply-only villager will block on a full oven, which is the player's choice to make rather than the mod's to prevent. |
-| **What it carries** — fuel / material / both | A villager who only stokes is a genuinely different worker from one who only loads ore, and on a settlement with one smelter and three kilns the difference is a walk. |
-| **Named stations** — multi-select, empty means all in the work area | Overlaps work areas deliberately: an area says *where*, a name says *which*. A station the job already names is always listed, so a setting can never become unpickable. |
-| **Which items** — allow-list, empty means everything | As hauling's. It can only ever *narrow* what the station already asks for, and the row says so — a setting that appears to widen and cannot is worse than no setting. |
-| **Stop when we have** — an item and a count, 0 meaning never | The terminus this job otherwise lacks, and the same one chopping has. Without it a kiln is kept topped up for ever and a settlement turns every log it owns into coal nobody asked for, while every individual decision is correct. Above the line the job returns **Skipped** and says *"we have enough"*. |
-| **Where it works** | Not new — `Areas` and `WorkRadius`, reused unchanged. It bounds which *stations* count, not where the material may come from: a destination is chosen by what the settlement wants, the way hauling already works. |
-| **Repeat** | Not new — the queue already counts trips before yielding. |
+| **Where it works** | `Areas` and `WorkRadius`. Which stations count is answered by *where they stand*, not by naming them. |
+| **Repeat** | The queue counts trips before yielding. |
+
+That is the whole of it, and the shortness is the point. Six settings used to live here — which
+stations, which kinds, supply or clear, fuel or material, an item allow-list and a stock target —
+and every one of them described a **station**. With them on the job, a settlement that wanted one
+furnace emptied and one oven filled needed two jobs and two rosters to say so.
+
+They now live on the structures they describe. A tend job is a verb and a place.
+
+### On the structure — where the tending is actually set up
+
+| Setting | Meaning |
+|---|---|
+| **Keep fuelled with** | Offered only when the station burns something. A charcoal kiln has no fuel item at all, which is why "what fuel does this take" has to be allowed to answer "nothing". |
+| **Feed it** | Which of the station's own conversions this one should be kept loaded with. |
+| **Keep it N% full** | A fraction of the station's own capacity, shown as the count it works out to. Below the line there is work, above it there is none. |
+| **What villagers do here** — supply / clear / both | Supplying and clearing are different work, and which one a kiln wants is a fact about that kiln. |
+| **What they carry to it** — fuel / material / both | Shown only where there is a choice: a station being cleared carries nothing, and one with no fuel item has only ever taken material. |
+| **Orders** — an item, a count, and whether it stands | The terminus this job otherwise lacks. Without one a kiln is kept topped up for ever and a settlement turns every log it owns into coal nobody asked for, while every individual decision is correct. The item is what the station *produces*. |
+| **Villagers may use this** | One switch. Off means invisible to every job, stock included. |
 
 **Having enough stops supplying, never clearing.** A station holding finished work still has to be
 emptied whatever the stores say: an oven left full burns what is on it and then accepts nothing
 ever again, and *"we have enough"* is a poor epitaph for a kitchen that set itself alight.
 
-**Two limits, and they answer different questions.** *Keep it half full* is about the station — do
-not overfill this kiln. *Stop when we have* is about the settlement — we do not need more coal.
-Neither substitutes for the other, which is the same division chopping draws between *leave
-standing* and *stop when we have*.
+**Two limits, and they answer different questions.** *Keep it N% full* is about the station — do
+not overfill this kiln. An *order* is about the settlement — we do not need more coal. Neither
+substitutes for the other, which is the same division chopping draws between *leave standing* and
+*stop when we have*.
 
-### On the structure — already built, and until now read by nothing
+### On the structure — the older half
+
+
 
 | Setting | Meaning |
 |---|---|
@@ -661,3 +676,60 @@ in the chest that asked for coal.
 
 And a smelter with nothing to smelt is not stoked, which is the one claim worth proving by walking
 away and counting the coal afterwards.
+
+---
+
+# Craft — making what the settlement was told to make
+
+Chop fells a tree, haul files the wood, tend feeds the kiln. Craft closes the loop: a villager
+takes materials out of the settlement's chests, stands at a workbench or forge, and makes
+something.
+
+## What makes it different from every other job
+
+**Valheim does not do any of it for us.** Smelting is a component with an RPC — a `Smelter` turns
+ore into coal whether anybody is watching or not. Crafting has no component, no RPC and no
+server-side path. `InventoryGui.DoCrafting` is the only implementation in the game and it is
+welded to the local player: skills, DLC checks, the upgrade dialog, `Player.m_localPlayer`
+throughout. So the craft itself is **ours**, and it has to reproduce vanilla's arithmetic exactly
+or a villager becomes either a cheat or a thief.
+
+The trap that shapes the code: `Inventory.RemoveItem` returns `void` and silently skips any item
+whose world level is below the world's. On an NG+ world a villager would consume nothing, produce
+everything, and no call would fail. So materials are counted under that same rule before anything
+is removed, and measured again after — the same doctrine tending uses to prove a feed landed.
+
+## Settings
+
+**On the job:** where it works, and repeat. Nothing else.
+
+**On the station:** its *orders* — what to make, how many, and whether the order stands or is a
+one-off — and whether worn gear may be mended there. Which recipes a station offers is read from
+the prefab, so an outpost forge can be given orders from home; recipes needing a higher station
+level are listed and *marked* rather than hidden, because the level depends on extensions standing
+beside it that may not be loaded.
+
+## What it does not do
+
+**It does not upgrade, and it does not craft above quality 1.** Vanilla's upgrade path rolls a
+break chance and dereferences the local player.
+
+**It does not put what it makes away.** Finished goods stay in the crafter's bag, and hauling
+collects them — first, before the ground and the chests, because a crafter with a full bag has
+stopped working while a dropped item will still be there in a minute. A crafter that fills its bag
+with nobody to relieve it stops and says *"bag full, waiting to be collected"*. That is the honest
+end of the arrangement, not a bug, and it is why a *maintain* order only completes once a hauler
+has filed the goods: a bag is not registered storage, and "the settlement holds fifty" means fifty
+in chests.
+
+**A hauler will not take what a crafter is working with.** The iron fetched for the nails is
+reserved; the nails are not.
+
+## Repair
+
+The same job at the same station, when the station is set to allow it, and only when there is
+nothing to make — crafting is what a player asked for by writing an order, while mending is what a
+station offers to do with its spare time. It costs no materials, which is vanilla's rule and not a
+simplification of it. The gate is vanilla's too, reproduced because `CanRepair` needs a `Player`:
+the item must use durability, be repairable, and have a recipe whose repair or crafting station
+shares this one's name, at a level clamped to four the way vanilla clamps it.

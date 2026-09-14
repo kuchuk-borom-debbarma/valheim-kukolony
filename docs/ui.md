@@ -106,17 +106,31 @@ to prevent, just routed through a person.
 
 ## The structure settings
 
-A registered structure's screen grows a section per capability it has:
+Above everything else, one switch that belongs to no capability: **villagers may use this**. It
+governs all of them, because almost every structure has a single capability and a switch per
+capability would mostly be a second click to reach the same place. Switching off is not
+unregistering — the row keeps its name and its settings and comes back configured.
+
+Then a section per capability it has:
 
 - **Storage** — what belongs here (empty means *anything*, which is what an overflow chest is)
   and whether the settlement may take from it.
-- **Processing** — what to keep it fuelled with, what to feed it, and how full to keep it, shown
-  as a percentage and the count it works out to.
+- **Processing** — what to keep it fuelled with, what to feed it, how full to keep it, whether
+  villagers supply it or clear it, and whether they carry fuel, material or both.
+- **Crafting** — what it should make, as a list of orders, and whether worn gear may be mended
+  here. One row per order, opening the order's own screen: rows are finite, and a cauldron can be
+  given a dozen.
 - **Rest** — who sleeps here.
 
-Both processing lists are read from the **prefab**, so a station that is nowhere near the player
-can still be configured, and a station with no fuel item shows no fuel row at all rather than an
-empty one. A screen must not offer a setting the structure ignores.
+Every one of those lists is read from the **prefab**, so a station nowhere near the player can
+still be configured, and a station with no fuel item shows no fuel row at all rather than an empty
+one. A screen must not offer a setting the structure ignores — which is also why *what they carry*
+appears only on a station that burns something and is not merely being cleared.
+
+**One exception, and it is marked rather than hidden.** A crafting station's *level* comes from
+extensions standing beside it, which may not be loaded — so recipes needing a higher level are
+listed with the level they need, because hiding them would make an unloaded forge look like it
+could do less than it can.
 
 ## The job screens
 
@@ -125,9 +139,15 @@ queue lives on the **villager**, because that changes per person and must not re
 settlement's record every time somebody is reassigned.
 
 - **Jobs** — every job the settlement knows, what it does, and where it happens.
-- **A job** — its name, how many times it repeats before the queue advances, which items it
-  handles, whether it tidies containers, whether it fills the bag before setting out, and
-  **where it works**.
+- **A job** — its name, how many times it repeats before the queue advances, and **where it
+  works**. Hauling adds which items it handles, whether it tidies containers and whether it
+  fills the bag before setting out; chopping adds what it takes and when to stop. Tending and
+  crafting add nothing at all, because everything they used to ask is a fact about a station and
+  is now set on the station. Both screens say so rather than showing an empty panel, which reads
+  as one that has not finished loading.
+- **Add a job** opens a picker over the kinds. It was a button per kind until a fourth arrived —
+  three fitted the row and the fourth would have been a silently half-width button. The list is
+  built from the enum, which is what stops the next kind being unreachable.
 
 "Where it works" offers the whole settlement first, then the colony's work-area flags. A work
 area is still a registered structure used as a centre plus a radius — any registered thing can

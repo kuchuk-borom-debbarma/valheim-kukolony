@@ -11,6 +11,7 @@ is the whole of what a colony can do, and growing it is how the mod grows.
 |---|---|---|
 | **Storage** | `Container` | Things can be kept here |
 | **Processing** | `Smelter`, `CookingStation`, `Fermenter` | Material goes in and a product comes out — furnace, kiln, oven, fermenter, and anything else built on those |
+| **Crafting** | `CraftingStation` | Things are made here by hand — workbench, forge, stonecutter, artisan and galdr tables, black forge, and the cauldron, which is why food recipes are craftable |
 | **Rest** | `Bed` | One villager can sleep here |
 | **Work area** | `WorkFlag` | Ground far from the hearth that the Kolony works |
 
@@ -42,7 +43,9 @@ handles it honestly.
 `Storage` and `Processing` keep the bits their predecessors `Container` and `Smelter` held,
 because they mean the same thing and an existing record should keep working. `Rest` took a
 fresh bit rather than a retired one, or every old fireplace record would have come back as a
-bed. Retired bits are masked off on read, so such a record becomes capability-less — a state
+bed. `Crafting` took a fresh bit (256) for the same reason — a record carrying a retired bit
+would otherwise come back as a crafting station, and a settlement would try to forge nails at an
+old fireplace. Retired bits are masked off on read, so such a record becomes capability-less — a state
 that could not previously exist and now reads as *no longer understood* rather than as a row
 that matches no filter and silently does nothing.
 
@@ -102,8 +105,27 @@ defaults cost a few bytes and remove a class of "which decoder is this" mistakes
 | Component | Settings |
 |---|---|
 | **Storage** | what belongs here (empty means *anything*, which is what an overflow chest is), and whether the settlement may take from it |
-| **Processing** | what to keep it fuelled with, what to feed it, and how full to keep it |
+| **Processing** | what to keep it fuelled with, what to feed it, how full to keep it, whether villagers supply it or clear it, and whether they carry fuel, material or both |
+| **Crafting** | what to make and how many of it (its *orders*), and whether worn gear may be mended here |
 | **Rest** | who sleeps here |
+| **Any** | whether villagers may use it at all |
+
+**One switch for the whole structure.** *Villagers may use this* sits above the capability
+panels because it governs all of them. Almost every structure has a single capability, so a
+switch per capability would mostly be a second click to reach the same place — and "villagers
+may use this" is a sentence a person can hold in their head. Out of service means **invisible**,
+not merely unusable: a switched-off chest does not count towards what the settlement holds
+either, because stock nobody can reach is stock the settlement does not have. Switching off is
+not unregistering; the record keeps its name, its orders and everything else it was told.
+
+**Orders are the stopping rule, and they live on the structure.** Each line is an item, a count,
+and whether it stands or is a one-off. On a crafting station the item is what to make; on a
+processing station it is what the station produces, so *"make fifty nails"* and *"keep it fed
+until we have a hundred coal"* are one sentence with two subjects. A one-off latches when it is
+filled, because "have we made fifty" cannot be answered by looking at the settlement — fifty
+arrows made and fifty arrows fired leave no trace. **No orders means no limit**, which is the
+opposite of what an empty list means elsewhere here and is the right answer for a kiln that was
+registered before orders existed.
 
 **What a station accepts is read from the prefab.** A smelter's fuel and conversion list are
 asset data, identical on every instance, so the answer needs nothing loaded and there is no
@@ -121,7 +143,10 @@ in one bed, so assigning someone who already has one moves them and says which b
 ## The settlement index
 
 Jobs do not search the settlement, they ask it: *where does wood go*, *what wants feeding*,
-*which beds are free*. With no population cap, a hundred villagers each walking every chest is
+*which beds are free*. The index keeps one list per capability, and `Find` searches **all** of
+them — a lesson learned the hard way, since a crafting station is in none of the first three and
+the craft job read "I cannot find my own station" as "my station wants nothing" and looped for
+ever while reporting that it was working. With no population cap, a hundred villagers each walking every chest is
 the difference between a settlement and a slideshow.
 
 Built once from the records and reused. It rebuilds when a revision the colony bumps on write

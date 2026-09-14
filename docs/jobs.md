@@ -42,6 +42,11 @@ resuming from the middle as well as running from the start.
 
 ## Settings
 
+> **Superseded.** This file describes the predecessor design — `IColonyWork`, `WorkRegistry`,
+> beehive jobs — and is kept for the reasoning, not as a description of the code. Settings about
+> a *structure* now live on the structure; see `docs/structure-registry.md` and
+> `docs/job-catalog.md`.
+
 Every setting lives on the job, once: item filters, target mode and exact structure IDs,
 source and destination containers, stock threshold, execution count, reservations, search
 radius, movement stop distance, and whether the result goes into a container or on the

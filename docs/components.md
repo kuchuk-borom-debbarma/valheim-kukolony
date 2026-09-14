@@ -24,8 +24,9 @@ This describes the code, not an aspiration:
 
 | Question | Where | Test |
 |---|---|---|
-| May this be registered? | `Colonies/StructureRegistry.TryCapabilities` | `Container`, `Bed`, `WorkFlag`, and a station via `StationProbe` |
+| May this be registered? | `Colonies/StructureRegistry.TryCapabilities` | `Container`, `Bed`, `WorkFlag`, a processing station via `StationProbe`, a crafting station via `CraftProbe` |
 | Which station is this, and how is it worked? | `Colonies/Stations/StationProbe` | `CookingStation`, `Fermenter`, `Smelter` |
+| Is this a place things are made by hand? | `Colonies/Stations/CraftProbe` | `CraftingStation` — one component, unlike processing, which is the whole finding |
 | What stays loaded off-screen? | `KeepAlive/LoadAllowlist.Matters` | `Piece`, `Container`, `CraftingStation`, `Smelter`, `CookingStation`, `Fermenter`, `Fireplace`, `TerrainComp`, `ItemDrop`, and what an axe can cut |
 | What can an axe cut? | `Resources/Choppable` | `TreeBase`, `TreeLog`, `Destructible` — compiled into a prefab-hash set, so the scan is an integer compare rather than a `GetComponent` per candidate |
 | What is this called? | `StructureRegistry.DisplayName` | `Piece.m_name` or `Container.m_name`, localised. The cleaned prefab name is the fallback when a thing carries neither — honest, and the reason rows do not read `charcoal_kiln(Clone)` |
@@ -48,14 +49,26 @@ target picker, and the settlement index.
 Two surfaces with two tests drift apart, and the symptom is ugly: a structure a player can register
 that no job will ever touch, or one a job wants that cannot be registered.
 
-**Processing holds to this; Storage does not yet.** Every station question goes through
-`StationProbe`. A container, by contrast, is decided at registration by the ZNetView-scoped test in
+**Processing and Crafting hold to this; Storage does not yet.** Every processing question goes
+through `StationProbe` and every crafting question through `CraftProbe` — including the one
+prefab-level question, *what kind of station is this prefab*, which lives beside the instance
+test as `CraftProbe.NameOfPrefab` rather than as a second `GetComponentInChildren` somewhere
+else. It has to be a separate function because `TryFind` requires a valid `ZNetView` and a prefab
+has none; it does not have to be in a different file, and when it was, it was a second component
+test with none of the probe's rules.
+
+A container, by contrast, is decided at registration by the ZNetView-scoped test in
 `StructureRegistry`, while half a dozen readers — `StructureInventory`, `Selection`, `HaulJob`,
-`TendJob` — reach for `GetComponentInChildren<Container>` directly. Those readers already hold a
-registered record and are fetching the component off the object that record names, so the looser
-test is harmless *there* — but the guarantee is a convention in that half of the code and an
-invariant only in this half. Written down as it is rather than as it ought to be, because a
-doctrine that overstates is worse than none.
+`TendJob`, `CraftJob`, `Repairing` — reach for `GetComponentInChildren<Container>` directly.
+
+**And one of them no longer holds a registered record.** Hauling now collects finished goods out
+of a *villager's* bag, which is a `Container` on a child of a person — so `HaulJob.Collect` tests
+for a `Villager` component **first**, because the container branch would otherwise claim it and
+then fail looking for a structure record a person does not have. That correctness guarantee lives
+in the order of two statements rather than in a predicate, which is precisely what this document
+exists to discourage. Recorded as a debt rather than dressed up: the honest fix is for the
+container branch to require the record it is about to look up, and until it does, the ordering is
+load-bearing and a reader needs to know it.
 
 ## Five consequences, each already paid for once
 
