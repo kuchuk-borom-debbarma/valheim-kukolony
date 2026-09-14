@@ -39,13 +39,8 @@ namespace Kukolony.Debug
 
         private static bool IsChordPressed()
         {
-            // Don't fire while the player is typing.
-            if (Chat.instance != null && Chat.instance.HasFocus())
-            {
-                return false;
-            }
-
-            if (Console.IsVisible())
+            // Don't fire while the player is typing, wherever they are typing.
+            if (Gui.Typing.Now())
             {
                 return false;
             }

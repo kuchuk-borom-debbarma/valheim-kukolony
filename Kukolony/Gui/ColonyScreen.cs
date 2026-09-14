@@ -429,12 +429,10 @@ namespace Kukolony.Gui
                 return;
             }
 
-            if (Chat.instance != null && Chat.instance.HasFocus())
-            {
-                return;
-            }
-
-            if (Console.IsVisible())
+            // A letter key is a letter first. This guarded chat and the console, which are the
+            // two places this mod does not put a text box - so naming a chest "Coal" closed the
+            // screen on the first keystroke.
+            if (Typing.Now())
             {
                 return;
             }

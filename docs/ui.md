@@ -104,6 +104,12 @@ to this peer reads "not found" there, identically to one that was destroyed. The
 live outpost's records is the same loss the *never infer destruction from absence* rule exists
 to prevent, just routed through a person.
 
+**A letter key is a letter first.** Every hotkey this mod reads asks `Typing.Now()` before it
+acts — the console, chat, the game's own text dialog, and whichever `InputField` Unity says has
+the caret. The screen's key is `C`, so without the last of those, naming a chest *Coal* closed the
+screen on the first keystroke. Shared rather than repeated, because the next hotkey will be
+written by copying one that exists.
+
 ## The structure settings
 
 Above everything else, one switch that belongs to no capability: **villagers may use this**. It
