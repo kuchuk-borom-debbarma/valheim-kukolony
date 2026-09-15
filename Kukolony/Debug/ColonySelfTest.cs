@@ -367,6 +367,10 @@ namespace Kukolony.Debug
                     yield return Partying(report, colony, origin);
                     break;
 
+                case "partywork":
+                    yield return PartyWorking(report, colony, origin);
+                    break;
+
                 case "queue":
                     yield return CheckAStuckTripEndsAndTheQueueMovesOn(report, colony);
                     yield return CheckAPresetKeepsItsOrder(report, colony);
@@ -382,7 +386,7 @@ namespace Kukolony.Debug
                     // Named but unknown. Failing beats running everything under a name that
                     // says otherwise, or running nothing and reporting a pass.
                     report.Check(false, $"'{wanted}' is not a slice this run knows",
-                        "known: chop, travel, queue, tend, craft, mine, forage, farm, repair, cook, eat, party, swing");
+                        "known: chop, travel, queue, tend, craft, mine, forage, farm, repair, cook, eat, party, partywork, swing");
                     break;
             }
 
@@ -7170,6 +7174,316 @@ namespace Kukolony.Debug
             yield return CheckAPartyVillagerCatchesUpAndThenStops(report, colony, origin);
             yield return CheckATiredPartyVillagerDoesNotWalkHome(report, colony, origin);
             CheckPartyMembershipLivesOnTheRecord(report);
+            CheckThePartyQueueIsASecondQueue(report);
+        }
+
+        /// <summary>
+        ///     A party villager working the ground around its player.
+        /// </summary>
+        /// <remarks>
+        ///     Its own slice rather than part of <c>party</c>, because between them the two no
+        ///     longer fit in one launch - felling a tree is minutes of watching where the rest is
+        ///     seconds. Splitting is what the focused harness is for; padding a run out until it
+        ///     is killed halfway and reports nothing is not.
+        /// </remarks>
+        private static IEnumerator PartyWorking(TestReport report, Colony colony, Vector3 origin)
+        {
+            yield return CheckAPartyVillagerWorksTheGroundAroundYou(report, colony, origin);
+        }
+
+        /// <summary>
+        ///     The party queue is a second list, and membership decides which one is worked.
+        /// </summary>
+        private static void CheckThePartyQueueIsASecondQueue(TestReport report)
+        {
+            ZDO blank = ZDOMan.instance.CreateNewZDO(Vector3.zero, 0);
+            VillagerState state = new VillagerState(blank);
+
+            state.SetQueue(new List<string> { "home" });
+            state.SetPartyQueue(new List<string> { "away" });
+
+            List<string> atHome = state.ActiveQueue();
+            report.Check(atHome.Count == 1 && atHome[0] == "home",
+                "out of a party, a villager works the queue it was given at home",
+                $"[{string.Join(",", atHome)}]");
+
+            state.SetPartyOwner(4242L);
+            List<string> inParty = state.ActiveQueue();
+
+            report.Check(inParty.Count == 1 && inParty[0] == "away",
+                "and in one it works its party queue instead",
+                $"[{string.Join(",", inParty)}]");
+
+            report.Check(state.GetQueue().Count == 1 && state.GetQueue()[0] == "home",
+                "control: without the home queue being disturbed, so leaving restores it",
+                $"[{string.Join(",", state.GetQueue())}]");
+
+            // The two lists are different lengths in general, so a position carried across one
+            // indexes the wrong job or none. This is the reset that stops that.
+            report.Check(state.QueuePosition == 0 && state.QueueAttempt == 0,
+                "and joining resets the position, which two lists of different lengths require",
+                $"position={state.QueuePosition} attempt={state.QueueAttempt}");
+
+            ZDOMan.instance.DestroyZDO(blank);
+        }
+
+        /// <summary>
+        ///     A villager in a party works the ground around its player, nowhere near its Kolony.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>The Kolony is moved away first, and that is the point.</b> In this harness
+        ///         the hearth stands a few metres from the player, so "the player is the work
+        ///         area" and "the settlement is the work area" produce identical readings and an
+        ///         assertion between them cannot fail. Three hundred metres apart, only one of
+        ///         them can explain a felled tree.
+        ///     </para>
+        ///     <para>
+        ///         The job is given <em>no areas at all</em>, so nothing but the party can put
+        ///         this tree in range - and the control at the end takes the villager out of the
+        ///         party and shows the same tree surviving.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator CheckAPartyVillagerWorksTheGroundAroundYou(TestReport report,
+            Colony colony, Vector3 origin)
+        {
+            Player player = Player.m_localPlayer;
+            string species = Choppable.SampleTree(0, 0);
+
+            if (player == null || string.IsNullOrEmpty(species))
+            {
+                report.Check(false, "control: the party-work check needs a player and a tree",
+                    $"player={(player != null)} species='{species}'");
+                yield break;
+            }
+
+            // The Kolony is moved, and its reach and the scan narrowed, so that the party is the
+            // only thing that can explain a felled tree. Sixty metres and not three hundred: the
+            // first version of this moved it far enough that the zone was no longer loaded, the
+            // game destroyed the hearth, and the check threw on a destroyed component instead of
+            // failing. Far enough to be out of range, near enough to still exist.
+            Vector3 hearthWas = colony.transform.position;
+            float radiusWas = ModConfig.ColonyRadius.Value;
+            float scanWas = ModConfig.ResourceScanRadius.Value;
+
+            float partyWas = ModConfig.PartyWorkRadius.Value;
+
+            ModConfig.ColonyRadius.Value = 24f;
+            ModConfig.ResourceScanRadius.Value = 40f;
+
+            // Narrowed so the tree this check plants is the only thing the villager could
+            // possibly be working on. The world is full of real trees, and at the default radius
+            // the villager legitimately walked off to fell one of those - which is correct
+            // behaviour and made the reading meaningless.
+            ModConfig.PartyWorkRadius.Value = 14f;
+
+            Relocate(colony.gameObject, OnGround(player.transform.position + new Vector3(60f, 0f, 0f)));
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (colony == null)
+            {
+                report.Check(false, "control: the Kolony survived being moved for the party check");
+                ModConfig.ColonyRadius.Value = radiusWas;
+                ModConfig.ResourceScanRadius.Value = scanWas;
+                ModConfig.PartyWorkRadius.Value = partyWas;
+                yield break;
+            }
+
+            // Cleared around the *player*, not around the site, and wider than anything the
+            // villager may work - so the only choppable thing inside its party area is the one
+            // planted below.
+            SweepFelling(player.transform.position, 40f);
+
+            Vector3 site = OnGround(player.transform.position + new Vector3(-8f, 0f, 0f));
+            SweepFelling(site, 20f);
+
+            GameObject tree = Spawn(species, site);
+            yield return new WaitForSecondsRealtime(.4f);
+            ChoppingGround.ResetForTest();
+            SettlementIndex.ResetForTest();
+
+            float fromHearth = Utils.DistanceXZ(site, colony.transform.position);
+
+            // Two separate bounds, and the tree has to be outside both. The work area is what a
+            // job is allowed to work; the scan is what the sweep will even offer it. A check that
+            // cleared only one of them would pass on the half of this change that was already
+            // working and say nothing about the other.
+            report.Check(tree != null &&
+                         fromHearth > ModConfig.ColonyRadius.Value &&
+                         fromHearth > ModConfig.ResourceScanRadius.Value,
+                "control: the tree is outside both the Kolony's reach and its scan",
+                $"{fromHearth:0} m away; reach {ModConfig.ColonyRadius.Value:0} m, " +
+                $"scan {ModConfig.ResourceScanRadius.Value:0} m");
+
+            colony.State.SetJobs(new List<JobDefinition>
+            {
+                // No areas. Nothing but the party can bring this tree into range.
+                new JobDefinition { Id = "chop", Name = "Chop", Kind = JobKind.Chop, Repeat = 60 }
+            });
+
+            Villager hand = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (hand == null || !hand.TryGetComponent(out ZNetView who) || !who.IsValid())
+            {
+                report.Check(false, "control: the party-work check could spawn a villager");
+                RestorePartyWorkFixture(colony, hearthWas, radiusWas, scanWas, partyWas);
+                Release(tree);
+                yield break;
+            }
+
+            SendRested(who);
+            Container bag = VillagerInventory.Attach(hand.gameObject, who);
+            report.Check(GiveAxe(bag, who, 0, 99),
+                "control: the villager has an axe, without which this job does nothing");
+
+            VillagerState state = new VillagerState(who.GetZDO());
+            Relocate(hand.gameObject, OnGround(player.transform.position + new Vector3(2f, 0f, 2f)));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            // The control runs FIRST, on the same tree, before anybody joins anything. Out of a
+            // party this villager's only work area is a Kolony sixty-eight metres away, so this
+            // tree must survive - and doing it first means one tree rather than two, which
+            // matters because the world is full of other trees and a second spawn made the
+            // reading ambiguous: the villager wandered off to fell a real one and the control
+            // counted zero at the site and passed without meaning anything.
+            // Standing trees, not "choppable things". Felling one turns a TreeBase into a TreeLog,
+            // so a count of both cannot drop until the log is broken up as well - which is a
+            // later link in a chain this check is not about, and it made the assertion below
+            // unfailable in the one direction that mattered.
+            int untouched = Nearby<TreeBase>(site, 20f);
+            state.SetQueue(new List<string> { "chop" });
+            yield return new WaitForSecondsRealtime(10f);
+            int stillThere = Nearby<TreeBase>(site, 20f);
+
+            report.Check(untouched > 0 && stillThere >= untouched,
+                "control: out of a party, that tree is out of reach and is left standing",
+                $"{untouched} -> {stillThere} standing, doing='{(hand != null ? hand.Activity : "gone")}'");
+
+            state.SetQueue(new List<string>());
+            state.SetPartyOwner(player.GetPlayerID());
+            Relocate(hand.gameObject, OnGround(player.transform.position + new Vector3(2f, 0f, 2f)));
+            yield return new WaitForSecondsRealtime(.3f);
+
+            // Before it is given anything to do. A villager with no work falls out of the bottom
+            // of the tick and heads home to idle - which, in a party, means walking away from the
+            // person it is following while they watch. The same fault resting had, through a
+            // different door, and this is the assertion that stops it coming back a third time.
+            yield return new WaitForSecondsRealtime(6f);
+
+            float strayed = hand != null
+                ? Utils.DistanceXZ(hand.transform.position, player.transform.position)
+                : 999f;
+
+            report.Check(strayed < 15f,
+                "a party villager with nothing to do waits with its player rather than walking home",
+                $"{strayed:0.#} m from player, home is {fromHearth:0} m away, " +
+                $"doing='{(hand != null ? hand.Activity : "gone")}'");
+
+            state.SetPartyQueue(new List<string> { "chop" });
+            ChoppingGround.ResetForTest();
+            yield return new WaitForSecondsRealtime(.4f);
+
+            // The two halves of "the player is a work area", asked separately - because when this
+            // failed as one assertion it was impossible to tell which of them was wrong, and they
+            // live in different files for different reasons.
+            ZDOID treeId = tree.TryGetComponent(out ZNetView treeView) && treeView.IsValid()
+                ? treeView.GetZDO().m_uid
+                : ZDOID.None;
+            List<ZDOID> offered = ChoppingGround.Near(colony);
+
+            report.Check(!treeId.IsNone() && offered.Contains(treeId),
+                "the sweep offers the tree, because a followed player anchors the search",
+                $"{offered.Count} candidate(s) within {ModConfig.ResourceScanRadius.Value:0} m of " +
+                $"an anchor; ours {(offered.Contains(treeId) ? "among them" : "MISSING")}");
+
+            List<JobDefinition> defined = colony.State.GetJobs();
+            List<WorkArea> reach = Jobs.Chop.ChopJob.Areas(colony, defined[0], hand);
+            bool covered = reach.Count > 0 && reach[0].Contains(site);
+
+            report.Check(covered,
+                "and the job's first area is the ground around that player",
+                $"first='{reach[0].Name}' r={reach[0].Radius:0} m, " +
+                $"{(covered ? "covers" : "MISSES")} the tree; {reach.Count} area(s) in all");
+
+            int standing = Nearby<TreeBase>(site, 20f);
+            float elapsed = 0f;
+            int left = standing;
+
+            // Followed rather than merely waited out. "Off to chop" for seventy seconds says
+            // nothing about whether the villager got anywhere near the tree, and that is the
+            // difference between a target it cannot reach and a target that is not ours.
+            float closestToTree = float.MaxValue;
+            float furthestFromPlayer = 0f;
+
+            // And what it actually aimed at, the first time it aimed at anything. "Off to chop"
+            // names no target, and the difference between a tree it cannot reach and a tree that
+            // is not ours is the whole diagnosis.
+            ZDOID target = ZDOID.None;
+            float targetAway = -1f;
+            bool targetIsOurs = false;
+
+            while (elapsed < 70f && left >= standing)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                elapsed += .5f;
+
+                if (hand == null || !who.IsValid()) break;
+
+                left = Nearby<TreeBase>(site, 20f);
+
+                if (target.IsNone())
+                {
+                    ZDOID aimed = new VillagerState(who.GetZDO()).Target;
+                    if (!aimed.IsNone())
+                    {
+                        target = aimed;
+                        ZDO aimedAt = ZDOMan.instance?.GetZDO(aimed);
+                        targetAway = aimedAt == null
+                            ? -1f
+                            : Utils.DistanceXZ(aimedAt.GetPosition(), player.transform.position);
+                        targetIsOurs = aimed == treeId;
+                    }
+                }
+
+                float toTree = Utils.DistanceXZ(hand.transform.position, site);
+                float toPlayer = Utils.DistanceXZ(hand.transform.position, player.transform.position);
+                if (toTree < closestToTree) closestToTree = toTree;
+                if (toPlayer > furthestFromPlayer) furthestFromPlayer = toPlayer;
+            }
+
+            report.Check(left < standing,
+                "a villager in a party fells a tree beside its player, out of its Kolony's reach",
+                $"{standing} -> {left} standing after {elapsed:0}s; got within " +
+                $"{closestToTree:0.#} m of the tree and {furthestFromPlayer:0.#} m from its player; " +
+                $"aimed at {(target.IsNone() ? "nothing" : targetIsOurs ? "OUR tree" : "something else")}" +
+                $" {targetAway:0.#} m from the player; doing='{(hand != null ? hand.Activity : "gone")}'");
+
+            if (who.IsValid()) VillagerLifecycle.Remove(colony, who.GetZDO().m_uid);
+            Release(tree);
+            SweepFelling(site, 20f);
+            RestorePartyWorkFixture(colony, hearthWas, radiusWas, scanWas, partyWas);
+            yield return new WaitForSecondsRealtime(.3f);
+        }
+
+        /// <summary>Puts back everything the party-work check moved or narrowed.</summary>
+        /// <remarks>
+        ///     In one place because it is done from four, and a run that left the Kolony's reach
+        ///     at twenty-four metres would fail every check after it for a reason nothing in
+        ///     those checks could explain.
+        /// </remarks>
+        private static void RestorePartyWorkFixture(Colony colony, Vector3 hearthWas,
+            float radiusWas, float scanWas, float partyWas)
+        {
+            ModConfig.ColonyRadius.Value = radiusWas;
+            ModConfig.ResourceScanRadius.Value = scanWas;
+            ModConfig.PartyWorkRadius.Value = partyWas;
+
+            if (colony != null) Relocate(colony.gameObject, hearthWas);
+            if (colony != null) colony.State.SetJobs(new List<JobDefinition>());
+
+            ChoppingGround.ResetForTest();
+            SettlementIndex.ResetForTest();
         }
 
         /// <summary>
@@ -7268,20 +7582,25 @@ namespace Kukolony.Debug
             VillagerState state = new VillagerState(who.GetZDO());
             state.SetPartyOwner(player.GetPlayerID());
 
-            // Put well beyond the leash, on ground the player is standing on so there is a path.
-            Vector3 away = OnGround(player.transform.position + new Vector3(28f, 0f, 0f));
+            // Put well beyond the leash - computed, not guessed. A fixed twenty-eight metres was
+            // a long way when this was written and stopped being one the moment the leash was
+            // opened up to clear the party's work radius, at which point the villager correctly
+            // stood still and the check called it a failure to follow.
+            float leash = Party.Following.LeashFor(ModConfig.PartyLeashDistance.Value,
+                Jobs.WorkArea.PartyRadius);
+            Vector3 away = OnGround(player.transform.position + new Vector3(leash + 20f, 0f, 0f));
             Relocate(hand.gameObject, away);
             yield return new WaitForSecondsRealtime(.3f);
 
             float started = Utils.DistanceXZ(hand.transform.position, player.transform.position);
-            report.Check(started > 20f,
-                "control: the villager really is a long way from its player",
-                $"{started:0.#} m");
+            report.Check(started > leash,
+                "control: the villager really is further out than its leash allows",
+                $"{started:0.#} m, leash {leash:0.#} m");
 
             float nearest = started;
             float elapsed = 0f;
 
-            while (elapsed < CookSeconds && nearest > 6f)
+            while (elapsed < 60f && nearest > 6f)
             {
                 yield return new WaitForSecondsRealtime(.5f);
                 elapsed += .5f;

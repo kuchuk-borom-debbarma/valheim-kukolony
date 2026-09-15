@@ -110,14 +110,41 @@ namespace Kukolony.Jobs
         ///         through.
         ///     </para>
         /// </remarks>
-        internal static void AllFor(Colony colony, JobDefinition job, List<WorkArea> into)
+        internal static void AllFor(Colony colony, JobDefinition job, List<WorkArea> into) =>
+            AllFor(colony, job, null, into);
+
+        /// <summary>
+        ///     Every area a job works for one particular villager, which matters when it is in a
+        ///     party.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>A party is an area that walks.</b> A villager following somebody works the
+        ///         ground around them, and it goes <em>first</em> - the list is tried in order, so
+        ///         first is what "do not wander off while there is work here" means. The
+        ///         settlement's own areas stay on the list behind it and cost nothing: they are
+        ///         usually far away, the sweep returns nothing in them, and on the occasion the
+        ///         party is standing in its own base they are exactly right.
+        ///     </para>
+        ///     <para>
+        ///         Null villager is the ordinary case and the old behaviour. Everything that is
+        ///         not about one villager's work - a screen stating a reach, a pin on the map -
+        ///         should keep asking that way, because a reach that changed depending on who was
+        ///         being followed would be a number the screen could not honestly print.
+        ///     </para>
+        /// </remarks>
+        internal static void AllFor(Colony colony, JobDefinition job, Villagers.Villager villager,
+            List<WorkArea> into)
         {
             if (into == null) return;
             into.Clear();
 
+            AddPartyArea(villager, into);
+
             if (colony == null)
             {
-                into.Add(new WorkArea(Vector3.zero, 0f, "nowhere"));
+                // A villager in a party has somewhere to work even with no Kolony behind it.
+                if (into.Count == 0) into.Add(new WorkArea(Vector3.zero, 0f, "nowhere"));
                 return;
             }
 
@@ -130,6 +157,8 @@ namespace Kukolony.Jobs
                 into.Add(settlement);
                 return;
             }
+
+            int beforeTokens = into.Count;
 
             List<StructureRecord> records = colony.State.GetStructures();
             bool settlementAdded = false;
@@ -153,8 +182,42 @@ namespace Kukolony.Jobs
 
             // Every place named is gone. Falls back rather than leaving an empty list, which
             // no caller checks for and every caller would read as "nothing to do here".
-            if (into.Count == 0) into.Add(settlement);
+            //
+            // Counted from where the tokens began rather than from zero, so a party villager
+            // whose job names a demolished outpost still falls back to the settlement instead of
+            // its party area silently standing in for one.
+            if (into.Count == beforeTokens) into.Add(settlement);
         }
+
+        /// <summary>
+        ///     The ground around the player this villager follows, if it follows one.
+        /// </summary>
+        /// <remarks>
+        ///     Nothing is added when the leader is not loaded. A party villager whose player has
+        ///     gone through a portal should work the settlement's ground if it is standing on it
+        ///     and otherwise find nothing - not work a circle around where somebody used to be.
+        /// </remarks>
+        private static void AddPartyArea(Villagers.Villager villager, List<WorkArea> into)
+        {
+            if (villager == null) return;
+
+            Villagers.VillagerState state = villager.State;
+            if (!state.IsValid || !state.InAParty) return;
+
+            Player leader = Party.PartyMembership.LeaderOf(state);
+            if (leader == null) return;
+
+            into.Add(new WorkArea(leader.transform.position, PartyRadius, leader.GetPlayerName()));
+        }
+
+        /// <summary>How far around its player a villager in a party will work.</summary>
+        /// <remarks>
+        ///     Smaller than a work area's default on purpose. A party is somebody you are standing
+        ///     with, and a villager that wanders forty metres off to a better tree has stopped
+        ///     being in a party in every sense that matters to the person it is following.
+        /// </remarks>
+        internal static float PartyRadius =>
+            ModConfig.PartyWorkRadius != null ? ModConfig.PartyWorkRadius.Value : 28f;
 
         /// <summary>One named place, if it is still registered and still exists.</summary>
         private static bool TryResolve(List<StructureRecord> records, JobDefinition job,

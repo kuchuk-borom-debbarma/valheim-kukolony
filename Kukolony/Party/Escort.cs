@@ -16,12 +16,11 @@ namespace Kukolony.Party
     ///         above resting, which is suspended in a party entirely.
     ///     </para>
     ///     <para>
-    ///         <b>A party villager does not run its job queue yet.</b> Its work is still bounded
-    ///         by its Kolony's ground while it is being walked away from it, so letting the queue
-    ///         run would send it back to a tree at home, out past the leash, and back again for
-    ///         ever. Work in a party needs the player to <em>be</em> the work area, which is the
-    ///         next stage. Until then this takes the tick whenever a villager is in a party, and
-    ///         says which of the two things it is doing.
+    ///         <b>It only takes the tick while it is catching up.</b> A villager that is with its
+    ///         player falls through to the queue and works, because the player is its work area -
+    ///         see <see cref="Jobs.WorkArea" />. So the leash is not only about staying together;
+    ///         it is what stops a villager wandering out of the party after a better tree, and
+    ///         then being dragged back before it has finished with it.
     ///     </para>
     /// </remarks>
     internal static class Escort
@@ -63,26 +62,25 @@ namespace Kukolony.Party
             float distance = PartyMembership.DistanceTo(leader, villager.transform.position);
             closing = Following.Decide(distance, Leash, Comfort, closing) == Keeping.Closing;
 
-            string who = leader.GetPlayerName();
-
             if (!closing)
             {
-                // Near enough. Stopped explicitly rather than left mid-walk, so it does not creep
-                // the last metre for the rest of the session.
-                walk.Stop();
-                doing = $"with {who}";
-                return true;
+                // Near enough, so this hands the tick back and the villager works the ground
+                // around its player. The walk is not stopped here: the job about to run has its
+                // own destination and stopping first would throw away a leg it is midway through.
+                return false;
             }
 
             // Run when it has real ground to make up. A villager that jogs the last three metres
             // looks panicked; one that walks forty looks lost.
             walk.MoveTowards(leader.transform.position, Comfort, distance > Leash * 2f, deltaTime);
-            doing = $"following {who}";
+            doing = $"following {leader.GetPlayerName()}";
             return true;
         }
 
-        private static float Leash =>
-            ModConfig.PartyLeashDistance != null ? ModConfig.PartyLeashDistance.Value : 12f;
+        /// <summary>How far it may drift, never inside the ground it works. See Following.</summary>
+        private static float Leash => Following.LeashFor(
+            ModConfig.PartyLeashDistance != null ? ModConfig.PartyLeashDistance.Value : 12f,
+            Jobs.WorkArea.PartyRadius);
 
         /// <summary>
         ///     How near it gets before it stops, never at or beyond the leash.

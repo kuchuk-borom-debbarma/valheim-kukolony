@@ -727,6 +727,21 @@ static class Program
         Case("and it still sets off in the first place",
             Following.Decide(leash + .01f, leash, 99f, false) == Keeping.Closing);
 
+        // The leash against the work radius. These two describe the same circle from opposite
+        // ends, and a leash inside the radius is a villager that fights itself: sent to a tree at
+        // the edge of its area, dragged back for arriving, sent out again. Seventy seconds of it
+        // were measured in game before this clamp existed.
+        Case("a leash comfortably wider than the work radius is left alone",
+            Math.Abs(Following.LeashFor(60f, 28f) - 60f) < .001f);
+        Case("one inside it is opened up past the ground the villager has to cover",
+            Following.LeashFor(12f, 28f) > 28f);
+        Case("and one exactly on the boundary is too, because arriving there would breach it",
+            Following.LeashFor(28f, 28f) > 28f);
+        Case("and a villager working the far edge of its area is not dragged back",
+            Following.Decide(27f, Following.LeashFor(12f, 28f), comfort, false) == Keeping.Holding);
+        Case("control: while one genuinely past that ground still is",
+            Following.Decide(40f, Following.LeashFor(12f, 28f), comfort, false) == Keeping.Closing);
+
         // Controls. Without these the cases above would all pass by answering Holding to
         // everything, which is exactly what a broken follow looks like.
         Case("control: a villager a hundred metres away really does set off",

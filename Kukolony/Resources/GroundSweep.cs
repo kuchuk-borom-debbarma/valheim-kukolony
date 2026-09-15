@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Kukolony.Colonies;
+using Kukolony.Party;
 using UnityEngine;
 
 namespace Kukolony.Resources
@@ -178,6 +179,19 @@ namespace Kukolony.Resources
                 Anchors.Add(new Vector4(flag.x, flag.y, flag.z, bound));
             }
 
+            // And every player this colony's villagers are following, because a party is a place
+            // the Kolony works that happens to be walking around. Without this a villager taken
+            // three hundred metres from home finds nothing: its job would have a work area
+            // centred on its player and no candidates inside it, because discovery is bounded
+            // here and here alone - which is the same shape as the bug a flag planted beyond the
+            // scan radius produced, work claimed and shown on the map that no villager could see.
+            //
+            // Added to the colony's own sweep rather than given one per villager. The walk below
+            // is over every loaded instance and is the expensive part; one more anchor costs one
+            // more distance check per candidate, while a sweep per party villager would cost the
+            // whole walk again.
+            AddPartyAnchors(colony, bound);
+
             foreach (ZNetView view in ZNetScene.instance.m_instances.Values)
             {
                 if (view == null || !view.IsValid()) continue;
@@ -195,6 +209,50 @@ namespace Kukolony.Resources
             }
 
             return cache.Found;
+        }
+
+        /// <summary>
+        ///     An anchor at each player being followed by one of this colony's villagers.
+        /// </summary>
+        /// <remarks>
+        ///     Deduplicated, because a player with five villagers in their party is one place, and
+        ///     five identical circles would be four wasted distance checks per candidate for the
+        ///     whole sweep.
+        /// </remarks>
+        private static void AddPartyAnchors(Colony colony, float bound)
+        {
+            ZDOID id = colony.Id;
+
+            foreach (Villagers.Villager villager in Villagers.Villager.Instances)
+            {
+                if (villager == null) continue;
+                if (!villager.TryGetComponent(out ZNetView view) || !view.IsValid()) continue;
+
+                ZDO zdo = view.GetZDO();
+                if (ColonyMembership.GetColony(zdo) != id) continue;
+
+                Villagers.VillagerState state = new Villagers.VillagerState(zdo);
+                if (!state.IsValid || !state.InAParty) continue;
+
+                Player leader = PartyMembership.LeaderOf(state);
+                if (leader == null) continue;
+
+                Vector3 at = leader.transform.position;
+                if (AlreadyAnchored(at)) continue;
+
+                Anchors.Add(new Vector4(at.x, at.y, at.z, bound));
+            }
+        }
+
+        private static bool AlreadyAnchored(Vector3 at)
+        {
+            for (int i = 0; i < Anchors.Count; i++)
+            {
+                Vector4 anchor = Anchors[i];
+                if (Utils.DistanceXZ(at, new Vector3(anchor.x, anchor.y, anchor.z)) < .5f) return true;
+            }
+
+            return false;
         }
 
         private static bool WithinAnyAnchor(Vector3 at)

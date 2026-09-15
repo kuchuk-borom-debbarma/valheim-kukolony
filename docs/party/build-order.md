@@ -37,13 +37,34 @@ Verified by a `party` slice that runs: 28 m closed to 4 m, then zero creep in tw
 exhausted villager that stays with its player in a party and lies down out of one. The old
 `chop`, `travel`, `queue` and `eat` slices were re-run and pass — `eat` for the first time ever.
 
-## 2. The moving work area and the party queue
+## 2. The moving work area and the party queue — **done**
 
 The player as an anchor, jobs filtered to the ones that work anywhere, the party queue, and the
 greyed-out reasons for the ones that do not.
 
 **Ships as:** "take a villager out and it will chop and mine wherever you go." This is genuinely
 useful on its own and it is the first stop a player would notice.
+
+**Landed.** Two choke points carry it: `WorkArea.AllFor` gains the followed player as the *first*
+area, and `GroundSweep` gains that player as an anchor - work is bounded by an area, but it is
+*discovered* by the sweep, and fixing only one of them would have left a villager with a work area
+full of candidates nothing ever offered it. `VillagerState.ActiveQueue()` picks which of the two
+queues is being worked, and `PartyWork` refuses the settlement jobs out loud.
+
+Three bugs found by running it, all of them behaviour that was correct in isolation:
+
+- **A party villager with no work walked home.** The same fault resting had in stage 1, arriving
+  through a different door - it fell out of the bottom of the tick into `StayNearHome`.
+- **The leash was inside the work radius.** The job sent the villager to a tree at the edge of its
+  area, arriving breached the leash, the escort dragged it back, the job sent it out again.
+  Seventy seconds of "following" beside a tree it never touched. The two numbers describe the same
+  circle from opposite ends, so the leash is now `Following.LeashFor` - never inside the work
+  radius, and with a margin, because a leash exactly on the boundary means arriving is breaching.
+- **Chopping remembered the wrong wood.** It offers the wood a villager is already in first, so it
+  does not walk home across the map for one branch. Take that villager into a party and the
+  remembered wood is the settlement: it walked sixty metres back to its Kolony to fell a tree
+  there, while standing beside the one it had been brought out for. Any party change now clears
+  what the jobs remember, through the new `Jobs.JobMemory.ForgetAll` that removal already needed.
 
 ## 3. Carrying — the four party abilities
 

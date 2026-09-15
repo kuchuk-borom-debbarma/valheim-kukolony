@@ -78,6 +78,16 @@ namespace Kukolony.Villagers
         /// </remarks>
         private static readonly int PartyKey = "kukolony.party.v1".GetStableHashCode();
 
+        /// <summary>
+        ///     The ordered jobs this villager works while in a party, as its own ring.
+        /// </summary>
+        /// <remarks>
+        ///     A second queue rather than a filter on the first, because a chopper at home being a
+        ///     hauler in the field is a thing somebody would actually want - and because the two
+        ///     lists are different lengths, so one position cannot index both.
+        /// </remarks>
+        private static readonly int PartyQueueKey = "kukolony.job.queue.party.v1".GetStableHashCode();
+
         private readonly ZDO _zdo;
 
         internal VillagerState(ZDO zdo)
@@ -331,8 +341,50 @@ namespace Kukolony.Villagers
         /// </remarks>
         internal void SetPartyOwner(long player)
         {
-            if (_zdo != null && PartyOwner != player) _zdo.Set(PartyKey, player);
+            if (_zdo == null || PartyOwner == player) return;
+
+            _zdo.Set(PartyKey, player);
+
+            // Joining or leaving swaps which queue is being worked, and the two are different
+            // lengths - so a position carried across indexes the wrong job, or none. Reset, which
+            // also reads correctly: you have just been handed different work, so start at the top
+            // of it. ResetJob goes with it because a villager should not carry a claim on a tree
+            // at home into an expedition it is being taken on.
+            SetQueuePosition(0);
+            SetQueueAttempt(0);
+            ResetJob();
+
+            // And everything the jobs remember about it outside the record. Chopping remembers
+            // which wood a villager is working and offers that one first, so it does not walk
+            // home across the map for a single branch - which means a villager taken into a party
+            // walked sixty metres back to its Kolony to fell a tree there, while standing beside
+            // the one it had been brought out for. Measured, with every part behaving as designed.
+            Jobs.JobMemory.ForgetAll(_zdo.m_uid);
         }
+
+        /// <summary>The ordered job ids this villager works while following somebody.</summary>
+        internal List<string> GetPartyQueue() =>
+            JobQueueCodec.Decode(_zdo?.GetString(PartyQueueKey, string.Empty) ?? string.Empty);
+
+        internal void SetPartyQueue(List<string> jobs)
+        {
+            _zdo.Set(PartyQueueKey, JobQueueCodec.Encode(jobs));
+            SetQueuePosition(0);
+            SetQueueAttempt(0);
+            ResetJob();
+        }
+
+        /// <summary>
+        ///     The queue that is actually being worked right now.
+        /// </summary>
+        /// <remarks>
+        ///     <b>Everything that asks "what is this villager for" should ask this</b>, not
+        ///     <see cref="GetQueue" /> - including the idle watch, because a villager in a party
+        ///     with an empty party queue has genuinely been given nothing to do and saying so is
+        ///     the whole point of that watch. <see cref="GetQueue" /> remains the home queue, and
+        ///     is what the screen edits.
+        /// </remarks>
+        internal List<string> ActiveQueue() => InAParty ? GetPartyQueue() : GetQueue();
 
         /// <summary>Net time the current target was taken, so a stuck claim expires.</summary>
         internal double ClaimedSince => _zdo?.GetLong(ClaimedSinceKey, 0L) ?? 0L;

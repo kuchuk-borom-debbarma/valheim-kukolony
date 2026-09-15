@@ -23,7 +23,7 @@ namespace Kukolony.Jobs
         /// </remarks>
         internal static JobDefinition Current(VillagerState state, List<JobDefinition> jobs)
         {
-            List<string> queue = state.GetQueue();
+            List<string> queue = state.ActiveQueue();
             if (queue.Count == 0 || jobs == null || jobs.Count == 0) return null;
 
             int position = Normalise(state.QueuePosition, queue.Count);
@@ -59,7 +59,7 @@ namespace Kukolony.Jobs
 
             if (result == JobResult.Running) return;
 
-            List<string> queue = state.GetQueue();
+            List<string> queue = state.ActiveQueue();
             if (queue.Count == 0) return;
 
             int position = Normalise(state.QueuePosition, queue.Count);

@@ -29,6 +29,12 @@ code at all. Above resting, because **resting is suspended in a party**.
 A party villager stays near its player. This is not new navigation — it is the existing
 `VillagerWalk` with a destination that moves.
 
+**And a third number constrains both**: the leash can never be inside the party work radius. They
+describe the same circle from opposite ends, and a leash inside the radius makes a villager fight
+itself — the job sends it to the edge of its area, arriving breaches the leash, the escort drags it
+back. `Following.LeashFor` opens the leash up past the work radius, with a margin, because a leash
+exactly on the boundary means arriving *is* breaching.
+
 Two distances matter and they are not the same number:
 
 - **Leash** — beyond this it stops working and closes the gap. Work is what it does *in* the
@@ -67,8 +73,16 @@ not become a structure record. This is the one place where the flag analogy stop
 | **Farm** | No | Needs a registered field. |
 | **Repair** | No | Needs a crafting station in range, which is one of the two vanilla rules the job faithfully keeps. |
 
-Hidden jobs are **shown greyed with the reason**, never silently skipped. A job that quietly does
-nothing is the failure this codebase has paid for more than once.
+Hidden jobs are **listed with the reason rather than hidden**, both in the picker that assigns
+party work and by the villager itself when it gets out there. Hiding them leaves a player
+wondering where tending went; a job that quietly does nothing is the failure this codebase has paid
+for more than once.
+
+**Discovery and permission are two different bounds and both had to move.** `WorkArea` decides what
+a job is *allowed* to work; `GroundSweep` decides what it is ever *offered*. The player is now an
+anchor in both. Changing only one would have produced a villager with a work area full of
+candidates nothing ever handed it — the same silent shape as a flag planted beyond the scan radius,
+which this mod has already shipped once.
 
 ## The party queue
 

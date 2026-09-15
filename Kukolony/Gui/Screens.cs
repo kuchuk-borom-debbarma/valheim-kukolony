@@ -169,7 +169,7 @@ namespace Kukolony.Gui
                 VillagerState theirs = new VillagerState(zdo);
                 if (!theirs.IsValid) continue;
 
-                if (IdleWatch.Judge(now, theirs.WorkedAt, theirs.GetQueue().Count, threshold) == Doing.Stalled)
+                if (IdleWatch.Judge(now, theirs.WorkedAt, theirs.ActiveQueue().Count, threshold) == Doing.Stalled)
                 {
                     quiet++;
                 }

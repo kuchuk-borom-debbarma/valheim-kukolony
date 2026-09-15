@@ -48,7 +48,7 @@ namespace Kukolony.Jobs
             if (colony == null || asker == null) return false;
 
             List<WorkArea> areas = new List<WorkArea>();
-            WorkArea.AllFor(colony, job, areas);
+            WorkArea.AllFor(colony, job, asker, areas);
 
             Vector3 here = asker.transform.position;
 
@@ -192,7 +192,7 @@ namespace Kukolony.Jobs
             if (colony == null || asker == null) return false;
 
             List<WorkArea> areas = new List<WorkArea>();
-            WorkArea.AllFor(colony, job, areas);
+            WorkArea.AllFor(colony, job, asker, areas);
 
             ItemDrop nearestItem = null;
             StructureRecord nearestHome = null;
@@ -331,7 +331,7 @@ namespace Kukolony.Jobs
             // In the job's own order, as loose items are: a settlement that keeps its
             // outpost's chests tidy only once its own are is the same promise the row makes.
             List<WorkArea> areas = new List<WorkArea>();
-            WorkArea.AllFor(colony, job, areas);
+            WorkArea.AllFor(colony, job, asker, areas);
 
             foreach (WorkArea area in areas)
             {

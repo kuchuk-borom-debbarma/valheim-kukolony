@@ -106,14 +106,7 @@ namespace Kukolony.Villagers
             // What the jobs were remembering about it. None of it outlives the villager, and a
             // long session that hires and dismisses would otherwise keep a refusal set per
             // dead villager plus an entry per target each of them ever gave up on.
-            Jobs.Chop.ChopJob.Forget(villager);
-            Jobs.Tend.TendJob.Forget(villager);
-            Jobs.Craft.CraftJob.Forget(villager);
-            Jobs.Mine.MineJob.Forget(villager);
-            Jobs.Forage.ForageJob.Forget(villager);
-            Jobs.Farm.FarmJob.Forget(villager);
-            Jobs.Repair.RepairJob.Forget(villager);
-            Jobs.Unreachable.Forget(villager);
+            Jobs.JobMemory.ForgetAll(villager);
 
             Log.Info($"Villager removed from colony '{colony.State.Name}'");
             return true;

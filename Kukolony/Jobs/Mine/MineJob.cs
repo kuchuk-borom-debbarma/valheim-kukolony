@@ -265,7 +265,7 @@ namespace Kukolony.Jobs.Mine
         /// </summary>
         private static JobResult Choose(MineContext context, out string activity)
         {
-            List<WorkArea> areas = Areas(context.Colony, context.Job);
+            List<WorkArea> areas = Areas(context.Colony, context.Job, context.Villager);
             List<ZDOID> candidates = MiningGround.Near(context.Colony);
             Vector3 here = context.Villager.transform.position;
 
@@ -696,10 +696,10 @@ namespace Kukolony.Jobs.Mine
             return pick == null ? "no pickaxe" : "nothing to mine";
         }
 
-        private static List<WorkArea> Areas(Colony colony, JobDefinition job)
+        private static List<WorkArea> Areas(Colony colony, JobDefinition job, Villager villager)
         {
             List<WorkArea> areas = new List<WorkArea>();
-            WorkArea.AllFor(colony, job, areas);
+            WorkArea.AllFor(colony, job, villager, areas);
 
             // Narrowed to what the sweep will actually return, for the reason chopping gives: a
             // work area wider than the scan that feeds it is a band of ground the job lists as

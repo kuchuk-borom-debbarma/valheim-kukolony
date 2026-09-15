@@ -73,7 +73,7 @@ namespace Kukolony.Villagers
                 return;
             }
 
-            int queued = state.GetQueue().Count;
+            int queued = state.ActiveQueue().Count;
 
             switch (IdleWatch.Judge(now, state.WorkedAt, queued, threshold))
             {

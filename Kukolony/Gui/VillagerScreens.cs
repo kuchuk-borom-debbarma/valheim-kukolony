@@ -106,7 +106,7 @@ namespace Kukolony.Gui
             double now = ZNet.instance.GetTimeSeconds();
             float threshold = ModConfig.IdleWarnSeconds != null ? ModConfig.IdleWarnSeconds.Value : 300f;
 
-            return IdleWatch.Judge(now, state.WorkedAt, state.GetQueue().Count, threshold) == Villagers.Doing.Stalled
+            return IdleWatch.Judge(now, state.WorkedAt, state.ActiveQueue().Count, threshold) == Villagers.Doing.Stalled
                 ? $" - {IdleWatch.Spell(IdleWatch.IdleFor(now, state.WorkedAt))}"
                 : string.Empty;
         }
@@ -202,8 +202,22 @@ namespace Kukolony.Gui
             {
                 Widgets.Choice(jobs, "Work", Doing(colony, queue),
                     () => host.Push(new PickerScreen("What should they do",
-                        filter => WorkOptions(colony, filter), new List<string> { Chosen(colony, queue) },
-                        false, chosen => Assign(host, colony, zdo, chosen))), 260f);
+                        filter => WorkOptions(colony, filter, false),
+                        new List<string> { Chosen(colony, queue) },
+                        false, chosen => Assign(host, colony, zdo, chosen, false))), 260f);
+            }
+
+            // Its own row beside the home one, because a party queue is a different instruction
+            // rather than a variant of this one - a chopper at home being a hauler in the field is
+            // the whole reason there are two.
+            List<string> away = new VillagerState(zdo).GetPartyQueue();
+            if (column.TryRow(out Row partyJobs))
+            {
+                Widgets.Choice(partyJobs, "Work in a party", Doing(colony, away),
+                    () => host.Push(new PickerScreen("What should they do in a party",
+                        filter => WorkOptions(colony, filter, true),
+                        new List<string> { Chosen(colony, away) },
+                        false, chosen => Assign(host, colony, zdo, chosen, true))), 260f);
             }
 
             BuildEquipment(host, column, zdo);
@@ -361,7 +375,15 @@ namespace Kukolony.Gui
         ///     rather than two lists, so one press means one thing and the villager's orders
         ///     cannot end up half a preset and half something else.
         /// </remarks>
-        private static List<PickerScreen.Option> WorkOptions(Colony colony, string filter)
+        /// <summary>
+        ///     The work that can be given, and - when choosing party work - what will not happen.
+        /// </summary>
+        /// <remarks>
+        ///     Jobs that need the settlement are <b>listed with the reason rather than hidden</b>.
+        ///     Hiding them would leave a player wondering where tending went; listing them says
+        ///     what the villager will say when it gets out there, before it is out there.
+        /// </remarks>
+        private static List<PickerScreen.Option> WorkOptions(Colony colony, string filter, bool forParty)
         {
             List<PickerScreen.Option> options = new List<PickerScreen.Option>
             {
@@ -383,9 +405,13 @@ namespace Kukolony.Gui
                 if (!Matches(job.Name, filter)) continue;
 
                 records = records ?? colony.State.GetStructures();
+
+                string where = forParty && !Party.PartyWork.Allows(job.Kind)
+                    ? Party.PartyWork.WhyNot(job.Kind)
+                    : JobListScreen.Where(records, job, JobListScreen.PickerBudget);
+
                 options.Add(new PickerScreen.Option(JobPrefix + job.Id,
-                    $"{JobListScreen.Fit(job.Name, JobListScreen.NameBudget)} " +
-                    $"- {JobListScreen.Where(records, job, JobListScreen.PickerBudget)}"));
+                    $"{JobListScreen.Fit(job.Name, JobListScreen.NameBudget)} - {where}"));
             }
 
             return options;
@@ -420,13 +446,13 @@ namespace Kukolony.Gui
         ///     a preset means that job and nothing else, which is what "one row, one question"
         ///     has to mean if the row is to be believed.
         /// </remarks>
-        private void Assign(ColonyScreen host, Colony colony, ZDO zdo, List<string> chosen)
+        private void Assign(ColonyScreen host, Colony colony, ZDO zdo, List<string> chosen, bool forParty)
         {
             string id = chosen.Count == 0 ? string.Empty : chosen[0];
 
             if (id.StartsWith(PresetPrefix, System.StringComparison.Ordinal))
             {
-                ApplyPreset(host, colony, new List<string> { id.Substring(PresetPrefix.Length) });
+                ApplyPreset(host, colony, new List<string> { id.Substring(PresetPrefix.Length) }, forParty);
                 return;
             }
 
@@ -435,23 +461,33 @@ namespace Kukolony.Gui
             if (id.StartsWith(JobPrefix, System.StringComparison.Ordinal))
             {
                 string job = id.Substring(JobPrefix.Length);
-                new VillagerState(zdo).SetQueue(new List<string> { job });
+                Give(zdo, new List<string> { job }, forParty);
 
                 JobDefinition definition = colony.State.GetJobs().Find(j => j.Id == job);
                 Report.Say(definition == null
                     ? "That job is gone."
-                    : $"{VillagerRoster.Name(_villager)} now works {definition.Name}.");
+                    : $"{VillagerRoster.Name(_villager)} now works {definition.Name}" +
+                      (forParty ? " while following somebody." : "."));
 
                 host.Refresh();
                 return;
             }
 
-            new VillagerState(zdo).SetQueue(new List<string>());
-            Report.Say($"{VillagerRoster.Name(_villager)} has nothing to do.");
+            Give(zdo, new List<string>(), forParty);
+            Report.Say($"{VillagerRoster.Name(_villager)} has nothing to do" +
+                       (forParty ? " while following somebody." : "."));
             host.Refresh();
         }
 
-        private void ApplyPreset(ColonyScreen host, Colony colony, List<string> chosen)
+        /// <summary>Writes whichever of the two queues was being edited.</summary>
+        private static void Give(ZDO zdo, List<string> jobs, bool forParty)
+        {
+            VillagerState state = new VillagerState(zdo);
+            if (forParty) state.SetPartyQueue(jobs);
+            else state.SetQueue(jobs);
+        }
+
+        private void ApplyPreset(ColonyScreen host, Colony colony, List<string> chosen, bool forParty)
         {
             if (chosen.Count == 0) return;
 
@@ -464,13 +500,30 @@ namespace Kukolony.Gui
             }
 
             // The same call the preset screen makes when it hands work to everybody, so one
-            // villager and a whole settlement cannot come to disagree about what giving a
-            // preset means.
-            int count = Assignment.Apply(new List<ZDOID> { _villager }, preset.Jobs);
+            // villager and a whole settlement cannot come to disagree about what giving a preset
+            // means. Party work goes straight to the second queue instead, because that shared
+            // call has no notion of one - and reusing it by swapping queues underneath would be
+            // the settlement-wide path quietly doing something else for one caller.
+            int count;
+            if (forParty)
+            {
+                ZDO record = ZDOMan.instance?.GetZDO(_villager);
+                count = record == null ? 0 : 1;
+                if (record != null)
+                {
+                    record.SetOwner(ZDOMan.GetSessionID());
+                    new VillagerState(record).SetPartyQueue(preset.Jobs);
+                }
+            }
+            else
+            {
+                count = Assignment.Apply(new List<ZDOID> { _villager }, preset.Jobs);
+            }
 
             Report.Say(count == 0
                 ? $"Could not give {preset.Name} to {VillagerRoster.Name(_villager)}."
-                : $"{VillagerRoster.Name(_villager)} now works {preset.Name}.");
+                : $"{VillagerRoster.Name(_villager)} now works {preset.Name}" +
+                  (forParty ? " while following somebody." : "."));
             host.Refresh();
         }
 

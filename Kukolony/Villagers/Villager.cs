@@ -731,6 +731,9 @@ namespace Kukolony.Villagers
             // - and before work, because in a party a villager's work area is still its Kolony's
             // ground while it is being walked away from it. Both of those are the next stage's
             // business; this stage only has to not walk home.
+            // Only when it is actually keeping up. Standing with its player, it falls through to
+            // the queue - which is the whole of this stage: a party villager works the ground
+            // around the person it is following.
             if (Party.Escort.Tick(this, state, _walk, ref _closingOnLeader, deltaTime,
                     out string escorting))
             {
@@ -807,6 +810,19 @@ namespace Kukolony.Villagers
         private Jobs.JobResult Run(Colonies.Colony colony, Jobs.JobDefinition job,
             VillagerState state, float deltaTime, out string doing)
         {
+            // Work that needs the settlement, asked for out in the field. Refused here rather
+            // than left to fail inside the job, because every one of those jobs already has an
+            // honest "nothing to do" answer and it would be the wrong one - "nothing to tend"
+            // reads as a settlement in good order, not as one three hundred metres away.
+            //
+            // Skipped rather than Failed: the villager has not failed at anything, there is
+            // simply nothing of that kind here, so it costs a repetition and the queue moves on
+            // to something it can actually do.
+            if (state.InAParty && !Party.PartyWork.Allows(job.Kind))
+            {
+                return Jobs.JobOutcomes.Skipped(state, Party.PartyWork.WhyNot(job.Kind), out doing);
+            }
+
             // Only a crafter advertises goods for collection, and it says so every tick while it
             // does. A villager that moves on to another job must stop advertising, or it stays a
             // magnet for every hauler in the settlement while holding nothing anybody wants -
@@ -1007,6 +1023,20 @@ namespace Kukolony.Villagers
         private void StayNearHome(float deltaTime)
         {
             VillagerState state = State;
+
+            // Not while it is following somebody. This is the same fault resting had and it came
+            // back through a different door: a party villager with nothing to do fell out of the
+            // bottom of the work tick and set off for its bed, three hundred metres away, while
+            // the person it was following watched it go. Home is where a villager idles when it
+            // has no work; in a party, its player is.
+            if (state.InAParty && Party.PartyMembership.LeaderOf(state) != null)
+            {
+                VillagerMovement.Stop(_ai);
+                SetActivity($"with {Party.PartyMembership.LeaderOf(state).GetPlayerName()}");
+                _pathFailureReported = false;
+                return;
+            }
+
             Vector3 home = ResolveHome(state);
             float distance = Utils.DistanceXZ(home, transform.position);
 

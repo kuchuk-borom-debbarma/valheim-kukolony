@@ -198,7 +198,7 @@ namespace Kukolony.Jobs.Forage
         /// <summary>Takes the nearest thing worth picking, in the job's own order of places.</summary>
         private static JobResult Choose(ForageContext context, out string activity)
         {
-            List<WorkArea> areas = Areas(context.Colony, context.Job);
+            List<WorkArea> areas = Areas(context.Colony, context.Job, context.Villager);
             List<ZDOID> candidates = ForagingGround.Near(context.Colony);
             Vector3 here = context.Villager.transform.position;
 
@@ -502,10 +502,10 @@ namespace Kukolony.Jobs.Forage
 
         internal static bool WouldStop(Colony colony, JobDefinition job) => HasEnough(colony, job);
 
-        private static List<WorkArea> Areas(Colony colony, JobDefinition job)
+        private static List<WorkArea> Areas(Colony colony, JobDefinition job, Villager villager)
         {
             List<WorkArea> areas = new List<WorkArea>();
-            WorkArea.AllFor(colony, job, areas);
+            WorkArea.AllFor(colony, job, villager, areas);
 
             // Narrowed to what the sweep will actually return, for the reason chopping gives: a
             // work area wider than the scan that feeds it is a band of ground the job lists as

@@ -279,7 +279,7 @@ namespace Kukolony.Jobs.Chop
             // below is merely asserted: a colony radius of 128 against the default 96 m scan,
             // or a flag set to 200, gives a work area wider than the scan that feeds it, and
             // the band between them is ground the job lists as in range and can never act on.
-            List<WorkArea> areas = Areas(context.Colony, context.Job);
+            List<WorkArea> areas = Areas(context.Colony, context.Job, context.Villager);
             List<ZDOID> candidates = ChoppingGround.Near(context.Colony);
 
             Vector3 here = context.Villager.transform.position;
@@ -754,10 +754,10 @@ namespace Kukolony.Jobs.Chop
         }
 
         /// <summary>Every place this job works, each held to what the search can reach.</summary>
-        internal static List<WorkArea> Areas(Colony colony, JobDefinition job)
+        internal static List<WorkArea> Areas(Colony colony, JobDefinition job, Villager villager)
         {
             List<WorkArea> areas = new List<WorkArea>();
-            WorkArea.AllFor(colony, job, areas);
+            WorkArea.AllFor(colony, job, villager, areas);
 
             for (int i = 0; i < areas.Count; i++)
             {

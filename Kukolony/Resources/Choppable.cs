@@ -110,6 +110,12 @@ namespace Kukolony.Resources
         /// </remarks>
         internal static string SampleTree(int lowestTier, int highestTier)
         {
+            // Built if it has not been, as the mining samplers do. Without this the answer is an
+            // empty string whenever the caller happens not to be the chop slice, which builds the
+            // index on its way past - so a check would fail with "this world has no tree" about a
+            // world full of them.
+            if (!IsReady) Rebuild();
+
             string best = string.Empty;
             float smallest = float.MaxValue;
 

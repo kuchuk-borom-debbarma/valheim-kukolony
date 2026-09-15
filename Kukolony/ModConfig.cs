@@ -59,6 +59,9 @@ namespace Kukolony
         /// <summary>How near a party villager gets before it stops closing.</summary>
         internal static ConfigEntry<float> PartyComfortDistance { get; private set; }
 
+        /// <summary>How far around their player a villager in a party will work.</summary>
+        internal static ConfigEntry<float> PartyWorkRadius { get; private set; }
+
         /// <summary>Seconds of food a villager can hold at once.</summary>
         internal static ConfigEntry<float> FedCapSeconds { get; private set; }
 
@@ -186,7 +189,9 @@ namespace Kukolony
                 new ConfigDescription(
                     "How far a villager following you may drift before it stops and closes the "
                     + "gap. Must be above PartyComfortDistance, which is what it closes to: one "
-                    + "distance makes a villager flicker between walking and standing.",
+                    + "distance makes a villager flicker between walking and standing. Raised "
+                    + "automatically to at least PartyWorkRadius, because a villager cannot be "
+                    + "sent to work further away than it is allowed to stand.",
                     new AcceptableValueRange<float>(3f, 64f)));
 
             PartyComfortDistance = config.Bind(
@@ -197,6 +202,17 @@ namespace Kukolony
                     "How near a villager following you gets before it stops. Smaller means it "
                     + "crowds you; larger means it strings out behind.",
                     new AcceptableValueRange<float>(1f, 32f)));
+
+            PartyWorkRadius = config.Bind(
+                "4 - Work",
+                nameof(PartyWorkRadius),
+                28f,
+                new ConfigDescription(
+                    "How far around you a villager in your party will go looking for work. Kept "
+                    + "smaller than a work area's usual reach on purpose: a villager that wanders "
+                    + "forty metres off to a better tree has stopped being in your party in every "
+                    + "sense that matters.",
+                    new AcceptableValueRange<float>(4f, 96f)));
 
             FedCapSeconds = config.Bind(
                 "4 - Work",

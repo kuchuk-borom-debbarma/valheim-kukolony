@@ -14,6 +14,7 @@
 #   scripts/in-game-focus.sh forage
 #   scripts/in-game-focus.sh eat
 #   scripts/in-game-focus.sh party
+#   scripts/in-game-focus.sh partywork
 #   scripts/in-game-focus.sh swing
 #
 # The checks themselves are shared with the full run rather than copied, so a focused

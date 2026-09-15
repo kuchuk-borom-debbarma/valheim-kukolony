@@ -25,9 +25,10 @@ And the same fighting works at home: **an unattended Kolony now defends itself.*
 
 ## Where it has got to
 
-**Stage 1 is built and verified in game**: membership, following, and the gesture. A villager you
-can take for a walk and send home again. It does not work, fight, carry or sail yet — those are
-stages 2 to 7 in [`build-order.md`](build-order.md).
+**Stages 1 and 2 are built and verified in game.** You can take a villager for a walk, and it will
+chop, mine and forage the ground around you while it is with you — off its own party queue, with
+the settlement jobs refused out loud. It does not fight, carry or sail yet; those are stages 3 to 7
+in [`build-order.md`](build-order.md).
 
 ## The documents
 
