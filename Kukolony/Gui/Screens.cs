@@ -93,6 +93,18 @@ namespace Kukolony.Gui
                 Widgets.Button(idleRow, "Who", 160f, () => host.Push(new VillagerListScreen()));
             }
 
+            // Above the idle row in importance and below it in the layout, because a starving
+            // villager is also a stalled one and would otherwise be counted twice with no hint
+            // that the second number explains the first. Red rather than yellow: this one has a
+            // deadline.
+            int hungry = Starving(state);
+            if (hungry > 0 && column.TryRow(out Row hungryRow))
+            {
+                Widgets.Caption(hungryRow, "Nothing to eat", 220f);
+                Widgets.Caption(hungryRow, hungry.ToString(), 80f, Color.red);
+                Widgets.Button(hungryRow, "Who", 160f, () => host.Push(new VillagerListScreen()));
+            }
+
             if (column.TryRow(out Row presetsRow))
             {
                 Widgets.Caption(presetsRow, "Work presets");
@@ -164,6 +176,39 @@ namespace Kukolony.Gui
             }
 
             return quiet;
+        }
+
+        /// <summary>
+        ///     How many villagers have run out of food and have nowhere to get more.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Counted the same way, and shown only when it is not zero, for the same reason:
+        ///         a row that is always present is a row nobody reads, and this is the one row in
+        ///         the mod that has a body count behind it.
+        ///     </para>
+        ///     <para>
+        ///         Read off stored satiety without charging any time against it. This runs on the
+        ///         GUI's repaint, which is not a simulation step - advancing hunger from here
+        ///         would make a villager starve faster while somebody had the screen open.
+        ///     </para>
+        /// </remarks>
+        private static int Starving(ColonyState state)
+        {
+            int hungry = 0;
+            foreach (Villager villager in Villager.Instances)
+            {
+                if (villager == null) continue;
+                if (!villager.TryGetComponent(out ZNetView view) || !view.IsValid()) continue;
+
+                ZDO zdo = view.GetZDO();
+                if (ColonyMembership.GetColony(zdo) != state.Id) continue;
+
+                VillagerState theirs = new VillagerState(zdo);
+                if (theirs.IsValid && Hunger.IsStarving(theirs.Fed)) hungry++;
+            }
+
+            return hungry;
         }
     }
 

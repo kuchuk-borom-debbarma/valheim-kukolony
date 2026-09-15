@@ -1065,3 +1065,83 @@ else took the axe first for free.
 
 A villager with an empty bag fetches a pickaxe from a registered chest and mines with it — and
 does not touch the same chest while it is marked as one villagers may not take from.
+
+---
+
+# Eating — a rule, like the tool errand, and the first one with a body count
+
+Not a job either. Nothing queues it and nothing on a job screen configures it. It is asked on the
+work tick **before the queue is consulted**, in the same place resting is asked and immediately
+ahead of it: being tired costs a settlement time, being hungry costs it people.
+
+## Satiety is seconds, and it goes negative
+
+One signed float on the villager's record: how many seconds of food are left in it. Below zero the
+same number is how long it has gone with nothing, so *fed*, *hungry*, *starving* and *how near
+death* are four comparisons against one value rather than four fields that can disagree.
+
+Eating adds the food's own `m_foodBurnTime`. That is why **cooked genuinely beats raw** — the
+number comes off the asset, so the balance is the game's, and a modded food works on the day it is
+installed without this mod having heard of it. `m_food > 0` is required as well: a burn time alone
+admits mead, which is a potion rather than a meal.
+
+## Hunger only advances where it is simulated
+
+`Eating.Charge` is the only thing that moves the number, and it runs on the work tick — so a
+villager in an unloaded zone is not starving quietly, it is not doing anything at all. **A
+settlement cannot lose people because the player walked away**, or because the keep-alive hit its
+zone cap, or because the feature was switched off in config.
+
+Two bounds make that affordable and safe:
+
+- **A floor under one step** (`Hunger.MinStepSeconds`). The work tick runs at the AI's rate, and a
+  replicated ZDO write per villager per frame is the shape a settlement with no population cap
+  cannot carry. Charging in steps of a few seconds is identical arithmetic with a thousandth of the
+  writes.
+- **A ceiling on one step** (`Hunger.MaxStepSeconds`). A villager that *does* tick after a long gap
+  is charged a minute for it, not six hours. Without this, coming back after an evening away would
+  be a massacre.
+
+And a floor under the debt itself, at minus the grace: however long a famine lasts, a survivor is
+always one meal from recovery rather than owing hours of food no chest could repay.
+
+## Which chest
+
+`Errand`, the same one the tool and seed errands use — so the nearest registered container in
+`SettlementIndex.WhatMayBeTidied`. **A chest switched to *villagers may not use what is here* is
+never eaten from, and still accepts deliveries**, because the deposit path (`WhereDoesItGo`) does
+not consult that flag and the taking paths do. That asymmetry is the whole meaning of the setting:
+*fill me, but do not empty me*. It is now asserted in both directions rather than being true by
+the absence of a check.
+
+Among what it can reach a villager takes **the most filling thing**, not the first — otherwise a
+kitchen is decorative.
+
+## Being told before it matters
+
+1. **Hungry** — below the threshold it stops and goes to eat. Ordinary, unannounced.
+2. **Starving** — nothing left, nothing in the bag, nothing in the settlement. It **stops working**
+   and says so, once, through `Chatter`. The Kolony screen grows a red *Nothing to eat* row.
+3. **Dying** — only after `StarvingGraceSeconds` past empty, and only if `StarvingKills` is on.
+
+**`StarvingKills` is off by default.** A settlement that runs unattended for hours should not be
+able to lose people before its owner has watched it feed itself once. Off still stops a starving
+villager working and still says so; only the dying is withheld.
+
+## What it does not do
+
+- **It does not use the game's eating.** `Humanoid.ConsumeItem` is eleven bytes deferring to
+  `CanConsumeItem`; `EatFood`, `UpdateFood` and the three food slots are `Player`-only. Satiety is
+  this mod's own model. See `docs/valheim-findings.md`.
+- **It does not respect cargo.** A hungry villager will eat one of the steaks it is hauling. That
+  is the right answer — the alternative is starving to death on top of a full load.
+- **It does not compete politely.** Villagers draw on the same chests a player does, and the
+  *may not use what is here* flag is the only brake.
+
+## Done when
+
+A hungry villager fetches a meal from a registered chest, eats it, and its own record shows the
+rise — while a locked larder beside it is never touched and still accepts deliveries. **Not yet
+run in game.** The `eat` slice exists and has never been executed; the death path has no in-game
+check at all, by design, because a check that switched killing on would have to kill the villager
+it was using to prove everything else.

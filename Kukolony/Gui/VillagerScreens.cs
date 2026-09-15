@@ -66,17 +66,13 @@ namespace Kukolony.Gui
         }
 
         /// <summary>
-        ///     What a villager is doing, when anyone can see it.
+        ///     What a villager is doing, and how long it has been getting nowhere.
         /// </summary>
         /// <remarks>
         ///     Activity lives on the component, not the ZDO, so a villager nobody is near has
         ///     none to report. Saying "not loaded" is honest; inventing "idle" would claim
         ///     knowledge of something nothing is simulating.
-        /// </remarks>
-        /// <summary>
-        ///     What a villager is doing, and how long it has been getting nowhere.
-        /// </summary>
-        /// <remarks>
+        ///
         ///     The time is the half that was missing. A villager's own words are not enough on
         ///     their own - "nothing to haul" reads as a settled settlement whether hauling is
         ///     finished or structurally impossible, and this mod has shipped both. The number
@@ -176,6 +172,14 @@ namespace Kukolony.Gui
             {
                 Widgets.Caption(energy, "Energy");
                 Widgets.Label(energy, Villager.EnergyText(new VillagerState(zdo)));
+            }
+
+            if (column.TryRow(out Row food))
+            {
+                VillagerState theirs = new VillagerState(zdo);
+                Widgets.Caption(food, "Food");
+                Widgets.Label(food, Villager.FoodText(theirs),
+                    Hunger.IsStarving(theirs.Fed) ? Color.red : Color.white);
             }
 
             StructureRecord bed = SettlementIndex.BedOf(colony, _villager);

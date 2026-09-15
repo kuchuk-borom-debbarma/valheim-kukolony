@@ -359,6 +359,10 @@ namespace Kukolony.Debug
                     yield return Cooking(report, colony, origin);
                     break;
 
+                case "eat":
+                    yield return Eating(report, colony, origin);
+                    break;
+
                 case "queue":
                     yield return CheckAStuckTripEndsAndTheQueueMovesOn(report, colony);
                     yield return CheckAPresetKeepsItsOrder(report, colony);
@@ -374,7 +378,7 @@ namespace Kukolony.Debug
                     // Named but unknown. Failing beats running everything under a name that
                     // says otherwise, or running nothing and reporting a pass.
                     report.Check(false, $"'{wanted}' is not a slice this run knows",
-                        "known: chop, travel, queue, tend, craft, mine, forage, farm, repair, cook, swing");
+                        "known: chop, travel, queue, tend, craft, mine, forage, farm, repair, cook, eat, swing");
                     break;
             }
 
@@ -7148,6 +7152,381 @@ namespace Kukolony.Debug
         ///     rather than being staged around with a hand-loaded villager, which would pass
         ///     identically whether the fetching worked or not.
         /// </remarks>
+        /// <summary>
+        ///     Villagers eating: what they will eat, where from, and what happens when there is none.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>Never run.</b> Written alongside the feature and left ready, because the game
+        ///         was not to be launched - so everything below is unproven against a live world and
+        ///         should be read as a plan for proving it rather than as evidence. The
+        ///         deterministic suite covers the arithmetic; this covers the half it cannot reach.
+        ///     </para>
+        ///     <para>
+        ///         <b>And it does not cover dying.</b> Killing is off by default and this slice
+        ///         leaves it off, because a check that switched it on would have to kill the
+        ///         villager it was using to prove the rest. So the one path with a body count is
+        ///         the one path with no in-game check - said here rather than left to be
+        ///         discovered, because a slice that passes while silently skipping the dangerous
+        ///         half is worse than no slice at all.
+        ///     </para>
+        /// </remarks>
+        private static IEnumerator Eating(TestReport report, Colony colony, Vector3 origin)
+        {
+            yield return CheckFoodIsUnderstood(report);
+            yield return CheckALockedLarderFeedsNobodyAndStillFillsUp(report, colony, origin);
+            yield return CheckAHungryVillagerFetchesAMealAndEatsIt(report, colony, origin);
+            yield return CheckAVillagerWithNothingToEatStopsAndSaysSo(report, colony, origin);
+            CheckAVillagerWithNoRecordIsNotStarving(report);
+        }
+
+        /// <summary>
+        ///     The world has food, and the game's own numbers really do rank cooked above raw.
+        /// </summary>
+        /// <remarks>
+        ///     The premise the whole feature rests on. If burn times did not differ, "better food
+        ///     matters" would be a claim this mod makes and the assets do not support - so it is
+        ///     measured here rather than assumed, the way the mining tiers and the plant grace
+        ///     period had to be.
+        /// </remarks>
+        private static IEnumerator CheckFoodIsUnderstood(TestReport report)
+        {
+            string thin = SampleFood(false);
+            string filling = SampleFood(true);
+
+            report.Check(!string.IsNullOrEmpty(thin) && !string.IsNullOrEmpty(filling),
+                "the world has food a villager could eat",
+                $"least filling='{thin}' most filling='{filling}'");
+
+            if (string.IsNullOrEmpty(thin) || string.IsNullOrEmpty(filling)) yield break;
+
+            float lean = BurnTimeOf(thin);
+            float rich = BurnTimeOf(filling);
+
+            report.Check(rich > lean,
+                "and foods differ in how long they last, which is what makes cooking worth doing",
+                $"{thin}={lean:0}s vs {filling}={rich:0}s");
+
+            // The predicate the errand and the eating both use, asked of a real inventory rather
+            // than of two floats: the same question asked two ways is how a villager fetches an
+            // axe forever while carrying one.
+            Inventory both = new Inventory("eat probe", null, 4, 4);
+            both.AddItem(ObjectDB.instance.GetItemPrefab(thin), 1);
+            both.AddItem(ObjectDB.instance.GetItemPrefab(filling), 1);
+
+            ItemDrop.ItemData chosen = FoodErrand.Best(both);
+
+            report.Check(chosen != null && Carrying.NameOf(chosen) == filling,
+                "and offered both, a villager reaches for the one that feeds it longest",
+                $"chose='{(chosen == null ? "nothing" : Carrying.NameOf(chosen))}' wanted='{filling}'");
+
+            yield return null;
+        }
+
+        /// <summary>
+        ///     A chest villagers may not take from feeds nobody - and still accepts deliveries.
+        /// </summary>
+        /// <remarks>
+        ///     <b>The second half is the one that has never been asserted.</b> That a locked chest
+        ///     still receives is true today only because the deposit path happens not to consult
+        ///     the flag, which is how a rule quietly disappears the next time somebody makes the
+        ///     two paths symmetrical for tidiness. This is the check that would notice.
+        /// </remarks>
+        private static IEnumerator CheckALockedLarderFeedsNobodyAndStillFillsUp(TestReport report,
+            Colony colony, Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            string food = SampleFood(true);
+            if (string.IsNullOrEmpty(food))
+            {
+                report.Check(false, "control: the larder check needs a food this world has");
+                yield break;
+            }
+
+            GameObject larder = Spawn("piece_chest_wood", origin + new Vector3(8f, 0f, -8f));
+            yield return null;
+
+            StructureRecord record = Register(colony, larder, "Player's larder");
+            if (record == null)
+            {
+                report.Check(false, "control: the larder check could register its chest");
+                Release(larder);
+                yield break;
+            }
+
+            Container box = larder.GetComponentInChildren<Container>(true);
+            int seeded = PutIn(box, food, 5);
+
+            ColonyOperations.EditSettings(colony, record.Id, s =>
+            {
+                s.MayTakeFrom = false;
+                s.Accepts = new List<string> { food };
+            });
+
+            report.Check(seeded > 0, "control: the larder holds food", $"{seeded} x {food}");
+
+            // Taking: the larder must not appear among the places a villager may raid.
+            bool raidable = false;
+            foreach (StructureRecord open in SettlementIndex.WhatMayBeTidied(colony))
+            {
+                if (open.Id == record.Id) raidable = true;
+            }
+
+            report.Check(!raidable,
+                "a chest marked 'villagers may not use what is here' is not one they may eat from");
+
+            // Giving: and it must still be somewhere a villager would put food.
+            bool receives = false;
+            foreach (StructureRecord home in
+                     SettlementIndex.WhereDoesItGo(colony, food, larder.transform.position))
+            {
+                if (home.Id == record.Id) receives = true;
+            }
+
+            report.Check(receives,
+                "and the same chest still accepts deliveries, which is the half nobody had checked",
+                $"{food} -> {record.Name}");
+
+            // The control that gives the first assertion meaning: unlocked, it is raidable. Without
+            // this, a bug that emptied WhatMayBeTidied entirely would pass the check above.
+            ColonyOperations.EditSettings(colony, record.Id, s => s.MayTakeFrom = true);
+            SettlementIndex.ResetForTest();
+
+            bool nowRaidable = false;
+            foreach (StructureRecord open in SettlementIndex.WhatMayBeTidied(colony))
+            {
+                if (open.Id == record.Id) nowRaidable = true;
+            }
+
+            report.Check(nowRaidable,
+                "control: with the flag on, that same chest is one they may eat from");
+
+            colony.RemoveStructure(record.Id);
+            Release(larder);
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A hungry villager walks to a chest, takes a meal and eats it.
+        /// </summary>
+        private static IEnumerator CheckAHungryVillagerFetchesAMealAndEatsIt(TestReport report,
+            Colony colony, Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            string food = SampleFood(true);
+            if (string.IsNullOrEmpty(food))
+            {
+                report.Check(false, "control: the eating check needs a food this world has");
+                yield break;
+            }
+
+            GameObject chest = Spawn("piece_chest_wood", origin + new Vector3(-8f, 0f, 8f));
+            yield return null;
+
+            StructureRecord store = Register(colony, chest, "Pantry");
+            if (store == null)
+            {
+                report.Check(false, "control: the eating check could register its chest");
+                Release(chest);
+                yield break;
+            }
+
+            Container box = chest.GetComponentInChildren<Container>(true);
+            int inChest = PutIn(box, food, 5);
+
+            Villager hand = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (hand == null || !hand.TryGetComponent(out ZNetView who) || !who.IsValid())
+            {
+                report.Check(false, "control: the eating check could spawn a villager");
+                colony.RemoveStructure(store.Id);
+                Release(chest);
+                yield break;
+            }
+
+            SendRested(who);
+
+            // Empty handed and hungry, which is the point: the fetching is half of what this proves.
+            Container bag = VillagerInventory.Attach(hand.gameObject, who);
+            Clear(bag.GetInventory());
+            VillagerInventory.Persist(bag, who);
+
+            VillagerState state = new VillagerState(who.GetZDO());
+            state.SetFed(30f);
+
+            float before = state.Fed;
+            report.Check(before < 60f && inChest > 0,
+                "control: the villager is hungry, empty handed, and the food is in a chest",
+                $"fed={before:0}s chest={inChest} x {food}");
+
+            float fed = before;
+            float elapsed = 0f;
+
+            while (elapsed < CookSeconds && fed <= before)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                elapsed += .5f;
+
+                if (hand == null || !who.IsValid()) break;
+                fed = new VillagerState(who.GetZDO()).Fed;
+            }
+
+            report.Check(fed > before,
+                "a hungry villager fetched a meal and ate it, and its own record says so",
+                $"fed {before:0}s -> {fed:0}s after {elapsed:0}s " +
+                $"doing='{(hand != null ? hand.Activity : "gone")}'");
+
+            report.Check(CountIn(box, food) < inChest,
+                "and the meal came out of the chest",
+                $"chest {inChest} -> {CountIn(box, food)} x {food}");
+
+            if (who.IsValid()) VillagerLifecycle.Remove(colony, who.GetZDO().m_uid);
+            colony.RemoveStructure(store.Id);
+            Release(chest);
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     With nothing to eat anywhere, a villager stops working and says why.
+        /// </summary>
+        /// <remarks>
+        ///     The behaviour that makes starving survivable: a villager that quietly carried on
+        ///     until it dropped would give a player no moment at which to act, which is the whole
+        ///     objection to letting hunger kill at all.
+        /// </remarks>
+        private static IEnumerator CheckAVillagerWithNothingToEatStopsAndSaysSo(TestReport report,
+            Colony colony, Vector3 origin)
+        {
+            SweepLooseItems(colony);
+            SettlementIndex.ResetForTest();
+
+            Villager hand = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (hand == null || !hand.TryGetComponent(out ZNetView who) || !who.IsValid())
+            {
+                report.Check(false, "control: the starving check could spawn a villager");
+                yield break;
+            }
+
+            SendRested(who);
+
+            Container bag = VillagerInventory.Attach(hand.gameObject, who);
+            Clear(bag.GetInventory());
+            VillagerInventory.Persist(bag, who);
+
+            // Out of food entirely, with nothing registered that holds any.
+            VillagerState state = new VillagerState(who.GetZDO());
+            state.SetFed(-30f);
+
+            report.Check(Hunger.IsStarving(state.Fed),
+                "control: the villager has nothing left and there is nowhere to get more",
+                $"fed={state.Fed:0}s");
+
+            string said = string.Empty;
+            float elapsed = 0f;
+
+            while (elapsed < CookSeconds && said.IndexOf("starv", System.StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                elapsed += .5f;
+
+                if (hand == null || !who.IsValid()) break;
+                said = hand.Activity ?? string.Empty;
+            }
+
+            report.Check(said.IndexOf("starv", System.StringComparison.OrdinalIgnoreCase) >= 0,
+                "a villager with nothing to eat stops and says so rather than working until it drops",
+                $"doing='{said}' after {elapsed:0}s");
+
+            // And it is still alive to be fed, because killing is off unless a player turns it on.
+            report.Check(!ModConfig.StarvingKills.Value || who.IsValid(),
+                "control: starving does not kill unless the setting says it may",
+                $"kills={ModConfig.StarvingKills.Value} alive={who.IsValid()}");
+
+            if (who.IsValid()) VillagerLifecycle.Remove(colony, who.GetZDO().m_uid);
+            SweepLooseItems(colony);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A villager saved before hunger existed opens fed, not dying.
+        /// </summary>
+        /// <remarks>
+        ///     The migration, asserted rather than trusted. An unwritten float reads as zero from
+        ///     a ZDO, and zero satiety is a villager that starts starving the instant an existing
+        ///     world is loaded - which would have turned an update into a massacre.
+        /// </remarks>
+        private static void CheckAVillagerWithNoRecordIsNotStarving(TestReport report)
+        {
+            ZDO blank = ZDOMan.instance.CreateNewZDO(Vector3.zero, 0);
+            VillagerState old = new VillagerState(blank);
+
+            report.Check(!Hunger.IsStarving(old.Fed),
+                "a villager from a save made before hunger existed reads as fed, not starving",
+                $"fed={old.Fed:0}s");
+
+            report.Check(old.FedAt <= 0d,
+                "control: and it genuinely has no record - this is the unwritten case, not a written one",
+                $"stamped={old.FedAt:0}");
+
+            ZDOMan.instance.DestroyZDO(blank);
+        }
+
+        /// <summary>
+        ///     A real food prefab name from this world, at one end of the filling scale or the other.
+        /// </summary>
+        /// <remarks>
+        ///     Found rather than named, as the deposit and tree samplers are and for the same
+        ///     reason: this mod does not ship the assets, so it cannot check its own spelling -
+        ///     and it has been wrong about a prefab name before.
+        /// </remarks>
+        private static string SampleFood(bool mostFilling)
+        {
+            if (ObjectDB.instance == null) return string.Empty;
+
+            string found = string.Empty;
+            float mark = mostFilling ? 0f : float.MaxValue;
+
+            foreach (GameObject prefab in ObjectDB.instance.m_items)
+            {
+                if (prefab == null || !prefab.TryGetComponent(out ItemDrop drop)) continue;
+
+                ItemDrop.ItemData.SharedData shared = drop.m_itemData?.m_shared;
+                if (shared == null || shared.m_food <= 0f || shared.m_foodBurnTime <= 0f) continue;
+
+                bool better = mostFilling
+                    ? shared.m_foodBurnTime > mark
+                    : shared.m_foodBurnTime < mark;
+                if (!better) continue;
+
+                mark = shared.m_foodBurnTime;
+                found = prefab.name;
+            }
+
+            return found;
+        }
+
+        /// <summary>How long one of these keeps a villager fed, from the asset itself.</summary>
+        private static float BurnTimeOf(string prefabName)
+        {
+            GameObject prefab = ObjectDB.instance == null
+                ? null
+                : ObjectDB.instance.GetItemPrefab(prefabName);
+
+            return prefab != null && prefab.TryGetComponent(out ItemDrop drop) &&
+                   drop.m_itemData?.m_shared != null
+                ? drop.m_itemData.m_shared.m_foodBurnTime
+                : 0f;
+        }
+
         private static IEnumerator Cooking(TestReport report, Colony colony, Vector3 origin)
         {
             yield return CheckFireplacesAreUnderstood(report);

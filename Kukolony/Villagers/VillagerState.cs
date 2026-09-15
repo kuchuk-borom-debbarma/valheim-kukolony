@@ -60,6 +60,11 @@ namespace Kukolony.Villagers
         private static readonly int RestingKey = "kukolony.energy.resting.v1".GetStableHashCode();
         private static readonly int RestRateKey = "kukolony.energy.rate.v1".GetStableHashCode();
 
+        // Hunger, in the same two-field shape as energy and for the same reason: a value and
+        // the moment it was true, so a villager nobody is watching is neither frozen nor ticked.
+        private static readonly int FedKey = "kukolony.fed.v1".GetStableHashCode();
+        private static readonly int FedAtKey = "kukolony.fed.at.v1".GetStableHashCode();
+
         private readonly ZDO _zdo;
 
         internal VillagerState(ZDO zdo)
@@ -195,7 +200,6 @@ namespace Kukolony.Villagers
 
         internal double EnergyAt => _zdo?.GetLong(EnergyAtKey, 0L) ?? 0d;
 
-        /// <summary>Whether it is currently resting, which decides which threshold applies.</summary>
         /// <summary>Whether this villager has finished goods waiting to be collected.</summary>
         internal bool HasGoods => _zdo?.GetBool(GoodsKey, false) ?? false;
 
@@ -246,6 +250,52 @@ namespace Kukolony.Villagers
         internal float RestRate => _zdo?.GetFloat(RestRateKey, 0f) ?? 0f;
 
         internal void SetRestRate(float rate) => _zdo?.Set(RestRateKey, rate);
+
+        /// <summary>
+        ///     Seconds of food left in this villager, and the moment that was true.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Negative means it has gone that long with nothing. See <see cref="Hunger" />
+        ///         for why one signed number carries fed, hungry and starving rather than three.
+        ///     </para>
+        ///     <para>
+        ///         <b>A villager with no record reads as freshly fed</b>, exactly as one with no
+        ///         energy record reads as rested. That is the right answer for a villager that
+        ///         has just been born, and it is what stops a save made before this existed from
+        ///         opening on a funeral.
+        ///     </para>
+        /// </remarks>
+        internal float Fed => _zdo?.GetFloat(FedKey, BornFed) ?? BornFed;
+
+        internal double FedAt => _zdo?.GetLong(FedAtKey, 0L) ?? 0d;
+
+        /// <summary>
+        ///     Records satiety and the moment it was true.
+        /// </summary>
+        /// <remarks>
+        ///     The stamp is written here rather than at call sites, for the reason
+        ///     <see cref="SetEnergy" /> gives: a value recorded without its moment decays from
+        ///     the wrong instant, silently and forever after.
+        /// </remarks>
+        internal void SetFed(float fed)
+        {
+            if (_zdo == null) return;
+
+            _zdo.Set(FedKey, fed);
+            _zdo.Set(FedAtKey, ZNet.instance == null ? 0L : (long)ZNet.instance.GetTimeSeconds());
+        }
+
+        /// <summary>
+        ///     How full a villager starts life, and how full an older save's villager reads as.
+        /// </summary>
+        /// <remarks>
+        ///     Falls back to a real number rather than to zero when the config has not been bound
+        ///     yet - during early load, or in a test - because zero here means every villager in
+        ///     the world is starving the moment it is read.
+        /// </remarks>
+        private static float BornFed =>
+            ModConfig.FedCapSeconds != null ? ModConfig.FedCapSeconds.Value : 1800f;
 
         /// <summary>Net time the current target was taken, so a stuck claim expires.</summary>
         internal double ClaimedSince => _zdo?.GetLong(ClaimedSinceKey, 0L) ?? 0L;

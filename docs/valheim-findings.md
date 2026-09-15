@@ -1116,3 +1116,35 @@ implying it is load-bearing.
 `m_craftRequireFire`, and `EffectArea.IsPointPlus025InsideBurningArea` answers it. That test is
 **proximity, not ownership** — a grill beside somebody else's bonfire will cook, which is exactly
 what the game does too.
+
+## Feeding a villager — the eating path is `Player`-only
+
+Measured against the shipped assembly, not inferred:
+
+- **`Humanoid.ConsumeItem` is eleven bytes.** It defers to `CanConsumeItem` and does nothing else.
+- **The real work is on `Player` and nowhere else** — `EatFood`, `UpdateFood`, `CanEat`, and the
+  three food slots that drive the HUD. A villager is a `Humanoid`, not a `Player`.
+
+So a villager **cannot be fed through the game's own path**, and satiety has to be modelled by the
+mod. This was very nearly written up the other way round from reading names alone; the assembly
+said no.
+
+**What the game does give is the numbers.** On `ItemDrop.ItemData.SharedData`, all public:
+
+```
+single m_food            how much max health it grants
+single m_foodStamina
+single m_foodEitr
+single m_foodBurnTime    how many seconds it lasts  <- this is the useful one
+single m_foodRegen
+single m_foodEatAnimTime
+```
+
+`m_foodBurnTime` is what makes "cooked is better than raw" a fact about the assets rather than a
+balance figure invented by a mod — and it means a modded food is ranked correctly without this mod
+having heard of it. Test both `m_food > 0` **and** `m_foodBurnTime > 0`: a burn time on its own
+admits mead, which is a potion rather than a meal.
+
+Find food by scanning `ObjectDB.instance.m_items` for those fields rather than by prefab name. The
+name list would be wrong the first time anybody installed a food mod, and this mod does not ship
+the assets so it cannot check its own spelling.

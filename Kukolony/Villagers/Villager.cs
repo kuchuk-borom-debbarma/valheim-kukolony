@@ -680,17 +680,9 @@ namespace Kukolony.Villagers
             return taken;
         }
 
-        /// <summary>
-        ///     Where this villager idles when no queued job can run.
-        /// </summary>
-        /// <summary>
-        ///     Where this villager belongs: its bed if it has one, else where it was born.
-        /// </summary>
-        /// <remarks>
-        ///     Read from the colony's record rather than from a loaded bed, so a villager can
-        ///     walk home to a bed whose zone has not been instantiated. The spawn point remains
-        ///     the answer for anyone unassigned, which is what it has always been.
-        /// </remarks>
+        /// <summary>The rig, for a check that has to watch what it actually does.</summary>
+        internal VillagerAnimation AnimationForTest => _animation;
+
         /// <summary>
         ///     Runs the job at the front of this villager's queue, if it has one.
         /// </summary>
@@ -707,9 +699,6 @@ namespace Kukolony.Villagers
         ///         visible steps.
         ///     </para>
         /// </remarks>
-        /// <summary>The rig, for a check that has to watch what it actually does.</summary>
-        internal VillagerAnimation AnimationForTest => _animation;
-
         private bool TryWork(float deltaTime)
         {
             Colonies.Colony colony = Colonies.Colony.FindFor(_nview.GetZDO());
@@ -726,6 +715,17 @@ namespace Kukolony.Villagers
             if (Time.time < _nextWorkTick) return _working;
 
             VillagerState state = State;
+
+            // Eating comes before resting, and both before the queue is consulted. A tired
+            // villager has nothing useful to offer any job; a hungry one is about to have
+            // nothing at all. Being tired costs the settlement time and being hungry costs it
+            // people, so hunger is asked first.
+            if (Eating.Tick(this, colony, state, Bag, _walk, deltaTime, out string eating))
+            {
+                SetActivity(eating);
+                _working = true;
+                return true;
+            }
 
             // Rest comes before work, and before the queue is even consulted. A tired villager
             // has nothing useful to offer any job, and asking one for work it cannot do would
@@ -929,6 +929,15 @@ namespace Kukolony.Villagers
         private float _nextWorkTick;
         private bool _working;
 
+        /// <summary>
+        ///     Where this villager idles when no queued job can run: its bed if it has one,
+        ///     else where it was born.
+        /// </summary>
+        /// <remarks>
+        ///     Read from the colony's record rather than from a loaded bed, so a villager can
+        ///     walk home to a bed whose zone has not been instantiated. The spawn point remains
+        ///     the answer for anyone unassigned, which is what it has always been.
+        /// </remarks>
         private Vector3 ResolveHome(VillagerState state)
         {
             Colonies.Colony colony = Colonies.Colony.FindFor(_nview.GetZDO());
@@ -1095,6 +1104,33 @@ namespace Kukolony.Villagers
                 : "working";
 
             return $"energy {energy:0}% ({word})";
+        }
+
+        /// <summary>
+        ///     How well fed this villager is, in the words a player would use.
+        /// </summary>
+        /// <remarks>
+        ///     Read off stored satiety without charging time against it, because this is asked
+        ///     on a repaint rather than on a simulation step - and hunger only advances where it
+        ///     is simulated. Opening a screen must not make anybody hungrier.
+        /// </remarks>
+        internal static string FoodText(VillagerState state)
+        {
+            float fed = state.Fed;
+            float hungry = ModConfig.HungryBelowSeconds != null
+                ? ModConfig.HungryBelowSeconds.Value
+                : 600f;
+
+            if (Hunger.IsStarving(fed))
+            {
+                float going = Hunger.StarvingFor(fed);
+                return going <= 0f
+                    ? "nothing left"
+                    : $"starving - nothing for {IdleWatch.Spell(going)}";
+            }
+
+            string word = Hunger.Wants(fed, hungry) ? "hungry" : "fed";
+            return $"{IdleWatch.Spell(fed)} of food ({word})";
         }
 
         /// <summary>Hover line: who this is and what they are doing.</summary>

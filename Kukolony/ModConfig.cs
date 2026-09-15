@@ -53,6 +53,20 @@ namespace Kukolony
         /// <summary>Energy a resting villager must reach before working again.</summary>
         internal static ConfigEntry<float> RestedAbove { get; private set; }
 
+        /// <summary>Seconds of food a villager can hold at once.</summary>
+        internal static ConfigEntry<float> FedCapSeconds { get; private set; }
+
+        /// <summary>Seconds of food left at which a villager stops to eat.</summary>
+        internal static ConfigEntry<float> HungryBelowSeconds { get; private set; }
+
+        /// <summary>How long a villager may starve before it dies of it.</summary>
+        internal static ConfigEntry<float> StarvingGraceSeconds { get; private set; }
+
+        /// <summary>
+        ///     Whether starving actually kills. Off leaves the warnings and the refusal to work.
+        /// </summary>
+        internal static ConfigEntry<bool> StarvingKills { get; private set; }
+
         /// <summary>In-game hours of sleep in a bed to go from exhausted to fully rested.</summary>
         internal static ConfigEntry<float> BedHoursToRest { get; private set; }
 
@@ -158,6 +172,46 @@ namespace Kukolony
                     "Energy a resting villager must reach before working again. Must be above "
                     + "TiredBelow: one threshold makes a villager flicker between the two.",
                     new AcceptableValueRange<float>(10f, 100f)));
+
+            FedCapSeconds = config.Bind(
+                "4 - Work",
+                nameof(FedCapSeconds),
+                1800f,
+                new ConfigDescription(
+                    "Seconds of food a villager can hold at once, and how full a new one starts. "
+                    + "Food is worth its own burn time from the game's own data, so a cap below "
+                    + "what a cooked meal is worth throws the rest of that meal away.",
+                    new AcceptableValueRange<float>(60f, 86400f)));
+
+            HungryBelowSeconds = config.Bind(
+                "4 - Work",
+                nameof(HungryBelowSeconds),
+                600f,
+                new ConfigDescription(
+                    "Seconds of food left at which a villager stops what it is doing and goes to "
+                    + "eat. Higher means it eats earlier and more often, and is further from ever "
+                    + "starving.",
+                    new AcceptableValueRange<float>(0f, 86400f)));
+
+            StarvingGraceSeconds = config.Bind(
+                "4 - Work",
+                nameof(StarvingGraceSeconds),
+                1800f,
+                new ConfigDescription(
+                    "How long a villager may go with nothing to eat before it dies of it. This is "
+                    + "the window you have to notice and act, so it is also the floor on how far "
+                    + "into hunger a villager can fall: however long a famine lasts, one meal "
+                    + "brings a survivor back.",
+                    new AcceptableValueRange<float>(60f, 86400f)));
+
+            StarvingKills = config.Bind(
+                "4 - Work",
+                nameof(StarvingKills),
+                false,
+                "Whether starving actually kills a villager. Off by default, because a settlement "
+                + "that works unattended for hours should not be able to lose people before you "
+                + "have watched it feed itself once. Off still stops a starving villager working "
+                + "and still says so - only the dying is withheld.");
 
             BedHoursToRest = config.Bind(
                 "4 - Work",

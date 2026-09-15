@@ -81,6 +81,7 @@ static class Program
         Locomoting();
         Legs();
         Tiring();
+        Starving();
         Repeating();
         Chopping();
         Appetite();
@@ -585,6 +586,98 @@ static class Program
         // recovered a hundredth of a point would start work, spend one action, and stop again.
         Case("control: the two thresholds genuinely differ, or a villager flickers",
             Energy.ShouldRest(21f, true, 20f, 60f) && !Energy.ShouldRest(21f, false, 20f, 60f));
+    }
+
+    /// <summary>Getting hungry, eating, and dying of not.</summary>
+    static void Starving()
+    {
+        Console.WriteLine("hunger");
+
+        // Satiety is seconds of food left, and it is allowed to go negative: below zero the
+        // number is how long the villager has gone with nothing. One signed float carries fed,
+        // hungry, starving and how near death, with no second timestamp to fall out of step.
+        const float floor = -1800f;
+
+        Case("time passing eats into what is left",
+            Math.Abs(Hunger.Left(1000f, 400f, floor) - 600f) < .001f);
+        Case("past empty it keeps counting, into debt",
+            Math.Abs(Hunger.Left(100f, 400f, floor) - -300f) < .001f);
+        Case("no time passing costs nothing",
+            Math.Abs(Hunger.Left(1000f, 0f, floor) - 1000f) < .001f);
+        Case("a negative span after a clock adjustment costs nothing",
+            Math.Abs(Hunger.Left(1000f, -400f, floor) - 1000f) < .001f);
+
+        // The floor. Without it a famine survived with the killing switched off leaves
+        // everybody owing hours of food that no reachable chest could repay.
+        Case("hunger cannot run deeper into debt than the floor",
+            Math.Abs(Hunger.Left(0f, 99999f, floor) - floor) < .001f);
+        Case("so one meal always brings a survivor back within reach",
+            Hunger.Ate(Hunger.Left(0f, 99999f, floor), 2000f, 1800f) > 0f);
+
+        // The step: what stops an absence from being a massacre. Hunger only advances while a
+        // villager is loaded and ticking, and a villager that ticks after a long gap is charged
+        // a minute for it rather than the whole gap.
+        Case("an ordinary gap between ticks is charged in full",
+            Math.Abs(Hunger.Step(30d) - 30f) < .001f);
+        Case("six hours unloaded is charged as one capped step",
+            Math.Abs(Hunger.Step(21600d) - Hunger.MaxStepSeconds) < .001f);
+        Case("a fraction of a second is not charged at all, so this writes no ZDO",
+            Math.Abs(Hunger.Step(.05d)) < .001f);
+        Case("nor is a clock that went backwards",
+            Math.Abs(Hunger.Step(-500d)) < .001f);
+
+        // Eating. Worth comes from the food's own burn time, so cooked beating raw is the
+        // game's arithmetic rather than a number chosen here.
+        Case("eating adds what the food is worth",
+            Math.Abs(Hunger.Ate(200f, 600f, 1800f) - 800f) < .001f);
+        Case("and never past what a villager can hold",
+            Math.Abs(Hunger.Ate(1600f, 600f, 1800f) - 1800f) < .001f);
+        Case("a meal eaten in debt pays the debt off first",
+            Math.Abs(Hunger.Ate(-400f, 600f, 1800f) - 200f) < .001f);
+        Case("something that is not food is worth nothing",
+            Math.Abs(Hunger.Ate(500f, 0f, 1800f) - 500f) < .001f);
+
+        // The thresholds.
+        Case("a villager with plenty left does not stop to eat",
+            !Hunger.Wants(900f, 600f));
+        Case("one that is running low does",
+            Hunger.Wants(599f, 600f));
+        Case("running low is not yet starving, so it goes on working",
+            !Hunger.IsStarving(599f));
+        Case("empty is",
+            Hunger.IsStarving(0f));
+
+        // Dying, and the window before it that is the whole point of the grace.
+        Case("starving briefly does not kill",
+            !Hunger.Starved(-60f, 1800f));
+        Case("starving past the grace does",
+            Hunger.Starved(-1800f, 1800f));
+        Case("a villager with food in it has not starved at all",
+            !Hunger.Starved(500f, 1800f));
+        Case("and a grace of zero is not a licence to execute on the instant",
+            !Hunger.Starved(0f, 0f));
+
+        Case("how long it has gone without is the debt, read back",
+            Math.Abs(Hunger.StarvingFor(-450f) - 450f) < .001f);
+        Case("and is nothing at all while it still has food in it",
+            Math.Abs(Hunger.StarvingFor(450f)) < .001f);
+
+        // A villager as full as it can be is never hungry, however the two numbers are set.
+        // Without this pairing a threshold above the cap is a livelock: eat, gain nothing,
+        // eat again, and a larder is gone in seconds.
+        Case("a villager full to the cap is not hungry even at the cap",
+            !Hunger.Wants(1800f, 1800f));
+
+        // Controls. Each of these is the assertion above it inverted: if the rule stopped
+        // working, the cases above could all still pass by saying "no" to everything.
+        Case("control: a villager that has not eaten really does get hungry",
+            Hunger.Wants(Hunger.Left(1000f, 900f, floor), 600f));
+        Case("control: and left long enough really does starve to death",
+            Hunger.Starved(Hunger.Left(1000f, 5000f, floor), 1800f));
+        Case("control: while one that keeps eating never does",
+            !Hunger.Starved(Hunger.Ate(Hunger.Left(1000f, 900f, floor), 1700f, 1800f), 1800f));
+        Case("control: the cap is a real cap, not a number that never binds",
+            Hunger.Ate(1800f, 99999f, 1800f) < 1801f);
     }
 
     /// <summary>Saying a thing that keeps being true, without saying it constantly.</summary>
