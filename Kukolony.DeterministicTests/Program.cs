@@ -94,6 +94,7 @@ static class Program
         FieldLayout();
         Farming();
         Mending();
+        Watching();
         Tending();
 
         Console.WriteLine(_failed == 0
@@ -1959,6 +1960,88 @@ static class Program
         bool every = true;
         foreach (RepairAction action in Enum.GetValues(typeof(RepairAction))) every &= reached[(int)action];
         Case("every action the table can name is reached by some combination", every);
+    }
+
+    /// <summary>
+    ///     Noticing a villager that achieves nothing.
+    /// </summary>
+    /// <remarks>
+    ///     This exists because three unrelated bugs in one night all looked identical from the
+    ///     outside - villagers standing about, reporting something reasonable, achieving nothing -
+    ///     and nothing in the mod noticed. The cases below are the rules that decide whether to
+    ///     speak, and the control beside them is the one that matters most: a watch that never
+    ///     complains would satisfy every "does not complain" case here and catch nothing ever.
+    /// </remarks>
+    static void Watching()
+    {
+        Console.WriteLine("idle watch");
+
+        const double threshold = 300d;
+
+        Case("a villager with nothing queued is meant to be idle",
+            IdleWatch.Judge(now: 1000d, workedAt: 0d, queued: 0, threshold) == Doing.Unemployed);
+
+        // Even with a stamp, and even an ancient one. Nothing was asked of it.
+        Case("and stays unemployed however long ago it last worked",
+            IdleWatch.Judge(1_000_000d, 1d, queued: 0, threshold) == Doing.Unemployed);
+
+        Case("a villager that has never finished anything is unknown, not ancient",
+            IdleWatch.Judge(1_000_000d, 0d, queued: 2, threshold) == Doing.Unknown);
+
+        Case("one that finished something a moment ago is working",
+            IdleWatch.Judge(1000d, 999d, queued: 1, threshold) == Doing.Working);
+
+        // THE control. Every case above is satisfied by a watch that answers Working to
+        // everything, which would be a watch that cannot fail and cannot help.
+        Case("control: and one with work that has finished nothing for too long is stalled",
+            IdleWatch.Judge(1000d, 500d, queued: 1, threshold) == Doing.Stalled);
+
+        // The boundary, both sides, because "too long" is the whole judgement.
+        Case("just under the threshold is still working",
+            IdleWatch.Judge(1000d, 701d, queued: 1, threshold) == Doing.Working);
+
+        Case("and exactly at it is stalled",
+            IdleWatch.Judge(1000d, 700d, queued: 1, threshold) == Doing.Stalled);
+
+        // A reload or a peer with a different notion of world time can hand back a clock that
+        // has gone backwards. That is not evidence of idling, and treating it as a very long
+        // wait would report every villager in the settlement the instant a world reopened.
+        Case("a clock that went backwards is not evidence of idling",
+            IdleWatch.Judge(now: 500d, workedAt: 1000d, queued: 1, threshold) == Doing.Working);
+
+        Case("how long it has been idle is zero when that is unknown",
+            Math.Abs(IdleWatch.IdleFor(1000d, 0d)) < .001);
+
+        Case("and the elapsed time otherwise",
+            Math.Abs(IdleWatch.IdleFor(1000d, 700d) - 300d) < .001);
+
+        Case("control: and never negative when the clock went backwards",
+            Math.Abs(IdleWatch.IdleFor(500d, 1000d)) < .001);
+
+        // Said the way a person would, because it goes on a row beside the villager's own words.
+        Case($"a span reads as a person would say it (got {IdleWatch.Spell(0.5)})",
+            IdleWatch.Spell(0.5) == "just now");
+        Case($"seconds under a minute (got {IdleWatch.Spell(45d)})", IdleWatch.Spell(45d) == "45s");
+        Case($"minutes past one (got {IdleWatch.Spell(845d)})", IdleWatch.Spell(845d) == "14m");
+        Case($"hours past one (got {IdleWatch.Spell(7300d)})", IdleWatch.Spell(7300d) == "2h");
+
+        // Every verdict is reachable. A reordered condition that made one dead - Stalled, say -
+        // would leave the watch unable to speak and no other case would notice.
+        bool[] reached = new bool[4];
+        double[] stamps = { 0d, 1d, 700d, 999d, 1500d };
+        int[] queues = { 0, 1 };
+
+        foreach (double stamp in stamps)
+        {
+            foreach (int queued in queues)
+            {
+                reached[(int)IdleWatch.Judge(1000d, stamp, queued, threshold)] = true;
+            }
+        }
+
+        bool every = true;
+        foreach (Doing verdict in Enum.GetValues(typeof(Doing))) every &= reached[(int)verdict];
+        Case("every verdict the watch can reach is reached by some combination", every);
     }
 
     static void Appetite()

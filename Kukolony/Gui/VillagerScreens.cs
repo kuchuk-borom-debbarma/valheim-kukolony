@@ -73,15 +73,45 @@ namespace Kukolony.Gui
         ///     none to report. Saying "not loaded" is honest; inventing "idle" would claim
         ///     knowledge of something nothing is simulating.
         /// </remarks>
+        /// <summary>
+        ///     What a villager is doing, and how long it has been getting nowhere.
+        /// </summary>
+        /// <remarks>
+        ///     The time is the half that was missing. A villager's own words are not enough on
+        ///     their own - "nothing to haul" reads as a settled settlement whether hauling is
+        ///     finished or structurally impossible, and this mod has shipped both. The number
+        ///     beside it is what tells those apart at a glance.
+        ///
+        ///     Only once it is worth saying. A villager that finished something a minute ago is
+        ///     just working, and a row cluttered with small numbers is a row nobody reads.
+        /// </remarks>
         internal static string Doing(ZDOID villager)
         {
             foreach (Villager live in Villager.Instances)
             {
                 if (live == null || !live.TryGetComponent(out ZNetView view) || !view.IsValid()) continue;
-                if (view.GetZDO().m_uid == villager) return live.Activity;
+                if (view.GetZDO().m_uid != villager) continue;
+
+                return live.Activity + Quiet(view.GetZDO());
             }
 
             return "not loaded";
+        }
+
+        /// <summary>How long this villager has finished nothing, when that is worth saying.</summary>
+        private static string Quiet(ZDO zdo)
+        {
+            if (ZNet.instance == null) return string.Empty;
+
+            VillagerState state = new VillagerState(zdo);
+            if (!state.IsValid) return string.Empty;
+
+            double now = ZNet.instance.GetTimeSeconds();
+            float threshold = ModConfig.IdleWarnSeconds != null ? ModConfig.IdleWarnSeconds.Value : 300f;
+
+            return IdleWatch.Judge(now, state.WorkedAt, state.GetQueue().Count, threshold) == Villagers.Doing.Stalled
+                ? $" - {IdleWatch.Spell(IdleWatch.IdleFor(now, state.WorkedAt))}"
+                : string.Empty;
         }
     }
 

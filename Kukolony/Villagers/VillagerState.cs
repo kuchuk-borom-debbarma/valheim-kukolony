@@ -39,6 +39,7 @@ namespace Kukolony.Villagers
         private static readonly KeyValuePair<int, int> TargetKey = ZDO.GetHashZDOID("kukolony.job.target");
         private static readonly int TargetTokenKey = "kukolony.job.target.token".GetStableHashCode();
         private static readonly int ClaimedSinceKey = "kukolony.job.claimed".GetStableHashCode();
+        private static readonly int WorkedAtKey = "kukolony.job.worked.v1".GetStableHashCode();
         private static readonly KeyValuePair<int, int> DestinationKey = ZDO.GetHashZDOID("kukolony.job.destination");
         private static readonly int DestinationTokenKey = "kukolony.job.destination.token".GetStableHashCode();
         private static readonly int CargoKey = "kukolony.job.cargo.v1".GetStableHashCode();
@@ -316,6 +317,40 @@ namespace Kukolony.Villagers
         ///     added for: a villager that is getting nowhere stops refreshing, and its claim
         ///     ages out as before.
         /// </remarks>
+        /// <summary>
+        ///     When this villager last finished a repetition, in world seconds. Zero when never.
+        /// </summary>
+        /// <remarks>
+        ///     <b>Completion is the only honest signal that anything is happening.</b> Running
+        ///     covers chopping a tree and livelocking alike; Skipped covers "nothing to do" and
+        ///     "this can never succeed" alike. So the one number worth keeping is when a
+        ///     repetition last actually ended - see <see cref="IdleWatch" /> for what reads it
+        ///     and why the mod needs it at all.
+        ///
+        ///     On the record rather than in memory, for two reasons: a watcher has to be able to
+        ///     read it without this villager's own code having run - which is precisely the case
+        ///     that went unnoticed - and it has to survive a reload.
+        /// </remarks>
+        internal double WorkedAt => _zdo?.GetLong(WorkedAtKey, 0L) ?? 0L;
+
+        /// <summary>
+        ///     Records that a repetition finished.
+        /// </summary>
+        /// <remarks>
+        ///     Written from one place - the queue applying a <c>Completed</c> outcome - and not
+        ///     throttled, because a completion happens once per repetition rather than once per
+        ///     frame. That distinction is the whole reason no throttle is needed here, and it is
+        ///     worth stating beside <see cref="TouchClaim" />, which does throttle and explains
+        ///     why: a hot field written every tick by the whole population is a contention shape
+        ///     a settlement with no population cap cannot pay for.
+        /// </remarks>
+        internal void MarkWorked()
+        {
+            if (_zdo == null || ZNet.instance == null) return;
+
+            _zdo.Set(WorkedAtKey, (long)ZNet.instance.GetTimeSeconds());
+        }
+
         internal void TouchClaim()
         {
             if (_zdo == null || Target.IsNone() || ZNet.instance == null) return;

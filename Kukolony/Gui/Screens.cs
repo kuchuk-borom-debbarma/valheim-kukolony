@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Jotunn.Managers;
 using Kukolony.Colonies;
+using Kukolony.Villagers;
 using Kukolony.Core;
 using UnityEngine;
 
@@ -82,6 +83,16 @@ namespace Kukolony.Gui
             // is a named queue of jobs, which is a different thing you reach for at a different
             // moment - and it was reachable only by opening Jobs and scrolling past every job the
             // Kolony had, in a row that looked like one more of them.
+            // Only when there is something to say. A row reading "0 idle" on a working settlement
+            // is noise, and noise is how a warning stops being read.
+            int quiet = Quiet(state);
+            if (quiet > 0 && column.TryRow(out Row idleRow))
+            {
+                Widgets.Caption(idleRow, "Getting nowhere", 220f);
+                Widgets.Caption(idleRow, quiet.ToString(), 80f, Color.yellow);
+                Widgets.Button(idleRow, "Who", 160f, () => host.Push(new VillagerListScreen()));
+            }
+
             if (column.TryRow(out Row presetsRow))
             {
                 Widgets.Caption(presetsRow, "Work presets");
@@ -116,6 +127,43 @@ namespace Kukolony.Gui
                 Widgets.Button(switchRow, "Switch Kolony", 200f, () => host.Push(new ColonyListScreen()));
                 Widgets.Button(switchRow, "Widget gallery", 200f, () => host.Push(new GalleryScreen()));
             }
+        }
+
+        /// <summary>
+        ///     How many villagers have work and are finishing none of it.
+        /// </summary>
+        /// <remarks>
+        ///     Counted rather than judged. A settlement that has everything it asked for shows a
+        ///     number here honestly, and so does one that is wedged - the mod cannot tell those
+        ///     apart, and pretending it could is what kept three real bugs invisible for weeks.
+        ///     The number is shown; the reading is the player's.
+        /// </remarks>
+        private static int Quiet(ColonyState state)
+        {
+            if (ZNet.instance == null) return 0;
+
+            double now = ZNet.instance.GetTimeSeconds();
+            float threshold = ModConfig.IdleWarnSeconds != null ? ModConfig.IdleWarnSeconds.Value : 300f;
+
+            int quiet = 0;
+            foreach (Villager villager in Villager.Instances)
+            {
+                if (villager == null) continue;
+                if (!villager.TryGetComponent(out ZNetView view) || !view.IsValid()) continue;
+
+                ZDO zdo = view.GetZDO();
+                if (ColonyMembership.GetColony(zdo) != state.Id) continue;
+
+                VillagerState theirs = new VillagerState(zdo);
+                if (!theirs.IsValid) continue;
+
+                if (IdleWatch.Judge(now, theirs.WorkedAt, theirs.GetQueue().Count, threshold) == Doing.Stalled)
+                {
+                    quiet++;
+                }
+            }
+
+            return quiet;
         }
     }
 

@@ -250,6 +250,8 @@ namespace Kukolony.Debug
             // Bounds the window in which the snapshot's target can go missing: this is the
             // last moment the acceptance run controls, and PreparePersistenceSnapshot logs the
             // same thing at the first moment it does.
+            CheckNobodyWentQuiet(report);
+
             StructureRecord storage = colony.State.GetStructures()
                 .FirstOrDefault(record => record.Name == "Renamed storage");
             Core.Log.Info($"[Benchmark] acceptance end: structures={colony.State.GetStructures().Count} " +
@@ -376,11 +378,90 @@ namespace Kukolony.Debug
                     break;
             }
 
+            // Asked last, because it is about the whole run rather than about any one check.
+            CheckTheWatchNotices(report);
+            CheckNobodyWentQuiet(report);
+
             // The fixtures go with it. A focused run does not save, so anything left standing
             // is left in the player's world rather than in a throwaway one.
             Cleanup(colony);
             LastPassed = report.Print();
         }
+
+        /// <summary>
+        ///     Nobody went quiet while this run was watching.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         <b>The assertion this codebase was missing.</b> Three unrelated bugs in one
+        ///         night all presented the same way - a villager standing about, reporting
+        ///         something reasonable, achieving nothing - and every one was found only because
+        ///         some check happened to count a thing afterwards. A hauler livelocked and said
+        ///         "nothing to haul"; a crash in a patch killed the AI loop and its villagers said
+        ///         "idle"; a container lookup that could never succeed said "nothing to haul" too.
+        ///     </para>
+        ///     <para>
+        ///         This asks the one question none of those checks did: <em>did anybody spend this
+        ///         run getting nowhere?</em> It costs nothing, it applies to every check written
+        ///         from now on without their authors doing anything, and it names the villager and
+        ///         quotes what it claimed to be doing - because the claim is the part that was
+        ///         lying every time.
+        ///     </para>
+        ///     <para>
+        ///         A check that stalls a villager on purpose excuses that villager by name. Never
+        ///         globally: a run that switched the watch off would hide exactly what it was
+        ///         built to find, in exactly the runs meant to find it.
+        ///     </para>
+        /// </remarks>
+        /// <summary>
+        ///     The watch really does notice, and really does stay quiet otherwise.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Without this pair the oracle could be dead and every slice would still pass -
+        ///         which is the exact shape of the bugs it was built for, arriving by the door
+        ///         that was meant to catch them.
+        ///     </para>
+        ///     <para>
+        ///         Driven through the judgement rather than by stalling a real villager for two
+        ///         minutes, because what is under test is whether the rule speaks and not whether
+        ///         a job can be wedged - and a check that took the threshold to prove a threshold
+        ///         would double the length of every run that includes it.
+        ///     </para>
+        /// </remarks>
+        private static void CheckTheWatchNotices(TestReport report)
+        {
+            float threshold = ModConfig.IdleWarnSeconds.Value;
+
+            // Somebody with work who has finished nothing for well past the limit.
+            report.Check(
+                IdleWatch.Judge(now: 10_000d, workedAt: 10_000d - threshold - 60d, queued: 1,
+                    threshold) == Villagers.Doing.Stalled,
+                "the watch notices a villager with work that has finished nothing",
+                $"threshold={threshold:0}s");
+
+            // And the control, which is what stops the line above passing for a watch that
+            // answers "stalled" to everything and fails every run for no reason.
+            report.Check(
+                IdleWatch.Judge(10_000d, 10_000d - 1d, queued: 1, threshold) == Villagers.Doing.Working,
+                "control: and stays quiet about one that just finished something");
+
+            report.Check(
+                IdleWatch.Judge(10_000d, 1d, queued: 0, threshold) == Villagers.Doing.Unemployed,
+                "control: and about one that was never given anything to do");
+        }
+
+        private static void CheckNobodyWentQuiet(TestReport report)
+        {
+            List<string> quiet = IdleReports.Complaints();
+
+            report.Check(quiet.Count == 0,
+                "nobody spent this run getting nowhere",
+                quiet.Count == 0
+                    ? $"threshold={ModConfig.IdleWarnSeconds.Value:0}s"
+                    : string.Join("; ", quiet.ToArray()));
+        }
+
 
         /// <summary>Takes a focused run's colony and everything it registered back out again.</summary>
         private static void Cleanup(Colony colony)
@@ -467,6 +548,8 @@ namespace Kukolony.Debug
 
             yield return CheckAnInterruptedHaulFinishes(report, colony, storage);
 
+            CheckTheWatchNotices(report);
+            CheckNobodyWentQuiet(report);
             LastPassed = report.Print();
         }
 
@@ -4497,6 +4580,7 @@ namespace Kukolony.Debug
         {
             Villager villager = VillagerLifecycle.Spawn(colony);
             yield return new WaitForSecondsRealtime(.4f);
+
             if (villager == null || !villager.TryGetComponent(out ZNetView view) || !view.IsValid())
             {
                 report.Check(false, "living check could spawn a villager");
@@ -9203,6 +9287,15 @@ namespace Kukolony.Debug
 
             Villager villager = VillagerLifecycle.Spawn(colony);
             yield return new WaitForSecondsRealtime(.4f);
+
+            // This check exists to prove a villager gives up on work it cannot finish, so it
+            // stalls one on purpose. Excused by name rather than by switching the watch off, so a
+            // second villager going quiet beside it is still caught - a global off switch would
+            // hide exactly what the watch was built to find, in the runs meant to find it.
+            if (villager != null && villager.TryGetComponent(out ZNetView stalled) && stalled.IsValid())
+            {
+                IdleReports.Excuse(stalled.GetZDO().m_uid);
+            }
             if (villager == null || !villager.TryGetComponent(out ZNetView view) || !view.IsValid())
             {
                 report.Check(false, "stuck-trip check could spawn a villager");

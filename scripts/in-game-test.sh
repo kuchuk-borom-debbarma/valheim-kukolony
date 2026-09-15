@@ -25,6 +25,20 @@ set_value() {
   grep -Fqx "$1 = $2" "$CONFIG" || { echo "could not set $1"; exit 1; }
 }
 
+# A setting the config file has never seen, which the plain setter cannot place: BepInEx reads
+# entries as belonging to the section above them, and this script restores the config from a
+# backup afterwards - so a key the game has not yet written is never there to be edited, and an
+# appended line lands outside every section and is silently ignored. Repeating the header is
+# legal and puts the entry where it will actually be read.
+#
+# Worth the six lines: the first run of the idle watch reported threshold=300s, the default,
+# because the 150 written here went somewhere BepInEx never looked.
+set_value_in() {
+  if grep -q "^$2 =" "$CONFIG"; then sed -i '' -e "s|^$2 =.*|$2 = $3|" "$CONFIG"
+  else printf '\n[%s]\n%s = %s\n' "$1" "$2" "$3" >> "$CONFIG"; fi
+  grep -Fqx "$2 = $3" "$CONFIG" || { echo "could not set $2"; exit 1; }
+}
+
 wait_for_run() {
   expected_stage="$1"
   report="$OUTPUT/benchmark-$expected_stage.log"
@@ -132,6 +146,11 @@ set_value BenchmarkAutoBoot true
 set_value BenchmarkRunId "$RUN_ID"
 set_value BenchmarkOutputPath "$OUTPUT"
 set_value BenchmarkScreenshots "${BENCHMARK_SCREENSHOTS:-true}"
+# A villager that finishes nothing for this long fails the run. Shorter than the default
+# because a run is minutes rather than an evening, and longer than the longest wait any
+# check makes on purpose - the mechanism is the same either way, only the patience differs.
+set_value_in "2 - Jobs" IdleWarnSeconds 150
+
 set_value BenchmarkAutoExit true
 set_value BenchmarkWorld KukolonyHaulTest
 

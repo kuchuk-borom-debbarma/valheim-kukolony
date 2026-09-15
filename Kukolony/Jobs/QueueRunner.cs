@@ -51,6 +51,12 @@ namespace Kukolony.Jobs
         /// </summary>
         internal static void Apply(VillagerState state, List<JobDefinition> jobs, JobResult result)
         {
+            // The one place a repetition is known to have finished, which makes it the one place
+            // worth stamping. Everything else a villager reports - running, skipped, failed -
+            // is compatible with achieving nothing at all, and a mod whose worst failure mode is
+            // a villager quietly achieving nothing needs a signal that is not.
+            if (result == JobResult.Completed) state.MarkWorked();
+
             if (result == JobResult.Running) return;
 
             List<string> queue = state.GetQueue();

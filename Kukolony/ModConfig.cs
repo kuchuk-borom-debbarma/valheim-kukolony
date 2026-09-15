@@ -27,6 +27,8 @@ namespace Kukolony
         /// <summary>How long a villager may hold a target before others may take it.</summary>
         internal static ConfigEntry<float> ClaimTtlSeconds { get; private set; }
 
+        internal static ConfigEntry<float> IdleWarnSeconds { get; private set; }
+
         /// <summary>Whether colonies keep working when no player is nearby.</summary>
         internal static ConfigEntry<bool> KeepAliveEnabled { get; private set; }
 
@@ -266,6 +268,17 @@ namespace Kukolony
                     "How long a villager may reserve something before other villagers may take it. "
                     + "Stops a stuck villager locking a resource forever.",
                     new AcceptableValueRange<float>(5f, 300f)));
+
+            IdleWarnSeconds = config.Bind(
+                "2 - Jobs",
+                nameof(IdleWarnSeconds),
+                300f,
+                new ConfigDescription(
+                    "How long a villager with work assigned may finish nothing before the Kolony "
+                    + "says so. A settlement that has everything it asked for will trip this "
+                    + "honestly; so will one that is stuck, and the mod cannot tell them apart - "
+                    + "which is the point, because the second kind used to be invisible.",
+                    new AcceptableValueRange<float>(30f, 3600f)));
 
             DebugSpawnEnabled = config.Bind(
                 "9 - Development",

@@ -48,6 +48,7 @@ namespace Kukolony
             Debug.TravelCommands.Register();
             Gui.SettlementPins.Register(gameObject);
             Colonies.StructureReaperDriver.Register(gameObject);
+            Villagers.IdleWatchDriver.Register(gameObject);
             gameObject.AddComponent<Debug.DebugHotkeys>();
             gameObject.AddComponent<Debug.AutoBoot>();
             gameObject.AddComponent<Debug.PrefabProbe>();
