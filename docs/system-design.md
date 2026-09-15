@@ -467,8 +467,14 @@ written has been wrong or gone stale. Read from the game instead:
   appearance screen offers: 87 hairstyles and 27 beards, against the 12 and 10 a hand-written
   list had.
 
-Wearing something is a picture, not protection, so a villager in wolf armour is dressed
-rather than armoured — this costs nothing and breaks no boundary.
+~~Wearing something is a picture, not protection, so a villager in wolf armour is dressed
+rather than armoured — this costs nothing and breaks no boundary.~~
+
+**Overturned by the party system.** Once villagers fight, armour protects: worn chest, legs and
+helmet contribute real armour value. See `docs/party/combat.md`. The cost this decision was
+avoiding is now being paid deliberately, and it comes with a consequence that was accepted with
+it — existing villagers keep the outfit they rolled when it was decorative, so survivability was
+assigned at random before anybody knew it would matter.
 
 ---
 
@@ -500,13 +506,28 @@ Settled, with the reason.
   searches. It does not mean building for a hundred villagers before there is one.
 - **Written for multiplayer, not tested at scale.** The ownership discipline is free to keep
   and expensive to add later; it is neither promised nor tested until someone asks.
-- **No defence.** A settlement that cannot survive a boar is accepted, deliberately.
+- ~~**No defence.** A settlement that cannot survive a boar is accepted, deliberately.~~
+  **Overturned by the party system.** Villagers fight, in a party and at home, and a Kolony
+  defends itself — including while nobody is watching. See `docs/party/defence.md`.
 - **Overlapping work areas are a union** — what a player drawing two circles most likely
   means. Coverage is the union; *choice* is ordered, because a list the player arranged that
   the work ignores is a lie on the screen. A job tries its areas in turn and works the first
   one with anything to do.
 - **Energy degrades rather than blocks**: slower, then unwilling, always saying why. Coming
   home to a stalled village is a story; coming home to corpses is a bug report.
+
+  **This is now in tension with two later features, and the tension is deliberate.** Hunger can
+  kill, and combat can kill at home while nobody is watching. The line above still governs
+  *energy*, which is self-resolving and blocks nothing. Where death was added, it was added with
+  the objection above answered rather than ignored:
+
+  - **Starvation** warns long before it kills, stops the villager working so the settlement stalls
+    visibly first, and **ships with killing switched off by default**.
+  - **Combat death is not permanent** — the villager drops its load and wakes at its bed after a
+    while, so what you come home to is a scattered field and a downtime, not a corpse.
+
+  If coming home to a defeated settlement ever does read as a bug report rather than a story, the
+  fault is in the reporting, and this line is the standard to hold it to.
 - **A job refuses to start rather than stranding its result**, falls back to a junk area, and
   drops on the ground only as a last resort. Nothing is destroyed, nothing is held silently.
 - **A villager always comes home to sleep**, from wherever it was working. Distance to an

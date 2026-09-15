@@ -1148,3 +1148,33 @@ admits mead, which is a potion rather than a meal.
 Find food by scanning `ObjectDB.instance.m_items` for those fields rather than by prefab name. The
 name list would be wrong the first time anybody installed a food mod, and this mod does not ship
 the assets so it cannot check its own spelling.
+
+
+## Carrying a creature on a boat — the mechanism is public
+
+Read off the shipped assembly. All public on `Character`:
+
+```
+void  AttachStart(Transform, GameObject, bool, bool, bool, string, Vector3, Transform)
+void  AttachStop()
+bool  IsAttached()
+bool  IsAttachedToShip()
+Ship  GetStandingOnShip()
+Rigidbody m_lastGroundBody      // moving-platform support: why you do not slide off a deck
+```
+
+`AttachStart` is what glues a body to a moving hull — it is what happens when a player sits at a
+helm. A villager does not need to sail; it needs to be attached to a point on the deck.
+
+**But `Ship.m_players` is a `List<Player>`**, strongly typed. A non-player can never register as a
+boat occupant, so anything in the game that counts who is aboard will not see a villager. Riding
+works; being counted does not.
+
+**And the real difficulty is not the boat.** Valheim's navmesh does not exist over water, and this
+mod's travel system works by walking straight at a destination while streaming navmesh tiles ahead.
+A creature aboard that still believes it is a pedestrian walks off the side. Boarding has to
+*suspend* navigation, not redirect it.
+
+Not yet measured, and it decides real behaviour: **`Character.m_canSwim` for `FallenWarrior`** —
+per-prefab asset data, invisible from the managed assembly. If a villager cannot swim, one that
+goes over the side sinks.

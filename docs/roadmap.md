@@ -485,3 +485,36 @@ terms: the work it does, and the equipment it requires. One at a time.
 
 Then, in the order set out in [system-design.md](system-design.md): rest and energy, ambient
 life, food; then reach — work areas and gathering.
+
+---
+
+## Milestone 7 — The party — **designed, not built**
+
+Villagers that follow a player, fight for them, carry for them and come home; and a Kolony that
+defends itself. The largest single feature so far, and the first that makes a **player** rather
+than a placed hearth the thing work is organised around.
+
+It overturns two settled decisions in [system-design.md](system-design.md) — *no defence*, and
+*wearing something is a picture, not protection* — and one of its choices knowingly breaks the
+game's own economy (villagers carrying metal through portals, restorable by a config switch).
+
+Fully specified in **[docs/party/](party/README.md)**, in seven documents:
+
+- [`decisions.md`](party/decisions.md) — every decision, its reason, and the cost accepted with it
+- [`party.md`](party/party.md) — joining, following, the moving work area, the party queue, the
+  four party abilities
+- [`combat.md`](party/combat.md) — stances, targeting, weapons, armour, death and revival
+- [`defence.md`](party/defence.md) — a base that fights its own raids unattended
+- [`travel.md`](party/travel.md) — boats and portals
+- [`unknowns.md`](party/unknowns.md) — **what must be measured before any of it is built**
+- [`build-order.md`](party/build-order.md) — seven stops, each one shippable on its own
+
+**Nothing starts until [`unknowns.md`](party/unknowns.md) is worked through.** Three of the eight
+items there can invalidate whole parts of the design — whether hostiles spawn off-screen, whether
+damage applies off-screen, and whether vanilla `MonsterAI` can be handed control cleanly. This mod's
+method is to probe rather than reason from code, and it keeps being right.
+
+**And the acceptance run comes first.** It has not been done since Mine, Forage, Farm, Repair,
+Cooking and hunger landed — six job-blob versions and a structure-blob version — and it is the only
+thing that checks a world survives save and reload. The party system adds ZDO fields to every
+villager and a second job queue on top of all of that.

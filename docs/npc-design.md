@@ -143,3 +143,35 @@ token on each colony-owned ZDO and resolves it through `ZDOExtraData`'s indexed 
 registry. Runtime IDs are cached and validated per `ZDOMan` instance. This applies to
 members, structure targets, job/preset exact targets, colony back-pointers, and active job
 targets.
+
+---
+
+## Fighting, and the rig that was disarmed on purpose
+
+A villager is cloned from **`FallenWarrior`**, which is a genuine combat creature. `VillagerPrefab`
+strips its `m_randomSets` and `m_randomItems` in `ClearInheritedCombatGear`. **The rig was
+disarmed, not absent** — which is why giving villagers combat is re-enabling something that already
+works rather than writing targeting from nothing.
+
+What stands in the way is `Patches/MonsterAiTickPatch.cs`. It returns `false` from a prefix on
+`MonsterAI.UpdateAI`, which suppresses target seeking, attacking and fleeing — and, as the file
+says, skips `BaseAI.UpdateAI`'s housekeeping including **regeneration**. So as things stand a
+villager cannot fight, cannot run and cannot heal, while being `MakeTame()`d and therefore a valid
+target for everything hostile in the world.
+
+That file is the **riskiest edit in the party feature**. It has already produced a fault where a
+destroyed component threw inside the prefix, took `MonoUpdaters.FixedUpdate` with it, and stopped
+the AI tick for every creature in the world — six thousand stack traces, and a villager that stood
+still for two minutes looking exactly like a broken job.
+
+Two other things about a villager change with the party system:
+
+- **Clothing stops being decorative.** `docs/system-design.md` said wearing something is a picture
+  rather than protection; once villagers fight, armour protects. Existing villagers keep the outfit
+  they rolled when it was cosmetic, so their survivability was assigned at random before anybody
+  knew it mattered.
+- **Death becomes something other than starvation.** A villager that loses a fight drops its bag
+  where it fell and wakes at its assigned bed — or the hearth, if it has none — after a
+  configurable time. `SettlementIndex.BedOf` and `ResolveHome` already answer "where does it wake".
+
+See [`docs/party/`](party/README.md).

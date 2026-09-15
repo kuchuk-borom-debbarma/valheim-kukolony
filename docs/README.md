@@ -14,6 +14,9 @@ Read these first:
   and picker behavior.
 - [Jobs and queues](jobs.md) — execution and persistence rules.
 - [Job catalog](job-catalog.md) — configuration card for every concrete job.
+- **[The party system](party/README.md)** — villagers that follow a player, fight, carry and come
+  home; and a Kolony that defends itself. **Designed, not yet built** — start with
+  [`party/decisions.md`](party/decisions.md) and [`party/unknowns.md`](party/unknowns.md).
 - [NPC design](npc-design.md) — the villager prefab contract and why the Player rig was
   abandoned.
 - [Colony UI](ui.md) — picker, panel tabs, job card, and test seams.

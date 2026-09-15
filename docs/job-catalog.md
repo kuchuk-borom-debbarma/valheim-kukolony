@@ -1145,3 +1145,42 @@ rise — while a locked larder beside it is never touched and still accepts deli
 run in game.** The `eat` slice exists and has never been executed; the death path has no in-game
 check at all, by design, because a check that switched killing on would have to kill the villager
 it was using to prove everything else.
+
+---
+
+# Which jobs work in a party
+
+Every job now has to answer one more question: **does this work when the villager is following a
+player instead of standing on its Kolony's ground?**
+
+The rule is simple and it falls out of what each job needs. A job that needs a *registered
+structure* cannot work in a party, because there are none out there. A job that needs only ground
+and a tool can work anywhere.
+
+| Job | In a party | Why |
+|---|---|---|
+| **Haul** | Into its own bag only | Hauling means *into a registered chest*. What survives is the carrying, which becomes the party abilities. |
+| **Chop** | **Yes** | A tree and an axe. Both travel. |
+| **Tend** | No | Needs a registered station. |
+| **Craft** | No | Needs a registered station. |
+| **Mine** | **Yes** | Rock and a pickaxe. |
+| **Forage** | **Yes** | Needs nothing but ground. |
+| **Farm** | No | Needs a registered field. |
+| **Repair** | No | Needs a crafting station in range — one of the two vanilla rules the job faithfully keeps. |
+
+**A hidden job is shown greyed with its reason, never silently skipped.** A job that quietly does
+nothing is the failure this codebase has paid for repeatedly — the cold grill, the tool errand that
+fetched forever, the check that passed while proving nothing. "Repair needs a crafting station, and
+there isn't one out here" is a sentence a player can act on; a job that runs and achieves nothing
+is not.
+
+The party itself is documented in [`docs/party/`](party/README.md). Three things there change how
+these jobs behave rather than whether they run:
+
+- **The player is the work area.** A job's areas are replaced by a radius that follows the player,
+  reusing the same anchor list `GroundSweep` already takes.
+- **A separate party queue.** A villager runs a different ordered list of jobs in a party than at
+  home, so a chopper at home can be a hauler in the field.
+- **Fighting pre-empts everything.** The tick order becomes
+  `fighting -> eating -> resting -> the job queue`. A villager being hit has nothing useful to
+  offer any job.

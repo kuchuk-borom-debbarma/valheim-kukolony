@@ -363,3 +363,35 @@ Worth knowing before picking it up: the reference decompile in `.reference/` is 
 build** from the installed game — its `FindSectorObjects` takes `(Vector2i, int area)` where the
 live one takes `(Vector2s, SimulationDistance)`. Reasoning from it about this code is unsafe;
 instrument the running game instead, which is how every line of the table above was settled.
+
+---
+
+## What the party system asks of this
+
+The keep-alive currently exists so **work** carries on with nobody watching. The party system asks
+it to carry **combat** as well, and those are not the same demand.
+
+Three questions that this document cannot currently answer, and that decide whether off-screen
+defence is a feature or a fiction. They are listed with the rest in
+[`docs/party/unknowns.md`](party/unknowns.md) and **must be measured before anything is built**:
+
+1. **Do hostiles spawn and tick in a zone held open with no player in it?** "Loaded" and "somewhere
+   the spawn system considers events can happen" are not the same claim, and Valheim's raid system
+   is built around players. If they do not, off-screen defence has nothing to defend against.
+2. **Does damage apply to something nobody is observing?** Health lives on the ZDO, which is
+   promising, but the path from a swing to a health write runs through code that normally has an
+   observer.
+3. **What does a settlement at peace pay for having combat at all?** The no-population-cap rule
+   means whatever combat costs per villager is multiplied by everybody. A target scan per villager
+   per tick is exactly the shape this system was built to avoid — the predecessor died partly of a
+   five-hundred-metre overlap sphere per villager per second.
+
+## And a cost the party takes on knowingly
+
+**Villagers aboard a boat keep holding their zones open.** The player is already streaming the
+water ahead, so each aboard villager's halo streams ocean nothing is using — a five-villager
+crossing pays five times for one journey.
+
+This was chosen deliberately, against the recommendation, with the cost stated. The halo is to be
+made configurable so a stuttering crossing has something to turn down. **If sea crossings stutter,
+this is the first thing to look at.**
