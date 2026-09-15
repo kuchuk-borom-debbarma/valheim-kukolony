@@ -65,6 +65,19 @@ namespace Kukolony.Villagers
         private static readonly int FedKey = "kukolony.fed.v1".GetStableHashCode();
         private static readonly int FedAtKey = "kukolony.fed.at.v1".GetStableHashCode();
 
+        /// <summary>
+        ///     The player whose party this villager is in, by <c>Player.GetPlayerID()</c>.
+        /// </summary>
+        /// <remarks>
+        ///     <b>One field, on the villager</b>, rather than a list on a player. A player is not
+        ///     a thing this mod persists, and a villager already carries everything else about
+        ///     itself - but the better reason is that it answers the multiplayer question by
+        ///     construction: two players cannot both hold the same villager, because there is one
+        ///     field and the last write wins. A list per player would have needed a rule for that,
+        ///     and rules that exist only in multiplayer are rules nobody tests.
+        /// </remarks>
+        private static readonly int PartyKey = "kukolony.party.v1".GetStableHashCode();
+
         private readonly ZDO _zdo;
 
         internal VillagerState(ZDO zdo)
@@ -296,6 +309,30 @@ namespace Kukolony.Villagers
         /// </remarks>
         private static float BornFed =>
             ModConfig.FedCapSeconds != null ? ModConfig.FedCapSeconds.Value : 1800f;
+
+        /// <summary>
+        ///     The id of the player this villager follows, or zero when it follows nobody.
+        /// </summary>
+        /// <remarks>
+        ///     Zero rather than a separate "is in a party" flag. A player id is never zero, so the
+        ///     absent case and the empty case are the same case - and two fields that have to
+        ///     agree about one fact is how a villager ends up in a party belonging to nobody.
+        /// </remarks>
+        internal long PartyOwner => _zdo?.GetLong(PartyKey, 0L) ?? 0L;
+
+        internal bool InAParty => PartyOwner != 0L;
+
+        /// <summary>Joins a player's party, or leaves one when given zero.</summary>
+        /// <remarks>
+        ///     Written only on a change. This is read every tick by the rule that keeps a villager
+        ///     near its player, and a ZDO write is a revision replicated to every peer - so an
+        ///     unconditional Set would put twenty network updates a second behind a villager
+        ///     standing perfectly still beside you.
+        /// </remarks>
+        internal void SetPartyOwner(long player)
+        {
+            if (_zdo != null && PartyOwner != player) _zdo.Set(PartyKey, player);
+        }
 
         /// <summary>Net time the current target was taken, so a stuck claim expires.</summary>
         internal double ClaimedSince => _zdo?.GetLong(ClaimedSinceKey, 0L) ?? 0L;

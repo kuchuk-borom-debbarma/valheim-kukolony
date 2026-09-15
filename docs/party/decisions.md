@@ -93,6 +93,16 @@ this reason, and this decision goes the other way. See the risks in [`defence.md
 
 ## Away from home
 
+**Energy does not apply in a party at all.**
+A party villager neither tires nor rests. This began as a bug rather than a feature: resting falls
+back to *the hearth* when there is no reachable bed, so a villager that got tired fifty metres into
+an expedition would turn round and walk home, and the party would look broken while every part of
+it behaved exactly as written.
+*Cost, accepted:* a long expedition can never be cut short by exhaustion, and **a villager parked in
+a party never tires** — which is harmless while a party villager cannot work, and is a free-labour
+hole the moment it can. The stage that lets it work has to answer that.
+*Knock-on:* the **camp** ability was justified as a rest point. It no longer is. See below.
+
 **A party villager eats out of its own bag, and then out of the player's.**
 Provisioning matters, and you are never ambushed by a starving villager while you are carrying
 food. It reuses the hunger rule that already exists; only the *source* changes.
@@ -129,4 +139,8 @@ All four were chosen. Detail in [`party.md`](party.md).
 - **Gleaner** — picks up what is dropped near the party.
 - **Supply line** — when its bag fills it leaves, walks home, files everything in the right
   chests, and comes back.
-- **Camp** — lights and feeds a fire so the party can rest away from home.
+- **Camp** — lights and feeds a fire away from home. **Its original justification is gone**: it was
+  "a rest point so the party can recover", and rest no longer applies in a party. What is left is
+  real but smaller — a fire cooks, and cooked food is what hunger runs on, so a camp is how a long
+  expedition feeds itself rather than how it sleeps. Worth re-examining before Stage 3 rather than
+  building to a reason that has expired.

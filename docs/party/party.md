@@ -14,6 +14,16 @@ players cannot both hold the same villager, because there is one field.
 is easy to get wrong and expensive to notice: a villager that came home and had forgotten it was a
 farmer would look fine for days.
 
+## Where following sits in the tick
+
+```
+eating  ->  following  ->  resting  ->  the job queue
+```
+
+Below eating, because a hungry villager should still eat — and it already can, since eating looks
+in the bag before it looks for a chest, so a provisioned party villager feeds itself with no party
+code at all. Above resting, because **resting is suspended in a party**.
+
 ## Following
 
 A party villager stays near its player. This is not new navigation — it is the existing
@@ -93,7 +103,15 @@ chain. It is also the one most likely to lose things, because it involves a long
 with a full bag, and the mod already has a travel system that has needed three rounds of work.
 
 ### Camp
-Lights a fire and keeps it fuelled so the party can rest away from home. Reuses the cooking work
-wholesale — the fireplace handling, the fuel reserve, and the "is it actually burning" probe all
-exist and were measured rather than assumed.
+Lights a fire and keeps it fuelled. Reuses the cooking work wholesale — the fireplace handling, the
+fuel reserve, and the "is it actually burning" probe all exist and were measured rather than
+assumed.
+
+**Its original reason has expired and this is deliberate.** Camp was specified as "a rest point so
+the party can recover away from home", and then rest was removed from parties entirely (see
+[`decisions.md`](decisions.md)). What survives is a fire that *cooks* — and since satiety comes
+from a food's own burn time, a camp is how a long expedition feeds itself rather than how it
+sleeps. That is a smaller thing than it was, and worth re-examining before Stage 3 rather than
+building to a justification that no longer holds.
+
 A camp fire is **not registered**, for the same reason the party radius is not Kolony ground.

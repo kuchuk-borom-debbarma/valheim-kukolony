@@ -727,6 +727,18 @@ namespace Kukolony.Villagers
                 return true;
             }
 
+            // Keeping up with a party comes before resting, because resting is suspended in one
+            // - and before work, because in a party a villager's work area is still its Kolony's
+            // ground while it is being walked away from it. Both of those are the next stage's
+            // business; this stage only has to not walk home.
+            if (Party.Escort.Tick(this, state, _walk, ref _closingOnLeader, deltaTime,
+                    out string escorting))
+            {
+                SetActivity(escorting);
+                _working = true;
+                return true;
+            }
+
             // Rest comes before work, and before the queue is even consulted. A tired villager
             // has nothing useful to offer any job, and asking one for work it cannot do would
             // burn a repetition to discover that.
@@ -928,6 +940,16 @@ namespace Kukolony.Villagers
 
         private float _nextWorkTick;
         private bool _working;
+
+        /// <summary>
+        ///     Whether the escort decided to close the gap to its player last tick.
+        /// </summary>
+        /// <remarks>
+        ///     A plain field, not persisted. Losing it on an ownership transfer costs one
+        ///     re-evaluation against the leash, and a villager standing beside its player
+        ///     evaluates the same way either way.
+        /// </remarks>
+        private bool _closingOnLeader;
 
         /// <summary>
         ///     Where this villager idles when no queued job can run: its bed if it has one,
@@ -1149,24 +1171,43 @@ namespace Kukolony.Villagers
             // lost that flip every time, because the component is added after Humanoid: the
             // method was never called, the prompt never appeared, and the check that asserted
             // it passed by calling the method itself.
-            string prompt = "[<color=yellow><b>$KEY_Use</b></color>] manage";
+            string prompt = state.InAParty
+                ? "[<color=yellow><b>$KEY_Use</b></color>] stop following   " +
+                  "[<color=yellow><b>$KEY_AltPlace</b> + <b>$KEY_Use</b></color>] manage"
+                : "[<color=yellow><b>$KEY_Use</b></color>] follow me   " +
+                  "[<color=yellow><b>$KEY_AltPlace</b> + <b>$KEY_Use</b></color>] manage";
+
             return $"{state.Name}\n<color=grey>{Activity}</color>\n" +
                    $"<color=grey>{EnergyText(state)}</color>\n" +
                    (Localization.instance != null ? Localization.instance.Localize(prompt) : prompt);
         }
 
         /// <summary>
-        ///     Opens the colony screen on this villager.
+        ///     Takes this villager into your party, or opens its screen.
         /// </summary>
         /// <remarks>
-        ///     <paramref name="hold" /> is refused rather than obeyed: the key repeats while it
-        ///     is held, and a screen that reopens twenty times a second is a screen that cannot
-        ///     be navigated. The same two calls the map pin makes, so walking up to somebody and
-        ///     clicking their pin land on exactly the same screen.
+        ///     <para>
+        ///         <b>Plain use is the party, alternate use is the screen</b>, and that is a
+        ///         change: use used to open the screen. The field gesture won because it is the
+        ///         one you want while walking past, and because the screen keeps two other ways
+        ///         in - the Kolony's roster and the map pin, which make the same two calls this
+        ///         does. Recruiting had none.
+        ///     </para>
+        ///     <para>
+        ///         <paramref name="hold" /> is refused rather than obeyed: the key repeats while
+        ///         it is held, which would have reopened the screen twenty times a second and now
+        ///         would join and leave a party twenty times a second.
+        ///     </para>
         /// </remarks>
         public bool Interact(Humanoid user, bool hold, bool alt)
         {
             if (hold || _nview == null || !_nview.IsValid()) return false;
+
+            if (!alt)
+            {
+                Party.PartyMembership.Toggle(this, user as Player);
+                return true;
+            }
 
             ZDO zdo = _nview.GetZDO();
             Colony colony = Colony.FindFor(zdo);

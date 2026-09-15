@@ -62,6 +62,9 @@ namespace Kukolony.Villagers
         {
             if (state.Resting) return;
 
+            // Nothing tires a villager in a party. See Tick for why, and for the hole it leaves.
+            if (state.InAParty) return;
+
             state.SetEnergy(Energy.Spend(state.StoredEnergy, ModConfig.EnergyPerAction.Value));
         }
 
@@ -73,6 +76,23 @@ namespace Kukolony.Villagers
             VillagerWalk walk, VillagerAnimation animation, float deltaTime, out string doing)
         {
             doing = string.Empty;
+
+            // Energy does not apply in a party. Not a shortcut - the fallback when a villager has
+            // no reachable bed is to walk to the hearth, so a party villager that got tired fifty
+            // metres out would turn round and go home, and the party would look broken.
+            //
+            // Suspended rather than rested-in-place, which was the other candidate: a fire in the
+            // field is the party's camp, and giving rest away here is what leaves that ability
+            // something to be worth building.
+            //
+            // **And it leaves a hole worth writing down**: a villager parked in a party never
+            // tires. Harmless while a party villager cannot work at all, and something the stage
+            // that lets it work has to answer.
+            if (state.InAParty)
+            {
+                if (state.Resting) Wake(villager, state, animation, Now(state));
+                return false;
+            }
 
             float energy = Now(state);
             bool resting = state.Resting;

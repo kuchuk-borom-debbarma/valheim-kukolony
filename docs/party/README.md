@@ -23,6 +23,12 @@ fell and wakes up at its bed — or at the hearth if it hasn't got one — after
 
 And the same fighting works at home: **an unattended Kolony now defends itself.**
 
+## Where it has got to
+
+**Stage 1 is built and verified in game**: membership, following, and the gesture. A villager you
+can take for a walk and send home again. It does not work, fight, carry or sail yet — those are
+stages 2 to 7 in [`build-order.md`](build-order.md).
+
 ## The documents
 
 | File | What it settles |

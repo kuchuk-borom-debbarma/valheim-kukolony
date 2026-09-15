@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Kukolony.Colonies;
 using Kukolony.Core;
 using Kukolony.Jobs;
+using Kukolony.Party;
 using Kukolony.Villagers;
 using UnityEngine;
 
@@ -207,6 +208,31 @@ namespace Kukolony.Gui
 
             BuildEquipment(host, column, zdo);
             BuildCarried(host, column, colony, zdo);
+
+            // Its own row, and a way out of a party that does not require walking to the
+            // villager. A party is the one state in this mod you can end up in a hundred metres
+            // from the thing you need to click, and the field gesture is the only other way to
+            // leave one.
+            VillagerState party = new VillagerState(zdo);
+            if (column.TryRow(out Row partyRow))
+            {
+                Player leader = PartyMembership.LeaderOf(party);
+                Widgets.Caption(partyRow, "Following", 220f);
+                Widgets.Label(partyRow, party.InAParty
+                        ? leader != null ? leader.GetPlayerName() : "someone who is not here"
+                        : "nobody",
+                    party.InAParty ? Color.white : Color.gray);
+
+                if (party.InAParty)
+                {
+                    Widgets.Button(partyRow, "Send home", 160f, () =>
+                    {
+                        PartyMembership.Leave(party);
+                        Report.Say($"{VillagerRoster.Name(_villager)} is no longer in a party.");
+                        host.Refresh();
+                    });
+                }
+            }
 
             if (column.TryRow(out Row watch))
             {

@@ -363,6 +363,10 @@ namespace Kukolony.Debug
                     yield return Eating(report, colony, origin);
                     break;
 
+                case "party":
+                    yield return Partying(report, colony, origin);
+                    break;
+
                 case "queue":
                     yield return CheckAStuckTripEndsAndTheQueueMovesOn(report, colony);
                     yield return CheckAPresetKeepsItsOrder(report, colony);
@@ -378,7 +382,7 @@ namespace Kukolony.Debug
                     // Named but unknown. Failing beats running everything under a name that
                     // says otherwise, or running nothing and reporting a pass.
                     report.Check(false, $"'{wanted}' is not a slice this run knows",
-                        "known: chop, travel, queue, tend, craft, mine, forage, farm, repair, cook, eat, swing");
+                        "known: chop, travel, queue, tend, craft, mine, forage, farm, repair, cook, eat, party, swing");
                     break;
             }
 
@@ -7152,6 +7156,277 @@ namespace Kukolony.Debug
         ///     rather than being staged around with a hand-loaded villager, which would pass
         ///     identically whether the fetching worked or not.
         /// </remarks>
+        /// <summary>
+        ///     Parties: joining one, keeping up with it, and not walking home out of it.
+        /// </summary>
+        /// <remarks>
+        ///     Stage 1 of the party system, which is membership and following and nothing else.
+        ///     A party villager does not work yet, so there is deliberately no check here that it
+        ///     does - see docs/party/build-order.md.
+        /// </remarks>
+        private static IEnumerator Partying(TestReport report, Colony colony, Vector3 origin)
+        {
+            yield return CheckInteractingTakesAVillagerIntoAParty(report, colony, origin);
+            yield return CheckAPartyVillagerCatchesUpAndThenStops(report, colony, origin);
+            yield return CheckATiredPartyVillagerDoesNotWalkHome(report, colony, origin);
+            CheckPartyMembershipLivesOnTheRecord(report);
+        }
+
+        /// <summary>
+        ///     Pressing use on a villager puts it in your party, and pressing it again does not.
+        /// </summary>
+        /// <remarks>
+        ///     <b>The check that catches the ambiguity.</b> The game resolves interaction with
+        ///     <c>GetComponentInParent&lt;Interactable&gt;()</c>, first match wins, and this mod
+        ///     has already lost that coin flip once with <c>Hoverable</c> - the method was never
+        ///     called, the prompt never appeared, and the check that asserted it passed by calling
+        ///     the method itself. So this goes through <c>Interact</c> as the game would and reads
+        ///     the answer off the villager's record, not off its behaviour.
+        /// </remarks>
+        private static IEnumerator CheckInteractingTakesAVillagerIntoAParty(TestReport report,
+            Colony colony, Vector3 origin)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                report.Check(false, "control: the party check needs a player");
+                yield break;
+            }
+
+            Villager hand = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (hand == null || !hand.TryGetComponent(out ZNetView who) || !who.IsValid())
+            {
+                report.Check(false, "control: the party check could spawn a villager");
+                yield break;
+            }
+
+            VillagerState state = new VillagerState(who.GetZDO());
+
+            report.Check(!state.InAParty,
+                "control: a new villager follows nobody",
+                $"owner={state.PartyOwner}");
+
+            hand.Interact(player, false, false);
+            yield return null;
+
+            long expected = player.GetPlayerID();
+            report.Check(state.PartyOwner == expected,
+                "pressing use on a villager takes it into your party",
+                $"owner={state.PartyOwner} wanted={expected}");
+
+            hand.Interact(player, false, false);
+            yield return null;
+
+            report.Check(!state.InAParty,
+                "and pressing it again sends it away",
+                $"owner={state.PartyOwner}");
+
+            // Held rather than pressed. The key repeats while it is down, so without this a
+            // villager would join and leave twenty times a second for as long as you lean on it.
+            hand.Interact(player, true, false);
+            yield return null;
+
+            report.Check(!state.InAParty,
+                "holding the key does not join a party over and over",
+                $"owner={state.PartyOwner}");
+
+            VillagerLifecycle.Remove(colony, who.GetZDO().m_uid);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     A villager left behind closes the gap, and stops once it is back.
+        /// </summary>
+        /// <remarks>
+        ///     Both halves matter and the second is the one with a bug in it. Closing is obvious
+        ///     when it fails; <em>not</em> stopping is a villager re-aiming its walk every tick
+        ///     while standing essentially still, which looks fine and costs a settlement with no
+        ///     population cap a great deal.
+        /// </remarks>
+        private static IEnumerator CheckAPartyVillagerCatchesUpAndThenStops(TestReport report,
+            Colony colony, Vector3 origin)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                report.Check(false, "control: the following check needs a player");
+                yield break;
+            }
+
+            Villager hand = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (hand == null || !hand.TryGetComponent(out ZNetView who) || !who.IsValid())
+            {
+                report.Check(false, "control: the following check could spawn a villager");
+                yield break;
+            }
+
+            SendRested(who);
+            VillagerState state = new VillagerState(who.GetZDO());
+            state.SetPartyOwner(player.GetPlayerID());
+
+            // Put well beyond the leash, on ground the player is standing on so there is a path.
+            Vector3 away = OnGround(player.transform.position + new Vector3(28f, 0f, 0f));
+            Relocate(hand.gameObject, away);
+            yield return new WaitForSecondsRealtime(.3f);
+
+            float started = Utils.DistanceXZ(hand.transform.position, player.transform.position);
+            report.Check(started > 20f,
+                "control: the villager really is a long way from its player",
+                $"{started:0.#} m");
+
+            float nearest = started;
+            float elapsed = 0f;
+
+            while (elapsed < CookSeconds && nearest > 6f)
+            {
+                yield return new WaitForSecondsRealtime(.5f);
+                elapsed += .5f;
+
+                if (hand == null || !who.IsValid()) break;
+
+                float now = Utils.DistanceXZ(hand.transform.position, player.transform.position);
+                if (now < nearest) nearest = now;
+            }
+
+            report.Check(nearest < started - 8f,
+                "a villager in a party closes the gap to its player",
+                $"{started:0.#} m -> {nearest:0.#} m after {elapsed:0}s " +
+                $"doing='{(hand != null ? hand.Activity : "gone")}'");
+
+            // And then holds. Sampled over several seconds rather than once, because a villager
+            // that has genuinely stopped and one that is creeping forward look identical in a
+            // single reading.
+            yield return new WaitForSecondsRealtime(1f);
+            Vector3 settled = hand != null ? hand.transform.position : Vector3.zero;
+            string saying = hand != null ? hand.Activity : string.Empty;
+            yield return new WaitForSecondsRealtime(2f);
+
+            float crept = hand != null ? Utils.DistanceXZ(hand.transform.position, settled) : 99f;
+
+            report.Check(crept < 2f,
+                "and stops once it is back with them rather than creeping forever",
+                $"moved {crept:0.##} m in 2s doing='{saying}'");
+
+            if (who.IsValid()) VillagerLifecycle.Remove(colony, who.GetZDO().m_uid);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     An exhausted villager in a party stays with its player instead of going to bed.
+        /// </summary>
+        /// <remarks>
+        ///     The bug this stage exists to close. Resting falls back to the hearth when there is
+        ///     no reachable bed, so before this a villager that tired fifty metres into an
+        ///     expedition would turn round and walk home - and the party would look broken while
+        ///     every part of it was behaving exactly as written.
+        /// </remarks>
+        private static IEnumerator CheckATiredPartyVillagerDoesNotWalkHome(TestReport report,
+            Colony colony, Vector3 origin)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                report.Check(false, "control: the tired-party check needs a player");
+                yield break;
+            }
+
+            Villager hand = VillagerLifecycle.Spawn(colony);
+            yield return new WaitForSecondsRealtime(.4f);
+
+            if (hand == null || !hand.TryGetComponent(out ZNetView who) || !who.IsValid())
+            {
+                report.Check(false, "control: the tired-party check could spawn a villager");
+                yield break;
+            }
+
+            VillagerState state = new VillagerState(who.GetZDO());
+            state.SetPartyOwner(player.GetPlayerID());
+            state.SetEnergy(0f);
+
+            Vector3 beside = OnGround(player.transform.position + new Vector3(3f, 0f, 3f));
+            Relocate(hand.gameObject, beside);
+
+            float toHearth = Utils.DistanceXZ(hand.transform.position, colony.transform.position);
+
+            report.Check(Resting.Now(state) <= 1f,
+                "control: the villager is exhausted and in a party",
+                $"energy={Resting.Now(state):0.#} owner={state.PartyOwner}");
+
+            yield return new WaitForSecondsRealtime(4f);
+
+            report.Check(hand != null && !new VillagerState(who.GetZDO()).Resting,
+                "an exhausted villager in a party does not lie down",
+                $"resting={(hand != null && new VillagerState(who.GetZDO()).Resting)} " +
+                $"doing='{(hand != null ? hand.Activity : "gone")}'");
+
+            // Asked of what it says it is doing, not of where it is standing. The first version
+            // of this measured the distance to the player - and in this harness the hearth is
+            // three metres from the player, so "walked home" and "stayed put" were the same
+            // reading and the assertion could not fail. It passed, and proved nothing.
+            string doing = hand != null ? hand.Activity ?? string.Empty : string.Empty;
+            bool restingWords = doing.IndexOf("rest", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                doing.IndexOf("bed", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                doing.IndexOf("sleep", System.StringComparison.OrdinalIgnoreCase) >= 0;
+
+            report.Check(!restingWords,
+                "and is minding its player rather than heading for a bed",
+                $"doing='{doing}', hearth {toHearth:0.#} m away");
+
+            // The control, and the only thing that makes the two above mean anything: the same
+            // exhausted villager, out of the party, does lie down. Without this a rest system
+            // that had stopped working entirely would pass every assertion here.
+            state.SetPartyOwner(0L);
+            yield return new WaitForSecondsRealtime(4f);
+
+            report.Check(hand != null && new VillagerState(who.GetZDO()).Resting,
+                "control: out of the party, that same exhausted villager does rest",
+                $"resting={(hand != null && new VillagerState(who.GetZDO()).Resting)} " +
+                $"doing='{(hand != null ? hand.Activity : "gone")}'");
+
+            if (who.IsValid()) VillagerLifecycle.Remove(colony, who.GetZDO().m_uid);
+            yield return new WaitForSecondsRealtime(.2f);
+        }
+
+        /// <summary>
+        ///     Party membership is a field on the record, and an absent one means no party.
+        /// </summary>
+        /// <remarks>
+        ///     The migration, asserted rather than trusted, as hunger's was. An unwritten long
+        ///     reads as zero from a ZDO, and zero is deliberately the same as "follows nobody" so
+        ///     that every villager in an existing save opens unattached rather than following a
+        ///     player who does not exist.
+        /// </remarks>
+        private static void CheckPartyMembershipLivesOnTheRecord(TestReport report)
+        {
+            ZDO blank = ZDOMan.instance.CreateNewZDO(Vector3.zero, 0);
+            VillagerState fresh = new VillagerState(blank);
+
+            report.Check(!fresh.InAParty,
+                "a villager from a save made before parties existed follows nobody",
+                $"owner={fresh.PartyOwner}");
+
+            const long somebody = 1234567890123L;
+            fresh.SetPartyOwner(somebody);
+
+            // Read back through a second reader over the same record, which is the thing that
+            // actually has to work: the state struct is a view, and a value that only survives
+            // inside the instance that wrote it would pass a naive check and lose the party on
+            // the next tick.
+            report.Check(new VillagerState(blank).PartyOwner == somebody,
+                "and membership written to the record is there when anything else reads it",
+                $"owner={new VillagerState(blank).PartyOwner}");
+
+            fresh.SetPartyOwner(0L);
+            report.Check(!new VillagerState(blank).InAParty,
+                "control: and leaving really clears it, rather than the read always answering yes");
+
+            ZDOMan.instance.DestroyZDO(blank);
+        }
+
         /// <summary>
         ///     Villagers eating: what they will eat, where from, and what happens when there is none.
         /// </summary>

@@ -18,7 +18,7 @@ gets built.
 does not apply off-screen (kills it harder), or vanilla `MonsterAI` cannot be handed control
 cleanly (roughly doubles the combat work).
 
-## 1. Party membership and following
+## 1. Party membership and following — **done**
 
 Join, dismiss, follow, leash. No combat, no new abilities, no boats.
 
@@ -27,6 +27,15 @@ back to it. Not useful yet — and it is the thing every later stop stands on, s
 whose bugs are cheapest to find now.
 
 **Ships as:** "villagers will follow you."
+
+**Landed.** Membership is one `long` on the villager's ZDO; `Party/Following.cs` is the pure
+hysteresis, `Party/Escort.cs` the rule in the tick, `Party/PartyMembership.cs` the gestures. Plain
+use joins or leaves, alternate use opens the screen — **a change**, since use used to open the
+screen, and justified because the screen keeps two other ways in and recruiting had none.
+
+Verified by a `party` slice that runs: 28 m closed to 4 m, then zero creep in two seconds, and an
+exhausted villager that stays with its player in a party and lies down out of one. The old
+`chop`, `travel`, `queue` and `eat` slices were re-run and pass — `eat` for the first time ever.
 
 ## 2. The moving work area and the party queue
 

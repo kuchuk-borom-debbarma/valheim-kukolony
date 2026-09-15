@@ -2,6 +2,7 @@ using Kukolony.Core;
 using Kukolony.Colonies;
 using Kukolony.Jobs;
 using Kukolony.Villagers.Navigation;
+using Kukolony.Party;
 using Kukolony.Villagers;
 using Kukolony.Jobs.Haul;
 using Kukolony.Jobs.Chop;
@@ -82,6 +83,7 @@ static class Program
         Legs();
         Tiring();
         Starving();
+        Escorting();
         Repeating();
         Chopping();
         Appetite();
@@ -678,6 +680,60 @@ static class Program
             !Hunger.Starved(Hunger.Ate(Hunger.Left(1000f, 900f, floor), 1700f, 1800f), 1800f));
         Case("control: the cap is a real cap, not a number that never binds",
             Hunger.Ate(1800f, 99999f, 1800f) < 1801f);
+    }
+
+    /// <summary>Keeping up with the player whose party you are in.</summary>
+    static void Escorting()
+    {
+        Console.WriteLine("following");
+
+        // Leash 12, comfort 4: it starts closing past twelve metres and does not stop until four.
+        const float leash = 12f, comfort = 4f;
+
+        Case("a villager standing beside its player stays put",
+            Following.Decide(2f, leash, comfort, false) == Keeping.Holding);
+        Case("one that has been left behind sets off",
+            Following.Decide(20f, leash, comfort, false) == Keeping.Closing);
+        Case("and keeps going while it is still catching up",
+            Following.Decide(8f, leash, comfort, true) == Keeping.Closing);
+        Case("until it is properly back with them",
+            Following.Decide(3f, leash, comfort, true) == Keeping.Holding);
+
+        // The band between the two distances, which is where the whole design lives: the answer
+        // there depends on what it was already doing, in both directions.
+        Case("inside the band, a villager that was holding holds",
+            Following.Decide(8f, leash, comfort, false) == Keeping.Holding);
+        Case("inside the band, a villager that was closing closes",
+            Following.Decide(8f, leash, comfort, true) == Keeping.Closing);
+
+        // Boundaries. Exactly at the leash is not past it, and exactly at comfort is near enough.
+        Case("exactly at the leash is not yet too far",
+            Following.Decide(leash, leash, comfort, false) == Keeping.Holding);
+        Case("a hair past it is",
+            Following.Decide(leash + .01f, leash, comfort, false) == Keeping.Closing);
+        Case("exactly at comfort is near enough to stop",
+            Following.Decide(comfort, leash, comfort, true) == Keeping.Holding);
+        Case("a hair outside it is not",
+            Following.Decide(comfort + .01f, leash, comfort, true) == Keeping.Closing);
+
+        // A comfort at or beyond the leash is a misconfiguration that would reinstate the flicker:
+        // start closing at the leash, and be immediately already comfortable.
+        // Asked at a distance that is past the leash and still inside the bad comfort, which is
+        // the only place the clamp changes an answer. The first version of this case compared two
+        // distances the clamp does not reach, passed, and went on passing with the clamp deleted -
+        // caught by re-breaking the code, which is the only reason it is written this way now.
+        Case("a comfort beyond the leash does not strand a villager fifty metres out",
+            Following.Decide(50f, leash, 99f, true) == Keeping.Closing);
+        Case("and it still sets off in the first place",
+            Following.Decide(leash + .01f, leash, 99f, false) == Keeping.Closing);
+
+        // Controls. Without these the cases above would all pass by answering Holding to
+        // everything, which is exactly what a broken follow looks like.
+        Case("control: a villager a hundred metres away really does set off",
+            Following.Decide(100f, leash, comfort, false) == Keeping.Closing);
+        Case("control: the two distances genuinely differ, or a villager flickers",
+            Following.Decide(8f, leash, comfort, true) == Keeping.Closing &&
+            Following.Decide(8f, leash, comfort, false) == Keeping.Holding);
     }
 
     /// <summary>Saying a thing that keeps being true, without saying it constantly.</summary>

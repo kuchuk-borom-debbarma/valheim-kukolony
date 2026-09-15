@@ -28,6 +28,7 @@
     <Compile Include="../Kukolony/Villagers/Navigation/Reckoning.cs" Link="Reckoning.cs" />
     <Compile Include="../Kukolony/Villagers/Energy.cs" Link="Energy.cs" />
     <Compile Include="../Kukolony/Villagers/Hunger.cs" Link="Hunger.cs" />
+    <Compile Include="../Kukolony/Party/Following.cs" Link="Following.cs" />
     <Compile Include="../Kukolony/Core/Repeats.cs" Link="Repeats.cs" />
     <Compile Include="../Kukolony/Villagers/Navigation/Arrival.cs" Link="Arrival.cs" />
     <Compile Include="../Kukolony/Villagers/Navigation/Rescue.cs" Link="Rescue.cs" />

@@ -53,6 +53,12 @@ namespace Kukolony
         /// <summary>Energy a resting villager must reach before working again.</summary>
         internal static ConfigEntry<float> RestedAbove { get; private set; }
 
+        /// <summary>How far a party villager may drift from its player before it closes the gap.</summary>
+        internal static ConfigEntry<float> PartyLeashDistance { get; private set; }
+
+        /// <summary>How near a party villager gets before it stops closing.</summary>
+        internal static ConfigEntry<float> PartyComfortDistance { get; private set; }
+
         /// <summary>Seconds of food a villager can hold at once.</summary>
         internal static ConfigEntry<float> FedCapSeconds { get; private set; }
 
@@ -172,6 +178,25 @@ namespace Kukolony
                     "Energy a resting villager must reach before working again. Must be above "
                     + "TiredBelow: one threshold makes a villager flicker between the two.",
                     new AcceptableValueRange<float>(10f, 100f)));
+
+            PartyLeashDistance = config.Bind(
+                "4 - Work",
+                nameof(PartyLeashDistance),
+                12f,
+                new ConfigDescription(
+                    "How far a villager following you may drift before it stops and closes the "
+                    + "gap. Must be above PartyComfortDistance, which is what it closes to: one "
+                    + "distance makes a villager flicker between walking and standing.",
+                    new AcceptableValueRange<float>(3f, 64f)));
+
+            PartyComfortDistance = config.Bind(
+                "4 - Work",
+                nameof(PartyComfortDistance),
+                4f,
+                new ConfigDescription(
+                    "How near a villager following you gets before it stops. Smaller means it "
+                    + "crowds you; larger means it strings out behind.",
+                    new AcceptableValueRange<float>(1f, 32f)));
 
             FedCapSeconds = config.Bind(
                 "4 - Work",
